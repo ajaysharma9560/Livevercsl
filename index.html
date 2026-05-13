@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>Live Camera Viewer</title>
+    <title>LiveCam Pro - Live Stream Viewer</title>
     <style>
         * {
             margin: 0;
@@ -12,29 +12,522 @@
         }
 
         body {
-            background: #0a0a0a;
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif;
-            padding: 16px;
+            background: linear-gradient(135deg, #0a0a0a 0%, #1a1a2e 100%);
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
             min-height: 100vh;
+            padding: 20px;
         }
 
+        /* Header Section */
         .header {
             text-align: center;
-            margin-bottom: 24px;
+            margin-bottom: 30px;
+        }
+
+        .logo {
+            font-size: 48px;
+            margin-bottom: 10px;
         }
 
         h1 {
-            color: white;
-            font-size: 24px;
-            margin-bottom: 8px;
+            color: #ffffff;
+            font-size: 28px;
+            font-weight: 600;
+            letter-spacing: 1px;
         }
 
         .subtitle {
             color: #888;
             font-size: 14px;
+            margin-top: 8px;
+        }
+
+        /* Connection Status */
+        .status-container {
+            max-width: 600px;
+            margin: 0 auto 20px auto;
+        }
+
+        .status-card {
+            background: rgba(20, 20, 40, 0.8);
+            backdrop-filter: blur(10px);
+            border-radius: 16px;
+            padding: 16px 24px;
             display: flex;
             align-items: center;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 15px;
+            border: 1px solid rgba(255,255,255,0.1);
+        }
+
+        .status-indicator {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .status-dot {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: #ff4444;
+            transition: all 0.3s ease;
+        }
+
+        .status-dot.connected {
+            background: #44ff44;
+            box-shadow: 0 0 10px #44ff44;
+            animation: pulse 1.5s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.6; transform: scale(1.2); }
+        }
+
+        .status-text {
+            color: #fff;
+            font-size: 14px;
+            font-weight: 500;
+        }
+
+        .device-info {
+            color: #888;
+            font-size: 12px;
+            font-family: monospace;
+        }
+
+        /* Connection Form */
+        .connect-section {
+            max-width: 600px;
+            margin: 0 auto 30px auto;
+        }
+
+        .connect-box {
+            background: rgba(20, 20, 40, 0.6);
+            border-radius: 16px;
+            padding: 20px;
+            border: 1px solid rgba(255,255,255,0.1);
+        }
+
+        .input-group {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+
+        .ip-input {
+            flex: 1;
+            padding: 14px 18px;
+            background: rgba(0,0,0,0.5);
+            border: 1px solid rgba(255,255,255,0.2);
+            border-radius: 12px;
+            color: #fff;
+            font-size: 14px;
+            font-family: monospace;
+            outline: none;
+            transition: all 0.3s;
+        }
+
+        .ip-input:focus {
+            border-color: #44ff44;
+            box-shadow: 0 0 8px rgba(68,255,68,0.3);
+        }
+
+        .connect-btn {
+            padding: 14px 28px;
+            background: linear-gradient(135deg, #44ff44, #00aa00);
+            border: none;
+            border-radius: 12px;
+            color: #000;
+            font-weight: bold;
+            font-size: 14px;
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+
+        .connect-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 20px rgba(68,255,68,0.3);
+        }
+
+        /* Video Section */
+        .video-section {
+            max-width: 900px;
+            margin: 0 auto;
+        }
+
+        .video-container {
+            background: #000;
+            border-radius: 20px;
+            overflow: hidden;
+            position: relative;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.5);
+            border: 1px solid rgba(68,255,68,0.3);
+        }
+
+        .live-badge {
+            position: absolute;
+            top: 15px;
+            left: 15px;
+            background: #ff4444;
+            color: white;
+            padding: 6px 14px;
+            border-radius: 30px;
+            font-size: 12px;
+            font-weight: bold;
+            z-index: 10;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            animation: blink 1s infinite;
+        }
+
+        .live-badge.hidden {
+            display: none;
+        }
+
+        @keyframes blink {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.6; }
+        }
+
+        video {
+            width: 100%;
+            height: auto;
+            display: block;
+            background: #000;
+        }
+
+        .placeholder {
+            aspect-ratio: 16/9;
+            background: linear-gradient(135deg, #111, #1a1a2e);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
             justify-content: center;
+            color: #666;
+            gap: 15px;
+        }
+
+        .placeholder-icon {
+            font-size: 64px;
+            opacity: 0.5;
+        }
+
+        /* Control Buttons */
+        .controls {
+            display: flex;
+            gap: 15px;
+            justify-content: center;
+            margin-top: 20px;
+            flex-wrap: wrap;
+        }
+
+        .control-btn {
+            padding: 12px 24px;
+            background: rgba(30,30,50,0.9);
+            border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 40px;
+            color: white;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .control-btn:hover {
+            background: rgba(50,50,80,0.9);
+            transform: scale(1.02);
+        }
+
+        .control-btn:active {
+            transform: scale(0.98);
+        }
+
+        /* Stats Section */
+        .stats {
+            max-width: 600px;
+            margin: 20px auto 0;
+            display: flex;
+            justify-content: center;
+            gap: 30px;
+            flex-wrap: wrap;
+        }
+
+        .stat-card {
+            background: rgba(20,20,40,0.6);
+            border-radius: 12px;
+            padding: 12px 20px;
+            text-align: center;
+            backdrop-filter: blur(5px);
+        }
+
+        .stat-value {
+            color: #44ff44;
+            font-size: 20px;
+            font-weight: bold;
+        }
+
+        .stat-label {
+            color: #888;
+            font-size: 11px;
+            margin-top: 4px;
+        }
+
+        /* Footer */
+        .footer {
+            text-align: center;
+            margin-top: 40px;
+            color: #555;
+            font-size: 11px;
+        }
+
+        /* Responsive */
+        @media (max-width: 768px) {
+            body { padding: 15px; }
+            h1 { font-size: 22px; }
+            .logo { font-size: 36px; }
+            .status-card { flex-direction: column; text-align: center; }
+            .input-group { flex-direction: column; }
+            .connect-btn { width: 100%; }
+            .control-btn { padding: 10px 18px; font-size: 12px; }
+        }
+    </style>
+</head>
+<body>
+
+<div class="header">
+    <div class="logo">📡</div>
+    <h1>LiveCam Pro</h1>
+    <div class="subtitle">Connect to your phone camera and watch live stream</div>
+</div>
+
+<div class="status-container">
+    <div class="status-card">
+        <div class="status-indicator">
+            <div class="status-dot" id="statusDot"></div>
+            <span class="status-text" id="statusText">Disconnected</span>
+        </div>
+        <div class="device-info" id="deviceInfo">No device connected</div>
+    </div>
+</div>
+
+<div class="connect-section">
+    <div class="connect-box">
+        <div class="input-group">
+            <input type="text" class="ip-input" id="ipInput" placeholder="Phone IP: 192.168.1.100" value="">
+            <input type="text" class="ip-input" id="portInput" placeholder="Port" value="8080" style="width: 100px;">
+            <button class="connect-btn" id="connectBtn">🔌 Connect</button>
+        </div>
+    </div>
+</div>
+
+<div class="video-section">
+    <div class="video-container">
+        <div class="live-badge" id="liveBadge">
+            ⚫ LIVE
+        </div>
+        <video id="liveStream" autoplay muted playsinline></video>
+        <div id="videoPlaceholder" class="placeholder" style="display: flex;">
+            <div class="placeholder-icon">🎥</div>
+            <div>Connect to start streaming</div>
+            <div style="font-size: 12px;">Enter your phone IP above</div>
+        </div>
+    </div>
+    
+    <div class="controls">
+        <button class="control-btn" id="cmdStart">📷 Start Camera</button>
+        <button class="control-btn" id="cmdStop">⏹️ Stop Camera</button>
+        <button class="control-btn" id="cmdStatus">📊 Get Status</button>
+    </div>
+</div>
+
+<div class="stats" id="statsPanel" style="display: none;">
+    <div class="stat-card">
+        <div class="stat-value" id="fps">0</div>
+        <div class="stat-label">FPS</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-value" id="latency">0</div>
+        <div class="stat-label">Latency (ms)</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-value" id="dataReceived">0</div>
+        <div class="stat-label">MB Received</div>
+    </div>
+</div>
+
+<div class="footer">
+    <span>🔒 Secure WebSocket Connection</span> | 
+    <span>📱 Open APK on your phone</span> |
+    <span>💡 Same WiFi required</span>
+</div>
+
+<script>
+    let socket = null;
+    let videoElement = document.getElementById('liveStream');
+    let placeholder = document.getElementById('videoPlaceholder');
+    let liveBadge = document.getElementById('liveBadge');
+    
+    let frameCount = 0;
+    let lastTime = Date.now();
+    let totalBytes = 0;
+    let fpsInterval = null;
+    
+    // UI Elements
+    const statusDot = document.getElementById('statusDot');
+    const statusText = document.getElementById('statusText');
+    const deviceInfo = document.getElementById('deviceInfo');
+    const connectBtn = document.getElementById('connectBtn');
+    const ipInput = document.getElementById('ipInput');
+    const portInput = document.getElementById('portInput');
+    const statsPanel = document.getElementById('statsPanel');
+    const fpsSpan = document.getElementById('fps');
+    const latencySpan = document.getElementById('latency');
+    const dataReceivedSpan = document.getElementById('dataReceived');
+    
+    // Load saved IP
+    const savedIp = localStorage.getItem('savedPhoneIp');
+    if (savedIp) {
+        ipInput.value = savedIp;
+    }
+    
+    function updateStatus(connected, message, deviceId = null) {
+        if (connected) {
+            statusDot.classList.add('connected');
+            statusText.innerHTML = '🟢 ' + message;
+            deviceInfo.innerHTML = deviceId ? `📱 Device: ${deviceId.substring(0, 12)}...` : '📱 Connected';
+        } else {
+            statusDot.classList.remove('connected');
+            statusText.innerHTML = '🔴 ' + message;
+            deviceInfo.innerHTML = 'No device connected';
+        }
+    }
+    
+    function updateLiveStatus(isLive) {
+        if (isLive) {
+            liveBadge.classList.remove('hidden');
+            liveBadge.innerHTML = '🔴 LIVE';
+            liveBadge.style.background = '#ff4444';
+            placeholder.style.display = 'none';
+            videoElement.style.display = 'block';
+            statsPanel.style.display = 'flex';
+            
+            // Start FPS counter
+            if (fpsInterval) clearInterval(fpsInterval);
+            fpsInterval = setInterval(() => {
+                const now = Date.now();
+                const elapsed = (now - lastTime) / 1000;
+                const currentFps = Math.round(frameCount / elapsed);
+                fpsSpan.innerText = currentFps;
+                frameCount = 0;
+                lastTime = now;
+                
+                dataReceivedSpan.innerText = (totalBytes / (1024 * 1024)).toFixed(1);
+            }, 1000);
+            
+        } else {
+            liveBadge.classList.add('hidden');
+            placeholder.style.display = 'flex';
+            videoElement.style.display = 'none';
+            statsPanel.style.display = 'none';
+            if (fpsInterval) clearInterval(fpsInterval);
+        }
+    }
+    
+    function connectToPhone() {
+        let ip = ipInput.value.trim();
+        let port = portInput.value.trim();
+        
+        if (!ip) {
+            alert('Enter phone IP address');
+            return;
+        }
+        
+        const wsUrl = `ws://${ip}:${port}`;
+        localStorage.setItem('savedPhoneIp', ip);
+        
+        updateStatus(false, 'Connecting...');
+        
+        try {
+            socket = new WebSocket(wsUrl);
+            
+            socket.onopen = () => {
+                updateStatus(true, 'Connected to phone');
+                console.log('WebSocket connected');
+            };
+            
+            socket.onmessage = (event) => {
+                try {
+                    const data = JSON.parse(event.data);
+                    
+                    if (data.type === 'frame') {
+                        frameCount++;
+                        totalBytes += event.data.length;
+                        videoElement.src = `data:image/jpeg;base64,${data.data}`;
+                        updateLiveStatus(true);
+                        
+                    } else if (data.type === 'status') {
+                        updateStatus(true, data.message);
+                    }
+                    
+                } catch (e) {
+                    // Not JSON, maybe raw data
+                }
+            };
+            
+            socket.onclose = () => {
+                updateStatus(false, 'Disconnected');
+                updateLiveStatus(false);
+                socket = null;
+            };
+            
+            socket.onerror = (error) => {
+                updateStatus(false, 'Connection error');
+                updateLiveStatus(false);
+                socket = null;
+            };
+            
+        } catch(e) {
+            updateStatus(false, 'Invalid connection');
+        }
+    }
+    
+    function sendCommand(cmd) {
+        if (socket && socket.readyState === WebSocket.OPEN) {
+            socket.send(cmd);
+            statusText.innerHTML = '📨 Command sent: ' + cmd;
+            setTimeout(() => {
+                if (socket && socket.readyState === WebSocket.OPEN) {
+                    statusText.innerHTML = '🟢 Connected';
+                }
+            }, 1500);
+        } else {
+            alert('Connect to phone first!');
+        }
+    }
+    
+    connectBtn.onclick = connectToPhone;
+    document.getElementById('cmdStart').onclick = () => sendCommand('START');
+    document.getElementById('cmdStop').onclick = () => sendCommand('STOP');
+    document.getElementById('cmdStatus').onclick = () => sendCommand('STATUS');
+    
+    // Auto connect if IP exists
+    if (savedIp) {
+        setTimeout(() => {
+            if (confirm('Auto-connect to saved phone IP: ' + savedIp + '?')) {
+                connectToPhone();
+            }
+        }, 500);
+    }
+</script>
+</body>
+</html>            justify-content: center;
             gap: 8px;
         }
 
