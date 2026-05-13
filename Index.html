@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>My Camera Stream</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+        body { 
+            font-family: Arial; 
+            text-align: center; 
+            padding: 20px;
+            background: black;
+            color: white;
+        }
+        .container {
+            max-width: 800px;
+            margin: auto;
+            background: #111;
+            padding: 20px;
+            border-radius: 20px;
+        }
+        video {
+            width: 100%;
+            border-radius: 10px;
+            background: #000;
+            border: 2px solid #00ff00;
+        }
+        input, button {
+            padding: 12px;
+            margin: 10px;
+            font-size: 16px;
+            border-radius: 10px;
+            border: none;
+        }
+        input {
+            width: 250px;
+            background: #333;
+            color: white;
+        }
+        button {
+            background: #00ff00;
+            cursor: pointer;
+            font-weight: bold;
+        }
+        .status {
+            padding: 10px;
+            margin: 10px;
+            border-radius: 10px;
+            background: #222;
+        }
+        .online { color: #00ff00; }
+        .offline { color: #ff0000; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>📱 Live Camera Stream</h1>
+        
+        <div class="status">
+            <span id="statusText">⚪ Not Connected</span>
+        </div>
+        
+        <video id="stream" autoplay muted playsinline></video>
+        
+        <div>
+            <input type="text" id="phoneIp" placeholder="Phone IP: 192.168.1.100:8080">
+            <button onclick="connect()">Connect to Phone</button>
+        </div>
+        
+        <div>
+            <button onclick="sendCommand('START')">📷 Start Camera</button>
+            <button onclick="sendCommand('STOP')">⏹️ Stop Camera</button>
+        </div>
+    </div>
+
+    <script>
+        let ws;
+        const video = document.getElementById('stream');
+        
+        function connect() {
+            let ip = document.getElementById('phoneIp').value;
+            if(!ip.includes(':8080')) ip = ip + ':8080';
+            
+            document.getElementById('statusText').innerHTML = '🟡 Connecting...';
+            
+            ws = new WebSocket(`ws://${ip}`);
+            
+            ws.onopen = () => {
+                document.getElementById('statusText').innerHTML = '🟢 Connected! Stream starting...';
+                document.getElementById('statusText').className = 'online';
+            };
+            
+            ws.onmessage = (event) => {
+                try {
+                    const data = JSON.parse(event.data);
+                    if(data.type === 'frame') {
+                        video.src = `data:image/jpeg;base64,${data.data}`;
+                    } else if(data.type === 'status') {
+                        document.getElementById('statusText').innerHTML = `📱 ${data.message}`;
+                    }
+                } catch(e) {}
+            };
+            
+            ws.onclose = () => {
+                document.getElementById('statusText').innerHTML = '🔴 Disconnected! Reconnect karein';
+                document.getElementById('statusText').className = 'offline';
+            };
+            
+            ws.onerror = () => {
+                document.getElementById('statusText').innerHTML = '❌ Connection error! Check IP and WiFi';
+            };
+        }
+        
+        function sendCommand(cmd) {
+            if(ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(cmd);
+            } else {
+                alert('Pehle connect karo!');
+            }
+        }
+    </script>
+</body>
+  </html>
