@@ -2,8 +2,8 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>LiveCam Pro - Live Stream</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>LiveCam Pro - Multi Quality</title>
     <style>
         * {
             margin: 0;
@@ -62,6 +62,431 @@
             align-items: center;
             gap: 10px;
         }
+
+        .status-dot {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: #ff4444;
+            transition: all 0.3s ease;
+        }
+
+        .status-dot.connected {
+            background: #44ff44;
+            box-shadow: 0 0 10px #44ff44;
+            animation: pulse 1.5s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.6; transform: scale(1.2); }
+        }
+
+        .status-text {
+            color: #fff;
+            font-size: 14px;
+        }
+
+        .device-info {
+            color: #888;
+            font-size: 12px;
+            font-family: monospace;
+        }
+
+        .video-section {
+            max-width: 1000px;
+            margin: 0 auto;
+        }
+
+        .video-container {
+            background: #000;
+            border-radius: 20px;
+            overflow: hidden;
+            position: relative;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.5);
+            border: 1px solid rgba(68,255,68,0.3);
+        }
+
+        .live-badge {
+            position: absolute;
+            top: 15px;
+            left: 15px;
+            background: #ff4444;
+            color: white;
+            padding: 6px 14px;
+            border-radius: 30px;
+            font-size: 12px;
+            font-weight: bold;
+            z-index: 10;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            animation: blink 1s infinite;
+        }
+
+        .live-badge.hidden {
+            display: none;
+        }
+
+        @keyframes blink {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.6; }
+        }
+
+        video {
+            width: 100%;
+            height: auto;
+            display: block;
+            background: #000;
+        }
+
+        .placeholder {
+            aspect-ratio: 16/9;
+            background: linear-gradient(135deg, #111, #1a1a2e);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            color: #666;
+            gap: 15px;
+        }
+
+        .placeholder-icon {
+            font-size: 64px;
+            opacity: 0.5;
+        }
+
+        /* Quality Buttons */
+        .quality-section {
+            max-width: 600px;
+            margin: 20px auto;
+        }
+
+        .quality-title {
+            color: #fff;
+            font-size: 14px;
+            margin-bottom: 12px;
+            text-align: center;
+        }
+
+        .quality-buttons {
+            display: flex;
+            gap: 12px;
+            justify-content: center;
+            flex-wrap: wrap;
+        }
+
+        .quality-btn {
+            padding: 10px 20px;
+            background: rgba(30,30,50,0.9);
+            border: 1px solid rgba(255,255,255,0.2);
+            border-radius: 40px;
+            color: white;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .quality-btn:hover {
+            background: rgba(68,255,68,0.2);
+            border-color: #44ff44;
+            transform: scale(1.02);
+        }
+
+        .quality-btn.active {
+            background: #44ff44;
+            color: #000;
+            border-color: #44ff44;
+        }
+
+        /* Stats */
+        .stats {
+            max-width: 600px;
+            margin: 20px auto 0;
+            display: flex;
+            justify-content: center;
+            gap: 30px;
+            flex-wrap: wrap;
+        }
+
+        .stat-card {
+            background: rgba(20,20,40,0.6);
+            border-radius: 12px;
+            padding: 12px 20px;
+            text-align: center;
+        }
+
+        .stat-value {
+            color: #44ff44;
+            font-size: 20px;
+            font-weight: bold;
+        }
+
+        .stat-label {
+            color: #888;
+            font-size: 11px;
+            margin-top: 4px;
+        }
+
+        .footer {
+            text-align: center;
+            margin-top: 40px;
+            color: #555;
+            font-size: 11px;
+        }
+    </style>
+</head>
+<body>
+
+<div class="header">
+    <div class="logo">📡</div>
+    <h1>LiveCam Pro</h1>
+    <div class="subtitle">Multi-Quality Live Stream</div>
+</div>
+
+<div class="status-container">
+    <div class="status-card">
+        <div class="status-indicator">
+            <div class="status-dot" id="statusDot"></div>
+            <span class="status-text" id="statusText">Connecting to server...</span>
+        </div>
+        <div class="device-info" id="deviceInfo">Waiting for camera</div>
+    </div>
+</div>
+
+<div class="video-section">
+    <div class="video-container">
+        <div class="live-badge hidden" id="liveBadge">🔴 LIVE</div>
+        <video id="liveStream" autoplay muted playsinline></video>
+        <div id="videoPlaceholder" class="placeholder" style="display: flex;">
+            <div class="placeholder-icon">🎥</div>
+            <div>No active camera stream</div>
+            <div style="font-size: 12px;">Ask someone to open the APK on their phone</div>
+        </div>
+    </div>
+</div>
+
+<!-- Quality Buttons -->
+<div class="quality-section">
+    <div class="quality-title">🎬 Video Quality</div>
+    <div class="quality-buttons">
+        <button class="quality-btn" data-quality="120" data-width="160" data-height="120">📱 120p</button>
+        <button class="quality-btn" data-quality="240" data-width="320" data-height="240">📱 240p</button>
+        <button class="quality-btn active" data-quality="360" data-width="480" data-height="360">📱 360p</button>
+        <button class="quality-btn" data-quality="480" data-width="640" data-height="480">📱 480p</button>
+        <button class="quality-btn" data-quality="720" data-width="1280" data-height="720">📱 720p</button>
+    </div>
+</div>
+
+<!-- Stats -->
+<div class="stats">
+    <div class="stat-card">
+        <div class="stat-value" id="fps">0</div>
+        <div class="stat-label">FPS</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-value" id="resolution">-</div>
+        <div class="stat-label">Resolution</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-value" id="dataReceived">0</div>
+        <div class="stat-label">MB Received</div>
+    </div>
+</div>
+
+<div class="footer">
+    <span>🔒 Secure Connection</span> | 
+    <span>📱 APK required on phone</span> |
+    <span>🎚️ Change quality anytime</span>
+</div>
+
+<script>
+    let socket = null;
+    let reconnectAttempts = 0;
+    let videoElement = document.getElementById('liveStream');
+    let placeholder = document.getElementById('videoPlaceholder');
+    let liveBadge = document.getElementById('liveBadge');
+    
+    let frameCount = 0;
+    let lastTime = Date.now();
+    let totalBytes = 0;
+    let fpsInterval = null;
+    let currentQuality = '360';
+    let currentWidth = 480;
+    let currentHeight = 360;
+    
+    const statusDot = document.getElementById('statusDot');
+    const statusText = document.getElementById('statusText');
+    const deviceInfo = document.getElementById('deviceInfo');
+    const fpsSpan = document.getElementById('fps');
+    const resolutionSpan = document.getElementById('resolution');
+    const dataReceivedSpan = document.getElementById('dataReceived');
+    
+    // 🔴🔴🔴 RENDER URL - FIXED, NO IP NEEDED 🔴🔴🔴
+    const RENDER_URL = "wss://server-0cwb.onrender.com";
+    
+    // Quality buttons
+    const qualityBtns = document.querySelectorAll('.quality-btn');
+    qualityBtns.forEach(btn => {
+        btn.addEventListener('click', () => {
+            qualityBtns.forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            
+            currentQuality = btn.getAttribute('data-quality');
+            currentWidth = parseInt(btn.getAttribute('data-width'));
+            currentHeight = parseInt(btn.getAttribute('data-height'));
+            
+            resolutionSpan.innerText = `${currentWidth}x${currentHeight}`;
+            
+            // Send quality change request to server
+            if (socket && socket.readyState === WebSocket.OPEN) {
+                socket.send(JSON.stringify({
+                    type: 'setQuality',
+                    width: currentWidth,
+                    height: currentHeight,
+                    quality: parseInt(currentQuality)
+                }));
+            }
+        });
+    });
+    
+    function updateStatus(connected, message, deviceCount = 0) {
+        if (connected) {
+            statusDot.classList.add('connected');
+            statusText.innerHTML = '🟢 ' + message;
+            if (deviceCount > 0) {
+                deviceInfo.innerHTML = `📱 ${deviceCount} camera(s) online`;
+            } else {
+                deviceInfo.innerHTML = '📱 No cameras online';
+            }
+        } else {
+            statusDot.classList.remove('connected');
+            statusText.innerHTML = '🔴 ' + message;
+            deviceInfo.innerHTML = 'Waiting for connection...';
+        }
+    }
+    
+    function updateLiveStatus(isLive) {
+        if (isLive) {
+            liveBadge.classList.remove('hidden');
+            placeholder.style.display = 'none';
+            videoElement.style.display = 'block';
+            
+            if (fpsInterval) clearInterval(fpsInterval);
+            fpsInterval = setInterval(() => {
+                const now = Date.now();
+                const elapsed = (now - lastTime) / 1000;
+                const currentFps = Math.round(frameCount / elapsed);
+                fpsSpan.innerText = currentFps;
+                frameCount = 0;
+                lastTime = now;
+                dataReceivedSpan.innerText = (totalBytes / (1024 * 1024)).toFixed(1);
+            }, 1000);
+        } else {
+            liveBadge.classList.add('hidden');
+            placeholder.style.display = 'flex';
+            videoElement.style.display = 'none';
+            if (fpsInterval) clearInterval(fpsInterval);
+            fpsSpan.innerText = '0';
+            dataReceivedSpan.innerText = '0';
+        }
+    }
+    
+    function connectToRender() {
+        const viewerId = 'viewer_' + Math.random().toString(36).substr(2, 9);
+        const wsUrl = `${RENDER_URL}?type=viewer&id=${viewerId}`;
+        
+        updateStatus(false, 'Connecting to server...');
+        
+        try {
+            socket = new WebSocket(wsUrl);
+            
+            socket.onopen = () => {
+                console.log('✅ Connected to Render server');
+                updateStatus(true, 'Connected to server', 0);
+                reconnectAttempts = 0;
+                
+                // Send initial quality setting
+                socket.send(JSON.stringify({
+                    type: 'setQuality',
+                    width: currentWidth,
+                    height: currentHeight,
+                    quality: parseInt(currentQuality)
+                }));
+            };
+            
+            socket.onmessage = (event) => {
+                try {
+                    const data = JSON.parse(event.data);
+                    
+                    if (data.type === 'cameraList') {
+                        if (data.cameras && data.cameras.length > 0) {
+                            updateStatus(true, 'Server connected', data.cameras.length);
+                            deviceInfo.innerHTML = `📱 ${data.cameras.length} camera(s) online`;
+                            
+                            if (data.cameras[0] && socket.readyState === WebSocket.OPEN) {
+                                socket.send(JSON.stringify({
+                                    type: 'watch',
+                                    cameraId: data.cameras[0].id,
+                                    width: currentWidth,
+                                    height: currentHeight
+                                }));
+                            }
+                        } else {
+                            updateStatus(true, 'No cameras online', 0);
+                            updateLiveStatus(false);
+                        }
+                    }
+                    
+                    if (data.type === 'frame') {
+                        frameCount++;
+                        totalBytes += data.data ? data.data.length : 0;
+                        videoElement.src = `data:image/jpeg;base64,${data.data}`;
+                        updateLiveStatus(true);
+                    }
+                    
+                } catch (e) {
+                    if (event.data instanceof Blob) {
+                        frameCount++;
+                        totalBytes += event.data.size;
+                        const url = URL.createObjectURL(event.data);
+                        videoElement.src = url;
+                        updateLiveStatus(true);
+                    }
+                }
+            };
+            
+            socket.onclose = () => {
+                console.log('❌ Disconnected, reconnecting...');
+                updateStatus(false, 'Disconnected, reconnecting...');
+                updateLiveStatus(false);
+                socket = null;
+                
+                setTimeout(() => {
+                    if (reconnectAttempts < 10) {
+                        reconnectAttempts++;
+                        connectToRender();
+                    }
+                }, 5000);
+            };
+            
+            socket.onerror = (error) => {
+                console.log('WebSocket error:', error);
+                updateStatus(false, 'Connection error');
+            };
+            
+        } catch(e) {
+            updateStatus(false, 'Connection failed');
+            setTimeout(connectToRender, 10000);
+        }
+    }
+    
+    resolutionSpan.innerText = '480x360';
+    connectToRender();
+</script>
+</body>
+</html>        }
 
         .status-dot {
             width: 12px;
