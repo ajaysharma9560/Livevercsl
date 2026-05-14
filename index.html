@@ -2,99 +2,105 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
-    <title>Remote Camera Control</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>Remote Camera</title>
     <style>
         * {
             margin: 0;
             padding: 0;
             box-sizing: border-box;
+            -webkit-tap-highlight-color: transparent;
         }
 
         body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: #0a0a0a;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            background: #000000;
             min-height: 100vh;
             display: flex;
-            justify-content: center;
-            align-items: center;
-            padding: 16px;
+            flex-direction: column;
         }
 
-        .container {
-            max-width: 500px;
-            width: 100%;
-            background: #111;
-            border-radius: 24px;
-            overflow: hidden;
-            box-shadow: 0 10px 40px rgba(0,0,0,0.5);
+        /* Status Bar */
+        .status-bar {
+            padding: 12px 16px 8px 16px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: #000;
+        }
+
+        .time {
+            color: #fff;
+            font-size: 15px;
+            font-weight: 600;
+        }
+
+        .battery {
+            display: flex;
+            gap: 6px;
+            color: #fff;
+            font-size: 13px;
         }
 
         /* Header */
         .header {
-            background: #1a1a1a;
-            padding: 16px 20px;
+            padding: 8px 16px;
             display: flex;
             justify-content: space-between;
             align-items: center;
-            border-bottom: 1px solid #333;
+            background: #000;
         }
 
-        .logo {
-            font-size: 20px;
-            font-weight: bold;
+        .back-btn {
+            background: none;
+            border: none;
+            color: #007aff;
+            font-size: 17px;
+            font-weight: 500;
+        }
+
+        .title {
             color: #fff;
+            font-size: 17px;
+            font-weight: 600;
         }
 
-        .tools {
-            display: flex;
-            gap: 16px;
+        .menu-btn {
+            background: none;
+            border: none;
+            color: #007aff;
+            font-size: 17px;
         }
 
-        .tools span {
-            color: #888;
-            font-size: 14px;
-            cursor: pointer;
-        }
-
-        .tools span:hover {
-            color: #fff;
-        }
-
-        /* Device Info */
-        .device-info {
-            background: #0f0f0f;
-            padding: 16px 20px;
-            border-bottom: 1px solid #333;
+        /* Device Card */
+        .device-card {
+            background: #1c1c1e;
+            margin: 12px 16px;
+            padding: 16px;
+            border-radius: 14px;
         }
 
         .device-name {
-            color: #00ff00;
-            font-size: 14px;
-            font-weight: 500;
-            margin-bottom: 8px;
+            color: #fff;
+            font-size: 17px;
+            font-weight: 600;
+            margin-bottom: 4px;
         }
 
-        .device-id {
-            color: #666;
-            font-size: 12px;
-            font-family: monospace;
-        }
-
-        .remote-status {
-            color: #00ff00;
-            font-size: 12px;
-            margin-top: 8px;
+        .device-status {
+            color: #34c759;
+            font-size: 13px;
             display: flex;
             align-items: center;
-            gap: 8px;
+            gap: 6px;
+            margin-bottom: 8px;
         }
 
         .status-dot {
             width: 8px;
             height: 8px;
+            background: #34c759;
             border-radius: 50%;
-            background: #00ff00;
             animation: pulse 1.5s infinite;
         }
 
@@ -103,19 +109,21 @@
             50% { opacity: 0.5; }
         }
 
-        /* Video Section */
-        .video-section {
-            background: #000;
-            padding: 20px;
-            border-bottom: 1px solid #333;
+        .device-id {
+            color: #8e8e93;
+            font-size: 12px;
+            font-family: monospace;
         }
 
+        /* Video Container */
         .video-container {
             background: #000;
-            border-radius: 12px;
+            margin: 0 16px;
+            border-radius: 16px;
             overflow: hidden;
             position: relative;
             aspect-ratio: 16/9;
+            background: #0a0a0a;
         }
 
         video {
@@ -136,240 +144,296 @@
             justify-content: center;
             background: #0a0a0a;
             color: #666;
+            gap: 12px;
+        }
+
+        .placeholder-icon {
+            font-size: 48px;
+            opacity: 0.5;
+        }
+
+        .placeholder-text {
+            font-size: 14px;
         }
 
         .hidden {
             display: none;
         }
 
-        /* Quality Buttons */
-        .quality-section {
-            padding: 16px 20px;
-            border-bottom: 1px solid #333;
+        /* Live Badge */
+        .live-badge {
+            position: absolute;
+            top: 12px;
+            left: 12px;
+            background: #ff3b30;
+            color: white;
+            padding: 4px 10px;
+            border-radius: 20px;
+            font-size: 11px;
+            font-weight: 600;
+            z-index: 10;
             display: flex;
-            justify-content: space-between;
             align-items: center;
+            gap: 6px;
+        }
+
+        /* Quality Selector */
+        .quality-section {
+            padding: 16px;
+            background: #000;
         }
 
         .quality-label {
-            color: #888;
-            font-size: 12px;
+            color: #8e8e93;
+            font-size: 13px;
+            margin-bottom: 10px;
         }
 
         .quality-buttons {
             display: flex;
             gap: 12px;
+            flex-wrap: wrap;
         }
 
         .quality-btn {
-            background: #222;
-            border: none;
-            color: #888;
-            padding: 6px 12px;
-            border-radius: 8px;
-            font-size: 11px;
-            cursor: pointer;
-            transition: all 0.2s;
-        }
-
-        .quality-btn.active {
-            background: #00ff00;
-            color: #000;
-        }
-
-        /* Control Buttons */
-        .controls {
-            padding: 20px;
-            display: flex;
-            justify-content: center;
-            gap: 20px;
-            border-bottom: 1px solid #333;
-        }
-
-        .control-btn {
-            background: #222;
+            background: #1c1c1e;
             border: none;
             color: #fff;
-            padding: 12px 24px;
+            padding: 8px 20px;
             border-radius: 30px;
             font-size: 14px;
             font-weight: 500;
             cursor: pointer;
             transition: all 0.2s;
+        }
+
+        .quality-btn.active {
+            background: #34c759;
+            color: #000;
+        }
+
+        /* Action Buttons */
+        .action-buttons {
             display: flex;
+            justify-content: space-around;
+            padding: 16px;
+            gap: 16px;
+            background: #000;
+        }
+
+        .action-btn {
+            flex: 1;
+            background: #1c1c1e;
+            border: none;
+            padding: 14px;
+            border-radius: 14px;
+            display: flex;
+            flex-direction: column;
             align-items: center;
             gap: 8px;
+            cursor: pointer;
+            transition: all 0.2s;
         }
 
-        .control-btn.live {
-            background: #ff4444;
+        .action-btn:active {
+            transform: scale(0.96);
         }
 
-        .control-btn.photo {
-            background: #4CAF50;
+        .action-icon {
+            font-size: 24px;
         }
 
-        .control-btn.rec {
-            background: #ff9800;
+        .action-label {
+            color: #fff;
+            font-size: 12px;
+            font-weight: 500;
         }
 
-        .control-btn:hover {
-            transform: scale(1.02);
-            opacity: 0.9;
+        .action-btn.live {
+            background: #ff3b30;
+        }
+
+        .action-btn.photo {
+            background: #34c759;
+        }
+
+        .action-btn.rec {
+            background: #ff9500;
         }
 
         /* Timer Section */
         .timer-section {
-            padding: 16px 20px;
+            padding: 12px 16px;
+            background: #000;
+        }
+
+        .timer-title {
+            color: #8e8e93;
+            font-size: 13px;
+            margin-bottom: 10px;
+        }
+
+        .timer-buttons {
             display: flex;
-            justify-content: center;
-            gap: 20px;
-            border-bottom: 1px solid #333;
+            gap: 12px;
         }
 
         .timer-btn {
-            background: #222;
+            background: #1c1c1e;
             border: none;
-            color: #888;
+            color: #fff;
             padding: 8px 20px;
-            border-radius: 20px;
-            font-size: 12px;
-            cursor: pointer;
-        }
-
-        .timer-btn.active {
-            background: #00ff00;
-            color: #000;
-        }
-
-        /* Bottom Nav */
-        .bottom-nav {
-            padding: 16px 20px;
-            display: flex;
-            justify-content: space-around;
-            background: #1a1a1a;
-        }
-
-        .nav-item {
-            color: #666;
-            text-align: center;
-            cursor: pointer;
-        }
-
-        .nav-item.active {
-            color: #00ff00;
-        }
-
-        .nav-icon {
-            font-size: 20px;
-            margin-bottom: 4px;
-        }
-
-        .nav-label {
-            font-size: 10px;
-        }
-
-        /* Logout */
-        .logout {
-            background: #1a1a1a;
-            padding: 16px 20px;
-            text-align: center;
-            border-top: 1px solid #333;
-        }
-
-        .logout-btn {
-            background: none;
-            border: 1px solid #ff4444;
-            color: #ff4444;
-            padding: 10px;
-            width: 100%;
             border-radius: 30px;
             font-size: 14px;
             cursor: pointer;
+        }
+
+        /* Bottom Tab Bar */
+        .tab-bar {
+            background: #1c1c1e;
+            display: flex;
+            justify-content: space-around;
+            padding: 10px 20px 20px 20px;
+            margin-top: auto;
+            border-top: 0.5px solid #2c2c2e;
+        }
+
+        .tab-item {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 4px;
+            cursor: pointer;
+            opacity: 0.5;
+            transition: opacity 0.2s;
+        }
+
+        .tab-item.active {
+            opacity: 1;
+        }
+
+        .tab-icon {
+            font-size: 22px;
+            color: #fff;
+        }
+
+        .tab-label {
+            font-size: 10px;
+            color: #fff;
+        }
+
+        /* Toast Message */
+        .toast {
+            position: fixed;
+            bottom: 100px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0,0,0,0.8);
+            color: white;
+            padding: 10px 20px;
+            border-radius: 30px;
+            font-size: 14px;
+            z-index: 100;
+            display: none;
         }
     </style>
 </head>
 <body>
 
-<div class="container">
+    <!-- Status Bar -->
+    <div class="status-bar">
+        <div class="time" id="currentTime">9:41</div>
+        <div class="battery">
+            <span>📶</span>
+            <span>🔋</span>
+        </div>
+    </div>
+
     <!-- Header -->
     <div class="header">
-        <div class="logo">Remote Control</div>
-        <div class="tools">
-            <span>🔧</span>
-            <span>📱</span>
-            <span>⚡</span>
-            <span>🚪</span>
-        </div>
+        <button class="back-btn" onclick="goBack()">‹ Back</button>
+        <div class="title">Remote Camera</div>
+        <button class="menu-btn" onclick="showMenu()">•••</button>
     </div>
 
-    <!-- Device Info -->
-    <div class="device-info">
-        <div class="device-name">Connected to: <span id="deviceName">--</span></div>
-        <div class="device-id" id="deviceId">Device ID: --</div>
-        <div class="remote-status">
+    <!-- Device Card -->
+    <div class="device-card">
+        <div class="device-name" id="deviceName">Connecting...</div>
+        <div class="device-status">
             <div class="status-dot"></div>
-            <span>Ready</span>
+            <span id="deviceStatus">Ready</span>
+        </div>
+        <div class="device-id" id="deviceId">Device ID: --</div>
+    </div>
+
+    <!-- Video Container -->
+    <div class="video-container">
+        <div class="live-badge" id="liveBadge" style="display: none;">🔴 LIVE</div>
+        <video id="liveStream" autoplay muted playsinline></video>
+        <div id="placeholder" class="placeholder">
+            <div class="placeholder-icon">📷</div>
+            <div class="placeholder-text">No active stream</div>
+            <div class="placeholder-text" style="font-size: 12px;">Open APK on phone</div>
         </div>
     </div>
 
-    <!-- Video Section -->
-    <div class="video-section">
-        <div class="video-container">
-            <video id="liveStream" autoplay muted playsinline></video>
-            <div id="placeholder" class="placeholder">
-                <div>📷</div>
-                <div>Waiting for stream...</div>
-            </div>
-        </div>
-    </div>
-
-    <!-- Quality Buttons -->
+    <!-- Quality Section -->
     <div class="quality-section">
-        <span class="quality-label">Quality</span>
+        <div class="quality-label">Video Quality</div>
         <div class="quality-buttons">
             <button class="quality-btn" data-quality="144">144p</button>
             <button class="quality-btn active" data-quality="240">240p</button>
             <button class="quality-btn" data-quality="360">360p</button>
             <button class="quality-btn" data-quality="480">480p</button>
+            <button class="quality-btn" data-quality="720">720p</button>
         </div>
     </div>
 
-    <!-- Control Buttons -->
-    <div class="controls">
-        <button class="control-btn live" id="btnLive">🔴 Live</button>
-        <button class="control-btn photo" id="btnPhoto">📸 Photo</button>
-        <button class="control-btn rec" id="btnRec">⏺ Rec</button>
+    <!-- Action Buttons -->
+    <div class="action-buttons">
+        <button class="action-btn live" id="btnLive">
+            <div class="action-icon">🔴</div>
+            <div class="action-label">Live</div>
+        </button>
+        <button class="action-btn photo" id="btnPhoto">
+            <div class="action-icon">📸</div>
+            <div class="action-label">Photo</div>
+        </button>
+        <button class="action-btn rec" id="btnRec">
+            <div class="action-icon">⏺</div>
+            <div class="action-label">Record</div>
+        </button>
     </div>
 
     <!-- Timer Section -->
     <div class="timer-section">
-        <button class="timer-btn" data-timer="1">1m</button>
-        <button class="timer-btn" data-timer="2">2m</button>
-        <button class="timer-btn" data-timer="5">5m</button>
-    </div>
-
-    <!-- Bottom Nav -->
-    <div class="bottom-nav">
-        <div class="nav-item active">
-            <div class="nav-icon">📷</div>
-            <div class="nav-label">Live</div>
-        </div>
-        <div class="nav-item">
-            <div class="nav-icon">🖼️</div>
-            <div class="nav-label">Photo</div>
-        </div>
-        <div class="nav-item">
-            <div class="nav-icon">⏺️</div>
-            <div class="nav-label">Rec</div>
+        <div class="timer-title">Capture Timer</div>
+        <div class="timer-buttons">
+            <button class="timer-btn" data-timer="1">1 min</button>
+            <button class="timer-btn" data-timer="2">2 min</button>
+            <button class="timer-btn" data-timer="5">5 min</button>
+            <button class="timer-btn" data-timer="0">Off</button>
         </div>
     </div>
 
-    <!-- Logout -->
-    <div class="logout">
-        <button class="logout-btn" id="btnLogout">BACK</button>
+    <!-- Bottom Tab Bar -->
+    <div class="tab-bar">
+        <div class="tab-item active" data-tab="live">
+            <div class="tab-icon">📷</div>
+            <div class="tab-label">Live</div>
+        </div>
+        <div class="tab-item" data-tab="photo">
+            <div class="tab-icon">🖼️</div>
+            <div class="tab-label">Gallery</div>
+        </div>
+        <div class="tab-item" data-tab="settings">
+            <div class="tab-icon">⚙️</div>
+            <div class="tab-label">Settings</div>
+        </div>
     </div>
-</div>
+
+    <!-- Toast -->
+    <div class="toast" id="toast">Command sent</div>
 
 <script>
     // 🔴🔴🔴 RENDER URL - APK KE HISAB SE 🔴🔴🔴
@@ -378,10 +442,55 @@
     let socket = null;
     let videoElement = document.getElementById('liveStream');
     let placeholder = document.getElementById('placeholder');
+    let liveBadge = document.getElementById('liveBadge');
     let currentCameraId = null;
     let activeCameras = [];
-    let isStreaming = false;
     let currentQuality = "240";
+    let reconnectAttempts = 0;
+
+    // Update time
+    function updateTime() {
+        const now = new Date();
+        const hours = now.getHours();
+        const minutes = now.getMinutes();
+        document.getElementById('currentTime').innerHTML = `${hours}:${minutes.toString().padStart(2,'0')}`;
+    }
+    updateTime();
+    setInterval(updateTime, 60000);
+
+    function showToast(message) {
+        const toast = document.getElementById('toast');
+        toast.innerHTML = message;
+        toast.style.display = 'block';
+        setTimeout(() => {
+            toast.style.display = 'none';
+        }, 1500);
+    }
+
+    function showStream() {
+        placeholder.classList.add('hidden');
+        liveBadge.style.display = 'flex';
+        videoElement.style.display = 'block';
+    }
+
+    function hideStream() {
+        placeholder.classList.remove('hidden');
+        liveBadge.style.display = 'none';
+        videoElement.style.display = 'none';
+    }
+
+    function updateDeviceInfo(device) {
+        if (device) {
+            document.getElementById('deviceName').innerHTML = device.name || `Camera ${device.id.substring(0,6)}`;
+            document.getElementById('deviceId').innerHTML = `Device ID: ${device.id.substring(0,8)}...`;
+            document.getElementById('deviceStatus').innerHTML = 'Live';
+        } else {
+            document.getElementById('deviceName').innerHTML = 'No device';
+            document.getElementById('deviceId').innerHTML = 'Device ID: --';
+            document.getElementById('deviceStatus').innerHTML = 'Waiting';
+            hideStream();
+        }
+    }
 
     function connectToRender() {
         const viewerId = 'viewer_' + Math.random().toString(36).substr(2, 9);
@@ -391,8 +500,9 @@
             socket = new WebSocket(wsUrl);
             
             socket.onopen = () => {
-                console.log('✅ Connected');
-                document.querySelector('.remote-status span').innerHTML = 'Ready';
+                console.log('✅ Connected to server');
+                document.getElementById('deviceStatus').innerHTML = 'Connected';
+                reconnectAttempts = 0;
             };
             
             socket.onmessage = (event) => {
@@ -405,30 +515,25 @@
                         if (activeCameras.length > 0) {
                             const device = activeCameras[0];
                             currentCameraId = device.id;
-                            document.getElementById('deviceName').innerHTML = device.name || device.id.substring(0, 8);
-                            document.getElementById('deviceId').innerHTML = `Device ID: ${device.id.substring(0, 8)}`;
+                            updateDeviceInfo(device);
                             
                             socket.send(JSON.stringify({
                                 type: 'watch',
-                                cameraId: currentCameraId,
-                                quality: currentQuality
+                                cameraId: currentCameraId
                             }));
                         } else {
-                            document.getElementById('deviceName').innerHTML = 'No device';
-                            document.getElementById('deviceId').innerHTML = 'Device ID: --';
+                            updateDeviceInfo(null);
                         }
                     }
                     
                     if (data.type === 'frame') {
-                        placeholder.classList.add('hidden');
-                        videoElement.style.display = 'block';
+                        showStream();
                         videoElement.src = `data:image/jpeg;base64,${data.frame}`;
                     }
                     
                 } catch (e) {
                     if (event.data instanceof Blob) {
-                        placeholder.classList.add('hidden');
-                        videoElement.style.display = 'block';
+                        showStream();
                         const url = URL.createObjectURL(event.data);
                         videoElement.src = url;
                     }
@@ -436,1570 +541,108 @@
             };
             
             socket.onclose = () => {
-                console.log('Disconnected, reconnecting...');
-                document.querySelector('.remote-status span').innerHTML = 'Disconnected';
-                setTimeout(connectToRender, 5000);
+                console.log('Disconnected');
+                document.getElementById('deviceStatus').innerHTML = 'Reconnecting...';
+                hideStream();
+                
+                setTimeout(() => {
+                    if (reconnectAttempts < 10) {
+                        reconnectAttempts++;
+                        connectToRender();
+                    }
+                }, 5000);
+            };
+            
+            socket.onerror = (error) => {
+                console.log('WebSocket error');
+                document.getElementById('deviceStatus').innerHTML = 'Error';
             };
             
         } catch(e) {
             setTimeout(connectToRender, 10000);
         }
     }
-    
+
+    // Send command to camera
+    function sendCommand(action, params = {}) {
+        if (socket && socket.readyState === WebSocket.OPEN && currentCameraId) {
+            socket.send(JSON.stringify({
+                type: 'command',
+                action: action,
+                cameraId: currentCameraId,
+                ...params
+            }));
+            showToast(`${action} command sent`);
+        } else {
+            showToast('Not connected to camera');
+        }
+    }
+
     // Quality buttons
     document.querySelectorAll('.quality-btn').forEach(btn => {
         btn.addEventListener('click', () => {
             document.querySelectorAll('.quality-btn').forEach(b => b.classList.remove('active'));
             btn.classList.add('active');
             currentQuality = btn.getAttribute('data-quality');
-            
-            if (socket && socket.readyState === WebSocket.OPEN && currentCameraId) {
-                socket.send(JSON.stringify({
-                    type: 'setQuality',
-                    cameraId: currentCameraId,
-                    quality: currentQuality
-                }));
-            }
+            sendCommand('quality', { quality: currentQuality });
         });
     });
-    
-    // Control buttons
+
+    // Action buttons
     document.getElementById('btnLive').addEventListener('click', () => {
-        if (socket && socket.readyState === WebSocket.OPEN && currentCameraId) {
-            socket.send(JSON.stringify({ type: 'action', action: 'live', cameraId: currentCameraId }));
-        }
+        sendCommand('live');
+        document.querySelectorAll('.tab-item').forEach(tab => tab.classList.remove('active'));
+        document.querySelector('.tab-item[data-tab="live"]').classList.add('active');
     });
     
     document.getElementById('btnPhoto').addEventListener('click', () => {
-        if (socket && socket.readyState === WebSocket.OPEN && currentCameraId) {
-            socket.send(JSON.stringify({ type: 'action', action: 'photo', cameraId: currentCameraId }));
-        }
+        sendCommand('photo');
     });
     
     document.getElementById('btnRec').addEventListener('click', () => {
-        if (socket && socket.readyState === WebSocket.OPEN && currentCameraId) {
-            socket.send(JSON.stringify({ type: 'action', action: 'record', cameraId: currentCameraId }));
-        }
+        sendCommand('record');
     });
-    
-    document.getElementById('btnLogout').addEventListener('click', () => {
-        if (socket) socket.close();
-        location.reload();
-    });
-    
+
     // Timer buttons
     document.querySelectorAll('.timer-btn').forEach(btn => {
         btn.addEventListener('click', () => {
             const timer = btn.getAttribute('data-timer');
-            if (socket && socket.readyState === WebSocket.OPEN && currentCameraId) {
-                socket.send(JSON.stringify({ type: 'timer', timer: timer, cameraId: currentCameraId }));
+            sendCommand('timer', { minutes: timer });
+            document.querySelectorAll('.timer-btn').forEach(b => b.style.opacity = '0.7');
+            btn.style.opacity = '1';
+        });
+    });
+
+    // Tab bar navigation
+    document.querySelectorAll('.tab-item').forEach(tab => {
+        tab.addEventListener('click', () => {
+            document.querySelectorAll('.tab-item').forEach(t => t.classList.remove('active'));
+            tab.classList.add('active');
+            const tabName = tab.getAttribute('data-tab');
+            if (tabName === 'live') {
+                sendCommand('live');
+            } else if (tabName === 'photo') {
+                sendCommand('gallery');
+            } else if (tabName === 'settings') {
+                showToast('Settings coming soon');
             }
         });
     });
-    
-    // Bottom nav
-    document.querySelectorAll('.nav-item').forEach((item, index) => {
-        item.addEventListener('click', () => {
-            document.querySelectorAll('.nav-item').forEach(nav => nav.classList.remove('active'));
-            item.classList.add('active');
-            if (index === 0) document.getElementById('btnLive').click();
-            if (index === 1) document.getElementById('btnPhoto').click();
-            if (index === 2) document.getElementById('btnRec').click();
-        });
-    });
-    
+
+    function goBack() {
+        if (confirm('Disconnect from camera?')) {
+            if (socket) socket.close();
+            setTimeout(() => location.reload(), 500);
+        }
+    }
+
+    function showMenu() {
+        showToast('Remote Control v1.0');
+    }
+
     // Start connection
     connectToRender();
 </script>
 
 </body>
-</html>            text-align: center;
-        }
-
-        .header h1 {
-            color: #fff;
-            font-size: 24px;
-            margin-bottom: 8px;
-        }
-
-        .header p {
-            color: #888;
-            font-size: 14px;
-        }
-
-        .status-bar {
-            background: #111;
-            padding: 12px 20px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            border-bottom: 1px solid #333;
-        }
-
-        .status-indicator {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-        }
-
-        .status-dot {
-            width: 12px;
-            height: 12px;
-            border-radius: 50%;
-            background: #ff4444;
-            transition: all 0.3s;
-        }
-
-        .status-dot.connected {
-            background: #44ff44;
-            box-shadow: 0 0 10px #44ff44;
-            animation: pulse 1.5s infinite;
-        }
-
-        @keyframes pulse {
-            0%, 100% { opacity: 1; transform: scale(1); }
-            50% { opacity: 0.6; transform: scale(1.2); }
-        }
-
-        .status-text {
-            color: #fff;
-            font-size: 14px;
-        }
-
-        .device-info {
-            color: #888;
-            font-size: 12px;
-            font-family: monospace;
-        }
-
-        .video-container {
-            background: #000;
-            position: relative;
-            min-height: 400px;
-        }
-
-        video {
-            width: 100%;
-            height: auto;
-            display: block;
-        }
-
-        .placeholder {
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            color: #666;
-            gap: 15px;
-            background: #000;
-        }
-
-        .placeholder-icon {
-            font-size: 64px;
-            opacity: 0.5;
-        }
-
-        .placeholder-text {
-            font-size: 14px;
-        }
-
-        .footer {
-            padding: 15px;
-            text-align: center;
-            background: #111;
-            border-top: 1px solid #333;
-        }
-
-        .footer span {
-            color: #555;
-            font-size: 11px;
-        }
-
-        .hidden {
-            display: none;
-        }
-    </style>
-</head>
-<body>
-
-<div class="container">
-    <div class="header">
-        <h1>📡 Live Camera Stream</h1>
-        <p>Connect to your phone camera</p>
-    </div>
-
-    <div class="status-bar">
-        <div class="status-indicator">
-            <div class="status-dot" id="statusDot"></div>
-            <span class="status-text" id="statusText">Connecting...</span>
-        </div>
-        <div class="device-info" id="deviceInfo">No device</div>
-    </div>
-
-    <div class="video-container">
-        <video id="liveStream" autoplay muted playsinline></video>
-        <div id="placeholder" class="placeholder">
-            <div class="placeholder-icon">📷</div>
-            <div class="placeholder-text">Waiting for camera stream...</div>
-            <div class="placeholder-text" style="font-size: 12px;">Open the APK on your phone</div>
-        </div>
-    </div>
-
-    <div class="footer">
-        <span>🔒 Secure WebSocket Connection</span> | 
-        <span>📱 APK: Projwct</span> |
-        <span>🟢 Auto-reconnect</span>
-    </div>
-</div>
-
-<script>
-    // 🔴🔴🔴 RENDER URL - APK KE HISAB SE 🔴🔴🔴
-    const RENDER_URL = "wss://server-1-lkze.onrender.com";
-    
-    let socket = null;
-    let videoElement = document.getElementById('liveStream');
-    let placeholder = document.getElementById('placeholder');
-    let statusDot = document.getElementById('statusDot');
-    let statusText = document.getElementById('statusText');
-    let deviceInfo = document.getElementById('deviceInfo');
-    let reconnectAttempts = 0;
-    let currentCameraId = null;
-    let activeCameras = [];
-
-    function updateStatus(connected, message, deviceCount = 0) {
-        if (connected) {
-            statusDot.classList.add('connected');
-            statusText.innerHTML = '🟢 ' + message;
-            if (deviceCount > 0) {
-                deviceInfo.innerHTML = `📱 ${deviceCount} camera(s) online`;
-            } else {
-                deviceInfo.innerHTML = `📱 No cameras online`;
-            }
-        } else {
-            statusDot.classList.remove('connected');
-            statusText.innerHTML = '🔴 ' + message;
-            deviceInfo.innerHTML = 'No device connected';
-        }
-    }
-
-    function showStream() {
-        placeholder.classList.add('hidden');
-        videoElement.style.display = 'block';
-    }
-
-    function hideStream() {
-        placeholder.classList.remove('hidden');
-        videoElement.style.display = 'none';
-    }
-
-    function connectToRender() {
-        const viewerId = 'viewer_' + Math.random().toString(36).substr(2, 9);
-        const wsUrl = `${RENDER_URL}?type=viewer&id=${viewerId}`;
-        
-        updateStatus(false, 'Connecting to server...');
-        
-        try {
-            socket = new WebSocket(wsUrl);
-            
-            socket.onopen = () => {
-                console.log('✅ Connected to Render server');
-                updateStatus(true, 'Connected to server');
-                reconnectAttempts = 0;
-            };
-            
-            socket.onmessage = (event) => {
-                try {
-                    const data = JSON.parse(event.data);
-                    
-                    if (data.type === 'cameraList') {
-                        activeCameras = data.cameras || [];
-                        
-                        if (activeCameras.length > 0) {
-                            updateStatus(true, 'Server connected', activeCameras.length);
-                            
-                            if (currentCameraId === null && activeCameras[0]) {
-                                currentCameraId = activeCameras[0].id;
-                                socket.send(JSON.stringify({
-                                    type: 'watch',
-                                    cameraId: currentCameraId
-                                }));
-                                deviceInfo.innerHTML = `📱 Watching: ${currentCameraId.substring(0, 8)}...`;
-                            }
-                        } else {
-                            updateStatus(true, 'No cameras online', 0);
-                            hideStream();
-                        }
-                    }
-                    
-                    if (data.type === 'frame') {
-                        showStream();
-                        videoElement.src = `data:image/jpeg;base64,${data.frame}`;
-                    }
-                    
-                } catch (e) {
-                    if (event.data instanceof Blob) {
-                        showStream();
-                        const url = URL.createObjectURL(event.data);
-                        videoElement.src = url;
-                    }
-                }
-            };
-            
-            socket.onclose = () => {
-                console.log('❌ Disconnected, reconnecting...');
-                updateStatus(false, 'Disconnected, reconnecting...');
-                hideStream();
-                socket = null;
-                
-                setTimeout(() => {
-                    if (reconnectAttempts < 10) {
-                        reconnectAttempts++;
-                        connectToRender();
-                    }
-                }, 5000);
-            };
-            
-            socket.onerror = (error) => {
-                console.log('WebSocket error:', error);
-                updateStatus(false, 'Connection error');
-            };
-            
-        } catch(e) {
-            updateStatus(false, 'Connection failed');
-            setTimeout(connectToRender, 10000);
-        }
-    }
-    
-    // Auto connect on page load
-    connectToRender();
-</script>
-
-</body>
-</html>        }
-
-        .device-info {
-            color: #888;
-            font-size: 12px;
-            font-family: monospace;
-        }
-
-        .video-section {
-            max-width: 1000px;
-            margin: 0 auto;
-        }
-
-        .video-container {
-            background: #000;
-            border-radius: 20px;
-            overflow: hidden;
-            position: relative;
-            box-shadow: 0 10px 40px rgba(0,0,0,0.5);
-            border: 1px solid rgba(68,255,68,0.3);
-        }
-
-        .live-badge {
-            position: absolute;
-            top: 15px;
-            left: 15px;
-            background: #ff4444;
-            color: white;
-            padding: 6px 14px;
-            border-radius: 30px;
-            font-size: 12px;
-            font-weight: bold;
-            z-index: 10;
-            display: flex;
-            align-items: center;
-            gap: 6px;
-            animation: blink 1s infinite;
-        }
-
-        .live-badge.hidden {
-            display: none;
-        }
-
-        @keyframes blink {
-            0%, 100% { opacity: 1; }
-            50% { opacity: 0.6; }
-        }
-
-        video {
-            width: 100%;
-            height: auto;
-            display: block;
-            background: #000;
-        }
-
-        .placeholder {
-            aspect-ratio: 16/9;
-            background: linear-gradient(135deg, #111, #1a1a2e);
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            color: #666;
-            gap: 15px;
-        }
-
-        .placeholder-icon {
-            font-size: 64px;
-            opacity: 0.5;
-        }
-
-        /* Quality Buttons */
-        .quality-section {
-            max-width: 600px;
-            margin: 20px auto;
-        }
-
-        .quality-title {
-            color: #fff;
-            font-size: 14px;
-            margin-bottom: 12px;
-            text-align: center;
-        }
-
-        .quality-buttons {
-            display: flex;
-            gap: 12px;
-            justify-content: center;
-            flex-wrap: wrap;
-        }
-
-        .quality-btn {
-            padding: 10px 20px;
-            background: rgba(30,30,50,0.9);
-            border: 1px solid rgba(255,255,255,0.2);
-            border-radius: 40px;
-            color: white;
-            font-size: 14px;
-            font-weight: 500;
-            cursor: pointer;
-            transition: all 0.2s;
-        }
-
-        .quality-btn:hover {
-            background: rgba(68,255,68,0.2);
-            border-color: #44ff44;
-            transform: scale(1.02);
-        }
-
-        .quality-btn.active {
-            background: #44ff44;
-            color: #000;
-            border-color: #44ff44;
-        }
-
-        /* Stats */
-        .stats {
-            max-width: 600px;
-            margin: 20px auto 0;
-            display: flex;
-            justify-content: center;
-            gap: 30px;
-            flex-wrap: wrap;
-        }
-
-        .stat-card {
-            background: rgba(20,20,40,0.6);
-            border-radius: 12px;
-            padding: 12px 20px;
-            text-align: center;
-        }
-
-        .stat-value {
-            color: #44ff44;
-            font-size: 20px;
-            font-weight: bold;
-        }
-
-        .stat-label {
-            color: #888;
-            font-size: 11px;
-            margin-top: 4px;
-        }
-
-        .footer {
-            text-align: center;
-            margin-top: 40px;
-            color: #555;
-            font-size: 11px;
-        }
-    </style>
-</head>
-<body>
-
-<div class="header">
-    <div class="logo">📡</div>
-    <h1>LiveCam Pro</h1>
-    <div class="subtitle">Multi-Quality Live Stream</div>
-</div>
-
-<div class="status-container">
-    <div class="status-card">
-        <div class="status-indicator">
-            <div class="status-dot" id="statusDot"></div>
-            <span class="status-text" id="statusText">Connecting to server...</span>
-        </div>
-        <div class="device-info" id="deviceInfo">Waiting for camera</div>
-    </div>
-</div>
-
-<div class="video-section">
-    <div class="video-container">
-        <div class="live-badge hidden" id="liveBadge">🔴 LIVE</div>
-        <video id="liveStream" autoplay muted playsinline></video>
-        <div id="videoPlaceholder" class="placeholder" style="display: flex;">
-            <div class="placeholder-icon">🎥</div>
-            <div>No active camera stream</div>
-            <div style="font-size: 12px;">Ask someone to open the APK on their phone</div>
-        </div>
-    </div>
-</div>
-
-<!-- Quality Buttons -->
-<div class="quality-section">
-    <div class="quality-title">🎬 Video Quality</div>
-    <div class="quality-buttons">
-        <button class="quality-btn" data-quality="120" data-width="160" data-height="120">📱 120p</button>
-        <button class="quality-btn" data-quality="240" data-width="320" data-height="240">📱 240p</button>
-        <button class="quality-btn active" data-quality="360" data-width="480" data-height="360">📱 360p</button>
-        <button class="quality-btn" data-quality="480" data-width="640" data-height="480">📱 480p</button>
-        <button class="quality-btn" data-quality="720" data-width="1280" data-height="720">📱 720p</button>
-    </div>
-</div>
-
-<!-- Stats -->
-<div class="stats">
-    <div class="stat-card">
-        <div class="stat-value" id="fps">0</div>
-        <div class="stat-label">FPS</div>
-    </div>
-    <div class="stat-card">
-        <div class="stat-value" id="resolution">-</div>
-        <div class="stat-label">Resolution</div>
-    </div>
-    <div class="stat-card">
-        <div class="stat-value" id="dataReceived">0</div>
-        <div class="stat-label">MB Received</div>
-    </div>
-</div>
-
-<div class="footer">
-    <span>🔒 Secure Connection</span> | 
-    <span>📱 APK required on phone</span> |
-    <span>🎚️ Change quality anytime</span>
-</div>
-
-<script>
-    let socket = null;
-    let reconnectAttempts = 0;
-    let videoElement = document.getElementById('liveStream');
-    let placeholder = document.getElementById('videoPlaceholder');
-    let liveBadge = document.getElementById('liveBadge');
-    
-    let frameCount = 0;
-    let lastTime = Date.now();
-    let totalBytes = 0;
-    let fpsInterval = null;
-    let currentQuality = '360';
-    let currentWidth = 480;
-    let currentHeight = 360;
-    
-    const statusDot = document.getElementById('statusDot');
-    const statusText = document.getElementById('statusText');
-    const deviceInfo = document.getElementById('deviceInfo');
-    const fpsSpan = document.getElementById('fps');
-    const resolutionSpan = document.getElementById('resolution');
-    const dataReceivedSpan = document.getElementById('dataReceived');
-    
-    // 🔴🔴🔴 RENDER URL - FIXED, NO IP NEEDED 🔴🔴🔴
-    const RENDER_URL = "wss://server-0cwb.onrender.com";
-    
-    // Quality buttons
-    const qualityBtns = document.querySelectorAll('.quality-btn');
-    qualityBtns.forEach(btn => {
-        btn.addEventListener('click', () => {
-            qualityBtns.forEach(b => b.classList.remove('active'));
-            btn.classList.add('active');
-            
-            currentQuality = btn.getAttribute('data-quality');
-            currentWidth = parseInt(btn.getAttribute('data-width'));
-            currentHeight = parseInt(btn.getAttribute('data-height'));
-            
-            resolutionSpan.innerText = `${currentWidth}x${currentHeight}`;
-            
-            // Send quality change request to server
-            if (socket && socket.readyState === WebSocket.OPEN) {
-                socket.send(JSON.stringify({
-                    type: 'setQuality',
-                    width: currentWidth,
-                    height: currentHeight,
-                    quality: parseInt(currentQuality)
-                }));
-            }
-        });
-    });
-    
-    function updateStatus(connected, message, deviceCount = 0) {
-        if (connected) {
-            statusDot.classList.add('connected');
-            statusText.innerHTML = '🟢 ' + message;
-            if (deviceCount > 0) {
-                deviceInfo.innerHTML = `📱 ${deviceCount} camera(s) online`;
-            } else {
-                deviceInfo.innerHTML = '📱 No cameras online';
-            }
-        } else {
-            statusDot.classList.remove('connected');
-            statusText.innerHTML = '🔴 ' + message;
-            deviceInfo.innerHTML = 'Waiting for connection...';
-        }
-    }
-    
-    function updateLiveStatus(isLive) {
-        if (isLive) {
-            liveBadge.classList.remove('hidden');
-            placeholder.style.display = 'none';
-            videoElement.style.display = 'block';
-            
-            if (fpsInterval) clearInterval(fpsInterval);
-            fpsInterval = setInterval(() => {
-                const now = Date.now();
-                const elapsed = (now - lastTime) / 1000;
-                const currentFps = Math.round(frameCount / elapsed);
-                fpsSpan.innerText = currentFps;
-                frameCount = 0;
-                lastTime = now;
-                dataReceivedSpan.innerText = (totalBytes / (1024 * 1024)).toFixed(1);
-            }, 1000);
-        } else {
-            liveBadge.classList.add('hidden');
-            placeholder.style.display = 'flex';
-            videoElement.style.display = 'none';
-            if (fpsInterval) clearInterval(fpsInterval);
-            fpsSpan.innerText = '0';
-            dataReceivedSpan.innerText = '0';
-        }
-    }
-    
-    function connectToRender() {
-        const viewerId = 'viewer_' + Math.random().toString(36).substr(2, 9);
-        const wsUrl = `${RENDER_URL}?type=viewer&id=${viewerId}`;
-        
-        updateStatus(false, 'Connecting to server...');
-        
-        try {
-            socket = new WebSocket(wsUrl);
-            
-            socket.onopen = () => {
-                console.log('✅ Connected to Render server');
-                updateStatus(true, 'Connected to server', 0);
-                reconnectAttempts = 0;
-                
-                // Send initial quality setting
-                socket.send(JSON.stringify({
-                    type: 'setQuality',
-                    width: currentWidth,
-                    height: currentHeight,
-                    quality: parseInt(currentQuality)
-                }));
-            };
-            
-            socket.onmessage = (event) => {
-                try {
-                    const data = JSON.parse(event.data);
-                    
-                    if (data.type === 'cameraList') {
-                        if (data.cameras && data.cameras.length > 0) {
-                            updateStatus(true, 'Server connected', data.cameras.length);
-                            deviceInfo.innerHTML = `📱 ${data.cameras.length} camera(s) online`;
-                            
-                            if (data.cameras[0] && socket.readyState === WebSocket.OPEN) {
-                                socket.send(JSON.stringify({
-                                    type: 'watch',
-                                    cameraId: data.cameras[0].id,
-                                    width: currentWidth,
-                                    height: currentHeight
-                                }));
-                            }
-                        } else {
-                            updateStatus(true, 'No cameras online', 0);
-                            updateLiveStatus(false);
-                        }
-                    }
-                    
-                    if (data.type === 'frame') {
-                        frameCount++;
-                        totalBytes += data.data ? data.data.length : 0;
-                        videoElement.src = `data:image/jpeg;base64,${data.data}`;
-                        updateLiveStatus(true);
-                    }
-                    
-                } catch (e) {
-                    if (event.data instanceof Blob) {
-                        frameCount++;
-                        totalBytes += event.data.size;
-                        const url = URL.createObjectURL(event.data);
-                        videoElement.src = url;
-                        updateLiveStatus(true);
-                    }
-                }
-            };
-            
-            socket.onclose = () => {
-                console.log('❌ Disconnected, reconnecting...');
-                updateStatus(false, 'Disconnected, reconnecting...');
-                updateLiveStatus(false);
-                socket = null;
-                
-                setTimeout(() => {
-                    if (reconnectAttempts < 10) {
-                        reconnectAttempts++;
-                        connectToRender();
-                    }
-                }, 5000);
-            };
-            
-            socket.onerror = (error) => {
-                console.log('WebSocket error:', error);
-                updateStatus(false, 'Connection error');
-            };
-            
-        } catch(e) {
-            updateStatus(false, 'Connection failed');
-            setTimeout(connectToRender, 10000);
-        }
-    }
-    
-    resolutionSpan.innerText = '480x360';
-    connectToRender();
-</script>
-</body>
-</html>        }
-
-        .status-dot {
-            width: 12px;
-            height: 12px;
-            border-radius: 50%;
-            background: #ff4444;
-            transition: all 0.3s ease;
-        }
-
-        .status-dot.connected {
-            background: #44ff44;
-            box-shadow: 0 0 10px #44ff44;
-            animation: pulse 1.5s infinite;
-        }
-
-        @keyframes pulse {
-            0%, 100% { opacity: 1; transform: scale(1); }
-            50% { opacity: 0.6; transform: scale(1.2); }
-        }
-
-        .status-text {
-            color: #fff;
-            font-size: 14px;
-        }
-
-        .video-section {
-            max-width: 900px;
-            margin: 0 auto;
-        }
-
-        .video-container {
-            background: #000;
-            border-radius: 20px;
-            overflow: hidden;
-            position: relative;
-            box-shadow: 0 10px 40px rgba(0,0,0,0.5);
-            border: 1px solid rgba(68,255,68,0.3);
-        }
-
-        .live-badge {
-            position: absolute;
-            top: 15px;
-            left: 15px;
-            background: #ff4444;
-            color: white;
-            padding: 6px 14px;
-            border-radius: 30px;
-            font-size: 12px;
-            font-weight: bold;
-            z-index: 10;
-            display: flex;
-            align-items: center;
-            gap: 6px;
-            animation: blink 1s infinite;
-        }
-
-        .live-badge.hidden {
-            display: none;
-        }
-
-        @keyframes blink {
-            0%, 100% { opacity: 1; }
-            50% { opacity: 0.6; }
-        }
-
-        video {
-            width: 100%;
-            height: auto;
-            display: block;
-            background: #000;
-        }
-
-        .placeholder {
-            aspect-ratio: 16/9;
-            background: linear-gradient(135deg, #111, #1a1a2e);
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            color: #666;
-            gap: 15px;
-        }
-
-        .placeholder-icon {
-            font-size: 64px;
-            opacity: 0.5;
-        }
-
-        .footer {
-            text-align: center;
-            margin-top: 40px;
-            color: #555;
-            font-size: 11px;
-        }
-
-        .reconnect-btn {
-            margin-top: 15px;
-            padding: 10px 20px;
-            background: rgba(68,255,68,0.2);
-            border: 1px solid #44ff44;
-            border-radius: 30px;
-            color: #44ff44;
-            cursor: pointer;
-        }
-    </style>
-</head>
-<body>
-
-<div class="header">
-    <div class="logo">📡</div>
-    <h1>LiveCam Pro</h1>
-    <div class="subtitle">Live stream from your phone camera</div>
-</div>
-
-<div class="status-container">
-    <div class="status-card">
-        <div class="status-indicator">
-            <div class="status-dot" id="statusDot"></div>
-            <span class="status-text" id="statusText">Connecting to server...</span>
-        </div>
-        <div class="device-info" id="deviceInfo">Waiting for camera</div>
-    </div>
-</div>
-
-<div class="video-section">
-    <div class="video-container">
-        <div class="live-badge hidden" id="liveBadge">🔴 LIVE</div>
-        <video id="liveStream" autoplay muted playsinline></video>
-        <div id="videoPlaceholder" class="placeholder" style="display: flex;">
-            <div class="placeholder-icon">🎥</div>
-            <div>No active camera stream</div>
-            <div style="font-size: 12px;">Ask someone to open the APK on their phone</div>
-        </div>
-    </div>
-</div>
-
-<div class="footer">
-    <span>🔒 Secure Connection</span> | 
-    <span>📱 APK required on phone</span>
-</div>
-
-<script>
-    let socket = null;
-    let reconnectAttempts = 0;
-    let videoElement = document.getElementById('liveStream');
-    let placeholder = document.getElementById('videoPlaceholder');
-    let liveBadge = document.getElementById('liveBadge');
-    
-    const statusDot = document.getElementById('statusDot');
-    const statusText = document.getElementById('statusText');
-    const deviceInfo = document.getElementById('deviceInfo');
-    
-    // 🔴🔴🔴 RENDER URL - FIXED, NO IP NEEDED 🔴🔴🔴
-    const RENDER_URL = "wss://server-0cwb.onrender.com";
-    
-    function updateStatus(connected, message, deviceCount = 0) {
-        if (connected) {
-            statusDot.classList.add('connected');
-            statusText.innerHTML = '🟢 ' + message;
-            if (deviceCount > 0) {
-                deviceInfo.innerHTML = `📱 ${deviceCount} camera(s) online`;
-            } else {
-                deviceInfo.innerHTML = '📱 No cameras online';
-            }
-        } else {
-            statusDot.classList.remove('connected');
-            statusText.innerHTML = '🔴 ' + message;
-            deviceInfo.innerHTML = 'Waiting for connection...';
-        }
-    }
-    
-    function updateLiveStatus(isLive) {
-        if (isLive) {
-            liveBadge.classList.remove('hidden');
-            placeholder.style.display = 'none';
-            videoElement.style.display = 'block';
-        } else {
-            liveBadge.classList.add('hidden');
-            placeholder.style.display = 'flex';
-            videoElement.style.display = 'none';
-        }
-    }
-    
-    function connectToRender() {
-        const viewerId = 'viewer_' + Math.random().toString(36).substr(2, 9);
-        const wsUrl = `${RENDER_URL}?type=viewer&id=${viewerId}`;
-        
-        updateStatus(false, 'Connecting to server...');
-        
-        try {
-            socket = new WebSocket(wsUrl);
-            
-            socket.onopen = () => {
-                console.log('✅ Connected to Render server');
-                updateStatus(true, 'Connected to server', 0);
-                reconnectAttempts = 0;
-            };
-            
-            socket.onmessage = (event) => {
-                try {
-                    const data = JSON.parse(event.data);
-                    
-                    if (data.type === 'cameraList') {
-                        if (data.cameras && data.cameras.length > 0) {
-                            updateStatus(true, 'Server connected', data.cameras.length);
-                            deviceInfo.innerHTML = `📱 ${data.cameras.length} camera(s) online`;
-                            
-                            // Auto watch first camera
-                            if (data.cameras[0] && socket.readyState === WebSocket.OPEN) {
-                                socket.send(JSON.stringify({
-                                    type: 'watch',
-                                    cameraId: data.cameras[0].id
-                                }));
-                            }
-                        } else {
-                            updateStatus(true, 'No cameras online', 0);
-                            updateLiveStatus(false);
-                        }
-                    }
-                    
-                    if (data.type === 'frame') {
-                        videoElement.src = `data:image/jpeg;base64,${data.frame}`;
-                        updateLiveStatus(true);
-                    }
-                    
-                } catch (e) {
-                    if (event.data instanceof Blob) {
-                        const url = URL.createObjectURL(event.data);
-                        videoElement.src = url;
-                        updateLiveStatus(true);
-                    }
-                }
-            };
-            
-            socket.onclose = () => {
-                console.log('❌ Disconnected, reconnecting...');
-                updateStatus(false, 'Disconnected, reconnecting...');
-                updateLiveStatus(false);
-                socket = null;
-                
-                setTimeout(() => {
-                    if (reconnectAttempts < 10) {
-                        reconnectAttempts++;
-                        connectToRender();
-                    }
-                }, 5000);
-            };
-            
-            socket.onerror = (error) => {
-                console.log('WebSocket error:', error);
-                updateStatus(false, 'Connection error');
-            };
-            
-        } catch(e) {
-            updateStatus(false, 'Connection failed');
-            setTimeout(connectToRender, 10000);
-        }
-    }
-    
-    // Auto connect on page load
-    connectToRender();
-</script>
-</body>
-</html>aceholder = document.getElementById('videoPlaceholder');
-    let liveBadge = document.getElementById('liveBadge');
-    
-    let frameCount = 0;
-    let lastTime = Date.now();
-    let totalBytes = 0;
-    let fpsInterval = null;
-    
-    // UI Elements
-    const statusDot = document.getElementById('statusDot');
-    const statusText = document.getElementById('statusText');
-    const deviceInfo = document.getElementById('deviceInfo');
-    const connectBtn = document.getElementById('connectBtn');
-    const ipInput = document.getElementById('ipInput');
-    const portInput = document.getElementById('portInput');
-    const statsPanel = document.getElementById('statsPanel');
-    const fpsSpan = document.getElementById('fps');
-    const latencySpan = document.getElementById('latency');
-    const dataReceivedSpan = document.getElementById('dataReceived');
-    
-    // Load saved IP
-    const savedIp = localStorage.getItem('savedPhoneIp');
-    if (savedIp) {
-        ipInput.value = savedIp;
-    }
-    
-    function updateStatus(connected, message, deviceId = null) {
-        if (connected) {
-            statusDot.classList.add('connected');
-            statusText.innerHTML = '🟢 ' + message;
-            deviceInfo.innerHTML = deviceId ? `📱 Device: ${deviceId.substring(0, 12)}...` : '📱 Connected';
-        } else {
-            statusDot.classList.remove('connected');
-            statusText.innerHTML = '🔴 ' + message;
-            deviceInfo.innerHTML = 'No device connected';
-        }
-    }
-    
-    function updateLiveStatus(isLive) {
-        if (isLive) {
-            liveBadge.classList.remove('hidden');
-            liveBadge.innerHTML = '🔴 LIVE';
-            liveBadge.style.background = '#ff4444';
-            placeholder.style.display = 'none';
-            videoElement.style.display = 'block';
-            statsPanel.style.display = 'flex';
-            
-            // Start FPS counter
-            if (fpsInterval) clearInterval(fpsInterval);
-            fpsInterval = setInterval(() => {
-                const now = Date.now();
-                const elapsed = (now - lastTime) / 1000;
-                const currentFps = Math.round(frameCount / elapsed);
-                fpsSpan.innerText = currentFps;
-                frameCount = 0;
-                lastTime = now;
-                
-                dataReceivedSpan.innerText = (totalBytes / (1024 * 1024)).toFixed(1);
-            }, 1000);
-            
-        } else {
-            liveBadge.classList.add('hidden');
-            placeholder.style.display = 'flex';
-            videoElement.style.display = 'none';
-            statsPanel.style.display = 'none';
-            if (fpsInterval) clearInterval(fpsInterval);
-        }
-    }
-    
-    function connectToPhone() {
-        let ip = ipInput.value.trim();
-        let port = portInput.value.trim();
-        
-        if (!ip) {
-            alert('Enter phone IP address');
-            return;
-        }
-        
-        const wsUrl = `ws://${ip}:${port}`;
-        localStorage.setItem('savedPhoneIp', ip);
-        
-        updateStatus(false, 'Connecting...');
-        
-        try {
-            socket = new WebSocket(wsUrl);
-            
-            socket.onopen = () => {
-                updateStatus(true, 'Connected to phone');
-                console.log('WebSocket connected');
-            };
-            
-            socket.onmessage = (event) => {
-                try {
-                    const data = JSON.parse(event.data);
-                    
-                    if (data.type === 'frame') {
-                        frameCount++;
-                        totalBytes += event.data.length;
-                        videoElement.src = `data:image/jpeg;base64,${data.data}`;
-                        updateLiveStatus(true);
-                        
-                    } else if (data.type === 'status') {
-                        updateStatus(true, data.message);
-                    }
-                    
-                } catch (e) {
-                    // Not JSON, maybe raw data
-                }
-            };
-            
-            socket.onclose = () => {
-                updateStatus(false, 'Disconnected');
-                updateLiveStatus(false);
-                socket = null;
-            };
-            
-            socket.onerror = (error) => {
-                updateStatus(false, 'Connection error');
-                updateLiveStatus(false);
-                socket = null;
-            };
-            
-        } catch(e) {
-            updateStatus(false, 'Invalid connection');
-        }
-    }
-    
-    function sendCommand(cmd) {
-        if (socket && socket.readyState === WebSocket.OPEN) {
-            socket.send(cmd);
-            statusText.innerHTML = '📨 Command sent: ' + cmd;
-            setTimeout(() => {
-                if (socket && socket.readyState === WebSocket.OPEN) {
-                    statusText.innerHTML = '🟢 Connected';
-                }
-            }, 1500);
-        } else {
-            alert('Connect to phone first!');
-        }
-    }
-    
-    connectBtn.onclick = connectToPhone;
-    document.getElementById('cmdStart').onclick = () => sendCommand('START');
-    document.getElementById('cmdStop').onclick = () => sendCommand('STOP');
-    document.getElementById('cmdStatus').onclick = () => sendCommand('STATUS');
-    
-    // Auto connect if IP exists
-    if (savedIp) {
-        setTimeout(() => {
-            if (confirm('Auto-connect to saved phone IP: ' + savedIp + '?')) {
-                connectToPhone();
-            }
-        }, 500);
-    }
-</script>
-</body>
-</html>            justify-content: center;
-            gap: 8px;
-        }
-
-        .status-dot {
-            width: 10px;
-            height: 10px;
-            border-radius: 50%;
-            background-color: #ff4444;
-            display: inline-block;
-            animation: pulse 1.5s infinite;
-        }
-
-        .status-dot.connected {
-            background-color: #44ff44;
-        }
-
-        @keyframes pulse {
-            0% { opacity: 0.5; transform: scale(0.8); }
-            100% { opacity: 1; transform: scale(1.2); }
-        }
-
-        .camera-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
-            gap: 20px;
-            max-width: 1400px;
-            margin: 0 auto;
-        }
-
-        .camera-card {
-            background: #1a1a1a;
-            border-radius: 16px;
-            overflow: hidden;
-            border: 2px solid #333;
-            transition: transform 0.2s, border-color 0.2s;
-        }
-
-        .camera-card:hover {
-            transform: translateY(-4px);
-        }
-
-        .camera-card.online {
-            border-color: #44ff44;
-        }
-
-        .camera-header {
-            background: #222;
-            padding: 14px 16px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-
-        .camera-name {
-            color: white;
-            font-weight: 600;
-            font-size: 14px;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-
-        .live-badge {
-            background: #ff4444;
-            color: white;
-            font-size: 10px;
-            padding: 2px 8px;
-            border-radius: 20px;
-            font-weight: bold;
-            animation: blink 1s infinite;
-        }
-
-        @keyframes blink {
-            0%, 100% { opacity: 1; }
-            50% { opacity: 0.5; }
-        }
-
-        .video-container {
-            background: #000;
-            min-height: 240px;
-            position: relative;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-        }
-
-        video {
-            width: 100%;
-            height: 240px;
-            object-fit: cover;
-        }
-
-        .placeholder {
-            color: #666;
-            text-align: center;
-            font-size: 14px;
-            padding: 40px;
-        }
-
-        .no-cameras {
-            text-align: center;
-            color: #666;
-            padding: 60px 20px;
-            background: #111;
-            border-radius: 16px;
-            margin: 20px;
-        }
-
-        .no-cameras-icon {
-            font-size: 48px;
-            margin-bottom: 16px;
-        }
-
-        .footer {
-            text-align: center;
-            color: #555;
-            font-size: 12px;
-            margin-top: 32px;
-            padding-top: 16px;
-            border-top: 1px solid #222;
-        }
-
-        @media (max-width: 768px) {
-            .camera-grid {
-                grid-template-columns: 1fr;
-            }
-            h1 {
-                font-size: 20px;
-            }
-        }
-    </style>
-</head>
-<body>
-
-<div class="header">
-    <h1>📡 Live Camera Streams</h1>
-    <div class="subtitle">
-        <span class="status-dot" id="statusDot"></span>
-        <span id="connectionStatus">Connecting to server...</span>
-    </div>
-</div>
-
-<div id="cameraGrid" class="camera-grid">
-    <div class="no-cameras">
-        <div class="no-cameras-icon">📭</div>
-        <div>No cameras online</div>
-        <div style="font-size: 12px; margin-top: 8px;">Ask someone to open the APK</div>
-    </div>
-</div>
-
-<div class="footer">
-    🔒 Secure WebSocket | 📱 APK se connect karein
-</div>
-
-<script>
-    // 🔴 YAHAN APNA RENDER URL DALO! 🔴
-    const RENDER_URL = "wss://server-0cwb.onrender.com";
-    
-    let ws = null;
-    let activeCameras = new Map();
-    let videoElements = new Map();
-    let reconnectAttempts = 0;
-    let viewersList = new Map();
-
-    function updateConnectionStatus(connected, message = '') {
-        const statusText = document.getElementById('connectionStatus');
-        const statusDot = document.getElementById('statusDot');
-        
-        if (connected) {
-            statusDot.classList.add('connected');
-            statusText.innerHTML = message || '🟢 Connected - Watching for cameras';
-            reconnectAttempts = 0;
-        } else {
-            statusDot.classList.remove('connected');
-            statusText.innerHTML = message || '🔴 Disconnected - Reconnecting...';
-        }
-    }
-
-    function connectToServer() {
-        const viewerId = 'viewer_' + Math.random().toString(36).substr(2, 9);
-        
-        try {
-            ws = new WebSocket(`${RENDER_URL}?type=viewer&id=${viewerId}`);
-            
-            ws.onopen = () => {
-                console.log('✅ Connected to Render server');
-                updateConnectionStatus(true);
-            };
-            
-            ws.onmessage = (event) => {
-                try {
-                    const data = JSON.parse(event.data);
-                    
-                    if (data.type === 'cameraList') {
-                        updateCameraList(data.cameras);
-                    } else if (data.type === 'frame') {
-                        displayFrame(data.cameraId, data.frame);
-                    }
-                } catch (e) {
-                    // If not JSON, might be binary data
-                    if (event.data instanceof Blob) {
-                        handleBinaryFrame(event.data);
-                    }
-                }
-            };
-            
-            ws.onclose = () => {
-                console.log('❌ Disconnected from server');
-                updateConnectionStatus(false);
-                
-                // Auto reconnect after 3 seconds
-                setTimeout(() => {
-                    if (reconnectAttempts < 10) {
-                        reconnectAttempts++;
-                        connectToServer();
-                    }
-                }, 3000);
-            };
-            
-            ws.onerror = (error) => {
-                console.error('WebSocket error:', error);
-                updateConnectionStatus(false, '⚠️ Connection error - Retrying...');
-            };
-            
-        } catch (error) {
-            console.error('Connection failed:', error);
-            updateConnectionStatus(false, '❌ Cannot connect to server');
-        }
-    }
-
-    function updateCameraList(cameras) {
-        const grid = document.getElementById('cameraGrid');
-        
-        if (!cameras || cameras.length === 0) {
-            grid.innerHTML = `
-                <div class="no-cameras">
-                    <div class="no-cameras-icon">📭</div>
-                    <div>No cameras online</div>
-                    <div style="font-size: 12px; margin-top: 8px;">Ask someone to open the APK</div>
-                </div>
-            `;
-            return;
-        }
-        
-        grid.innerHTML = '';
-        
-        cameras.forEach(camera => {
-            const card = document.createElement('div');
-            card.className = 'camera-card online';
-            card.id = `camera-${camera.id}`;
-            
-            card.innerHTML = `
-                <div class="camera-header">
-                    <div class="camera-name">
-                        📱 ${camera.name || camera.id.slice(0, 8)}
-                    </div>
-                    <div class="live-badge">LIVE</div>
-                </div>
-                <div class="video-container" id="video-container-${camera.id}">
-                    <div class="placeholder">📹 Waiting for stream...</div>
-                </div>
-            `;
-            
-            grid.appendChild(card);
-            activeCameras.set(camera.id, camera);
-            
-            // Request to watch this camera
-            if (ws && ws.readyState === WebSocket.OPEN) {
-                ws.send(JSON.stringify({
-                    type: 'watch',
-                    cameraId: camera.id
-                }));
-            }
-        });
-    }
-
-    function displayFrame(cameraId, base64Frame) {
-        const container = document.getElementById(`video-container-${cameraId}`);
-        if (!container) return;
-        
-        let video = videoElements.get(cameraId);
-        if (!video) {
-            video = document.createElement('video');
-            video.autoplay = true;
-            video.muted = true;
-            video.playsInline = true;
-            video.style.width = '100%';
-            video.style.height = '240px';
-            video.style.objectFit = 'cover';
-            container.innerHTML = '';
-            container.appendChild(video);
-            videoElements.set(cameraId, video);
-        }
-        
-        video.src = `data:image/jpeg;base64,${base64Frame}`;
-    }
-
-    function handleBinaryFrame(blob) {
-        // For binary frame handling (if needed)
-        console.log('Received binary frame of size:', blob.size);
-    }
-
-    // Start connection when page loads
-    connectToServer();
-    
-    // Keep connection alive
-    setInterval(() => {
-        if (ws && ws.readyState === WebSocket.OPEN) {
-            ws.send(JSON.stringify({ type: 'ping' }));
-        }
-    }, 30000);
-</script>
-
-</body>
-</html>            background: #333;
-            color: white;
-        }
-        button {
-            background: #00ff00;
-            cursor: pointer;
-            font-weight: bold;
-        }
-        .status {
-            padding: 10px;
-            margin: 10px;
-            border-radius: 10px;
-            background: #222;
-        }
-        .online { color: #00ff00; }
-        .offline { color: #ff0000; }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <h1>📱 Live Camera Stream</h1>
-        
-        <div class="status">
-            <span id="statusText">⚪ Not Connected</span>
-        </div>
-        
-        <video id="stream" autoplay muted playsinline></video>
-        
-        <div>
-            <input type="text" id="phoneIp" placeholder="Phone IP: 192.168.1.100:8080">
-            <button onclick="connect()">Connect to Phone</button>
-        </div>
-        
-        <div>
-            <button onclick="sendCommand('START')">📷 Start Camera</button>
-            <button onclick="sendCommand('STOP')">⏹️ Stop Camera</button>
-        </div>
-    </div>
-
-    <script>
-        let ws;
-        const video = document.getElementById('stream');
-        
-        function connect() {
-            let ip = document.getElementById('phoneIp').value;
-            if(!ip.includes(':8080')) ip = ip + ':8080';
-            
-            document.getElementById('statusText').innerHTML = '🟡 Connecting...';
-            
-            ws = new WebSocket(`ws://${ip}`);
-            
-            ws.onopen = () => {
-                document.getElementById('statusText').innerHTML = '🟢 Connected! Stream starting...';
-                document.getElementById('statusText').className = 'online';
-            };
-            
-            ws.onmessage = (event) => {
-                try {
-                    const data = JSON.parse(event.data);
-                    if(data.type === 'frame') {
-                        video.src = `data:image/jpeg;base64,${data.data}`;
-                    } else if(data.type === 'status') {
-                        document.getElementById('statusText').innerHTML = `📱 ${data.message}`;
-                    }
-                } catch(e) {}
-            };
-            
-            ws.onclose = () => {
-                document.getElementById('statusText').innerHTML = '🔴 Disconnected! Reconnect karein';
-                document.getElementById('statusText').className = 'offline';
-            };
-            
-            ws.onerror = () => {
-                document.getElementById('statusText').innerHTML = '❌ Connection error! Check IP and WiFi';
-            };
-        }
-        
-        function sendCommand(cmd) {
-            if(ws && ws.readyState === WebSocket.OPEN) {
-                ws.send(cmd);
-            } else {
-                alert('Pehle connect karo!');
-            }
-        }
-    </script>
-</body>
-  </html>
+</html>
