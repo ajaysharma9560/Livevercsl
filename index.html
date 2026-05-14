@@ -2,8 +2,8 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>LiveCam Pro - Multi Quality</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
+    <title>Live Camera Stream</title>
     <style>
         * {
             margin: 0;
@@ -12,49 +12,49 @@
         }
 
         body {
-            background: linear-gradient(135deg, #0a0a0a 0%, #1a1a2e 100%);
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #0a0a0a;
             min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
             padding: 20px;
         }
 
+        .container {
+            max-width: 800px;
+            width: 100%;
+            background: #1a1a2e;
+            border-radius: 20px;
+            overflow: hidden;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.5);
+            border: 1px solid rgba(68,255,68,0.3);
+        }
+
         .header {
+            background: linear-gradient(135deg, #0a0a0a, #1a1a2e);
+            padding: 20px;
             text-align: center;
-            margin-bottom: 30px;
         }
 
-        .logo {
-            font-size: 48px;
-            margin-bottom: 10px;
+        .header h1 {
+            color: #fff;
+            font-size: 24px;
+            margin-bottom: 8px;
         }
 
-        h1 {
-            color: #ffffff;
-            font-size: 28px;
-        }
-
-        .subtitle {
+        .header p {
             color: #888;
             font-size: 14px;
-            margin-top: 8px;
         }
 
-        .status-container {
-            max-width: 600px;
-            margin: 0 auto 20px auto;
-        }
-
-        .status-card {
-            background: rgba(20, 20, 40, 0.8);
-            backdrop-filter: blur(10px);
-            border-radius: 16px;
-            padding: 16px 24px;
+        .status-bar {
+            background: #111;
+            padding: 12px 20px;
             display: flex;
-            align-items: center;
             justify-content: space-between;
-            flex-wrap: wrap;
-            gap: 15px;
-            border: 1px solid rgba(255,255,255,0.1);
+            align-items: center;
+            border-bottom: 1px solid #333;
         }
 
         .status-indicator {
@@ -68,7 +68,7 @@
             height: 12px;
             border-radius: 50%;
             background: #ff4444;
-            transition: all 0.3s ease;
+            transition: all 0.3s;
         }
 
         .status-dot.connected {
@@ -86,6 +86,222 @@
             color: #fff;
             font-size: 14px;
         }
+
+        .device-info {
+            color: #888;
+            font-size: 12px;
+            font-family: monospace;
+        }
+
+        .video-container {
+            background: #000;
+            position: relative;
+            min-height: 400px;
+        }
+
+        video {
+            width: 100%;
+            height: auto;
+            display: block;
+        }
+
+        .placeholder {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            color: #666;
+            gap: 15px;
+            background: #000;
+        }
+
+        .placeholder-icon {
+            font-size: 64px;
+            opacity: 0.5;
+        }
+
+        .placeholder-text {
+            font-size: 14px;
+        }
+
+        .footer {
+            padding: 15px;
+            text-align: center;
+            background: #111;
+            border-top: 1px solid #333;
+        }
+
+        .footer span {
+            color: #555;
+            font-size: 11px;
+        }
+
+        .hidden {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <div class="header">
+        <h1>📡 Live Camera Stream</h1>
+        <p>Connect to your phone camera</p>
+    </div>
+
+    <div class="status-bar">
+        <div class="status-indicator">
+            <div class="status-dot" id="statusDot"></div>
+            <span class="status-text" id="statusText">Connecting...</span>
+        </div>
+        <div class="device-info" id="deviceInfo">No device</div>
+    </div>
+
+    <div class="video-container">
+        <video id="liveStream" autoplay muted playsinline></video>
+        <div id="placeholder" class="placeholder">
+            <div class="placeholder-icon">📷</div>
+            <div class="placeholder-text">Waiting for camera stream...</div>
+            <div class="placeholder-text" style="font-size: 12px;">Open the APK on your phone</div>
+        </div>
+    </div>
+
+    <div class="footer">
+        <span>🔒 Secure WebSocket Connection</span> | 
+        <span>📱 APK: Projwct</span> |
+        <span>🟢 Auto-reconnect</span>
+    </div>
+</div>
+
+<script>
+    // 🔴🔴🔴 RENDER URL - APK KE HISAB SE 🔴🔴🔴
+    const RENDER_URL = "wss://server-1-lkze.onrender.com";
+    
+    let socket = null;
+    let videoElement = document.getElementById('liveStream');
+    let placeholder = document.getElementById('placeholder');
+    let statusDot = document.getElementById('statusDot');
+    let statusText = document.getElementById('statusText');
+    let deviceInfo = document.getElementById('deviceInfo');
+    let reconnectAttempts = 0;
+    let currentCameraId = null;
+    let activeCameras = [];
+
+    function updateStatus(connected, message, deviceCount = 0) {
+        if (connected) {
+            statusDot.classList.add('connected');
+            statusText.innerHTML = '🟢 ' + message;
+            if (deviceCount > 0) {
+                deviceInfo.innerHTML = `📱 ${deviceCount} camera(s) online`;
+            } else {
+                deviceInfo.innerHTML = `📱 No cameras online`;
+            }
+        } else {
+            statusDot.classList.remove('connected');
+            statusText.innerHTML = '🔴 ' + message;
+            deviceInfo.innerHTML = 'No device connected';
+        }
+    }
+
+    function showStream() {
+        placeholder.classList.add('hidden');
+        videoElement.style.display = 'block';
+    }
+
+    function hideStream() {
+        placeholder.classList.remove('hidden');
+        videoElement.style.display = 'none';
+    }
+
+    function connectToRender() {
+        const viewerId = 'viewer_' + Math.random().toString(36).substr(2, 9);
+        const wsUrl = `${RENDER_URL}?type=viewer&id=${viewerId}`;
+        
+        updateStatus(false, 'Connecting to server...');
+        
+        try {
+            socket = new WebSocket(wsUrl);
+            
+            socket.onopen = () => {
+                console.log('✅ Connected to Render server');
+                updateStatus(true, 'Connected to server');
+                reconnectAttempts = 0;
+            };
+            
+            socket.onmessage = (event) => {
+                try {
+                    const data = JSON.parse(event.data);
+                    
+                    if (data.type === 'cameraList') {
+                        activeCameras = data.cameras || [];
+                        
+                        if (activeCameras.length > 0) {
+                            updateStatus(true, 'Server connected', activeCameras.length);
+                            
+                            if (currentCameraId === null && activeCameras[0]) {
+                                currentCameraId = activeCameras[0].id;
+                                socket.send(JSON.stringify({
+                                    type: 'watch',
+                                    cameraId: currentCameraId
+                                }));
+                                deviceInfo.innerHTML = `📱 Watching: ${currentCameraId.substring(0, 8)}...`;
+                            }
+                        } else {
+                            updateStatus(true, 'No cameras online', 0);
+                            hideStream();
+                        }
+                    }
+                    
+                    if (data.type === 'frame') {
+                        showStream();
+                        videoElement.src = `data:image/jpeg;base64,${data.frame}`;
+                    }
+                    
+                } catch (e) {
+                    if (event.data instanceof Blob) {
+                        showStream();
+                        const url = URL.createObjectURL(event.data);
+                        videoElement.src = url;
+                    }
+                }
+            };
+            
+            socket.onclose = () => {
+                console.log('❌ Disconnected, reconnecting...');
+                updateStatus(false, 'Disconnected, reconnecting...');
+                hideStream();
+                socket = null;
+                
+                setTimeout(() => {
+                    if (reconnectAttempts < 10) {
+                        reconnectAttempts++;
+                        connectToRender();
+                    }
+                }, 5000);
+            };
+            
+            socket.onerror = (error) => {
+                console.log('WebSocket error:', error);
+                updateStatus(false, 'Connection error');
+            };
+            
+        } catch(e) {
+            updateStatus(false, 'Connection failed');
+            setTimeout(connectToRender, 10000);
+        }
+    }
+    
+    // Auto connect on page load
+    connectToRender();
+</script>
+
+</body>
+</html>        }
 
         .device-info {
             color: #888;
