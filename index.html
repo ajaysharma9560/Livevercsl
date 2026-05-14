@@ -3,97 +3,208 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Neon Status</title>
+    <title>App Status Monitor</title>
     <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
         body {
-            background: #0a0a0a;
+            background: #0f172a;
+            min-height: 100vh;
             display: flex;
             justify-content: center;
             align-items: center;
-            min-height: 100vh;
-            font-family: 'Courier New', monospace;
+            font-family: Arial, sans-serif;
         }
-        .container { text-align: center; }
+        
+        .container {
+            background: #1e293b;
+            border-radius: 20px;
+            padding: 40px;
+            text-align: center;
+            min-width: 350px;
+        }
+        
+        /* Status Box - Sahi size mein */
         .status-box {
-            width: 250px;
-            height: 250px;
-            border-radius: 50%;
-            margin: 30px auto;
-            transition: all 0.3s;
+            width: 180px;
+            height: 180px;
+            border-radius: 20px;
+            margin: 20px auto;
+            transition: all 0.3s ease;
         }
+        
+        /* Red color - Jab app band hai */
         .status-box.red {
-            background: #ff0000;
-            box-shadow: 0 0 50px #ff0000, 0 0 100px #ff0000;
-            animation: pulseRed 1s infinite;
+            background-color: #ef4444;
+            box-shadow: 0 0 15px rgba(239,68,68,0.3);
         }
+        
+        /* Green color - Jab app active hai */
         .status-box.green {
-            background: #00ff00;
-            box-shadow: 0 0 50px #00ff00, 0 0 100px #00ff00;
-            animation: pulseGreen 1s infinite;
+            background-color: #22c55e;
+            box-shadow: 0 0 20px rgba(34,197,94,0.4);
         }
-        .status-box.checking { background: #333; box-shadow: 0 0 20px #666; }
-        @keyframes pulseRed {
-            0% { box-shadow: 0 0 50px #ff0000; }
-            50% { box-shadow: 0 0 100px #ff0000, 0 0 150px #ff0000; }
-            100% { box-shadow: 0 0 50px #ff0000; }
+        
+        /* Gray - Loading state */
+        .status-box.checking {
+            background-color: #475569;
         }
-        @keyframes pulseGreen {
-            0% { box-shadow: 0 0 50px #00ff00; }
-            50% { box-shadow: 0 0 100px #00ff00, 0 0 150px #00ff00; }
-            100% { box-shadow: 0 0 50px #00ff00; }
+        
+        .status-text {
+            font-size: 24px;
+            font-weight: bold;
+            margin: 15px 0;
         }
-        .status-text { font-size: 24px; font-weight: bold; margin-top: 20px; }
-        .red-text { color: #ff0000; text-shadow: 0 0 10px #ff0000; }
-        .green-text { color: #00ff00; text-shadow: 0 0 10px #00ff00; }
-        .info { color: #666; margin-top: 30px; font-size: 12px; }
+        
+        .status-text.red-text {
+            color: #ef4444;
+        }
+        
+        .status-text.green-text {
+            color: #22c55e;
+        }
+        
+        .device-info {
+            background: #0f172a;
+            padding: 15px;
+            border-radius: 10px;
+            margin: 20px 0;
+        }
+        
+        .device-info p {
+            color: #94a3b8;
+            font-size: 14px;
+            margin: 5px 0;
+        }
+        
+        .device-info span {
+            color: #f1f5f9;
+            font-weight: bold;
+        }
+        
         button {
-            margin-top: 20px;
-            padding: 10px 30px;
-            background: transparent;
-            color: #00ff00;
-            border: 2px solid #00ff00;
-            border-radius: 5px;
+            margin-top: 15px;
+            padding: 10px 24px;
+            background: #3b82f6;
+            color: white;
+            border: none;
+            border-radius: 8px;
             cursor: pointer;
-            font-family: monospace;
+            font-size: 14px;
         }
-        button:hover { background: #00ff00; color: black; }
-        h1 { color: #00ff00; margin-bottom: 20px; text-shadow: 0 0 10px #00ff00; }
+        
+        button:hover {
+            background: #2563eb;
+        }
+        
+        h1 {
+            color: #f1f5f9;
+            font-size: 24px;
+            margin-bottom: 20px;
+        }
+        
+        .badge {
+            display: inline-block;
+            padding: 4px 12px;
+            background: #0f172a;
+            border-radius: 20px;
+            font-size: 12px;
+            color: #94a3b8;
+            margin-top: 10px;
+        }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>⚡ NEON STATUS</h1>
+        <h1>📱 App Status Monitor</h1>
+        
+        <!-- Status Box -->
         <div class="status-box checking" id="statusBox"></div>
-        <div class="status-text" id="statusText">CHECKING...</div>
-        <div class="info">
-            <div>🕐 <span id="lastUpdate">--:--:--</span></div>
+        
+        <!-- Status Text -->
+        <div class="status-text" id="statusText">Checking...</div>
+        
+        <!-- Device Information -->
+        <div class="device-info">
+            <p>📱 <strong>Active Device:</strong> <span id="deviceId">None</span></p>
+            <p>🕐 <strong>Last Update:</strong> <span id="lastUpdate">--:--:--</span></p>
+            <p>🖥️ <strong>Server Time:</strong> <span id="serverTime">--:--:--</span></p>
         </div>
-        <button onclick="refreshStatus()">⟳ REFRESH</button>
+        
+        <div class="badge" id="deviceCount">No device connected</div>
+        
+        <button onclick="refreshStatus()">🔄 Refresh Now</button>
     </div>
+
     <script>
+        let activeDevices = new Set();  // Multiple devices track karne ke liye
+        
         async function checkStatus() {
             try {
-                const res = await fetch('/api/update-status');
-                const data = await res.json();
+                const response = await fetch('/api/update-status');
+                const data = await response.json();
+                
                 const box = document.getElementById('statusBox');
-                const text = document.getElementById('statusText');
-                if(data.status === 'active') {
+                const statusText = document.getElementById('statusText');
+                const deviceSpan = document.getElementById('deviceId');
+                const deviceCountSpan = document.getElementById('deviceCount');
+                
+                // Multiple devices handle karna
+                if(data.activeDevices && data.activeDevices.length > 0) {
+                    // Koi bhi device active hai to GREEN
                     box.className = 'status-box green';
-                    text.innerHTML = '◉ ACTIVE';
-                    text.className = 'status-text green-text';
+                    statusText.innerHTML = '✅ ACTIVE';
+                    statusText.className = 'status-text green-text';
+                    
+                    // Show active devices
+                    const deviceNames = data.activeDevices.join(', ');
+                    deviceSpan.innerHTML = deviceNames;
+                    deviceCountSpan.innerHTML = `📱 ${data.activeDevices.length} device(s) active`;
+                    
+                } else if(data.status === 'active') {
+                    // Single device active
+                    box.className = 'status-box green';
+                    statusText.innerHTML = '✅ ACTIVE';
+                    statusText.className = 'status-text green-text';
+                    deviceSpan.innerHTML = data.deviceId || 'Android Device';
+                    deviceCountSpan.innerHTML = '📱 1 device active';
+                    
                 } else {
+                    // No device active
                     box.className = 'status-box red';
-                    text.innerHTML = '◎ OFFLINE';
-                    text.className = 'status-text red-text';
+                    statusText.innerHTML = '❌ OFFLINE';
+                    statusText.className = 'status-text red-text';
+                    deviceSpan.innerHTML = 'None';
+                    deviceCountSpan.innerHTML = '⭕ No device connected';
                 }
+                
                 document.getElementById('lastUpdate').innerHTML = new Date().toLocaleTimeString();
-            } catch(e) {
+                document.getElementById('serverTime').innerHTML = new Date().toLocaleTimeString();
+                
+            } catch(error) {
+                console.error('Error:', error);
                 document.getElementById('statusBox').className = 'status-box red';
-                document.getElementById('statusText').innerHTML = '⚠ ERROR';
+                document.getElementById('statusText').innerHTML = '⚠️ ERROR';
+                document.getElementById('statusText').className = 'status-text red-text';
+                document.getElementById('deviceId').innerHTML = 'Connection failed';
+                document.getElementById('lastUpdate').innerHTML = new Date().toLocaleTimeString();
             }
         }
-        async function refreshStatus() { await checkStatus(); }
+        
+        async function refreshStatus() {
+            await checkStatus();
+            const btn = document.querySelector('button');
+            btn.textContent = '✓ Refreshed!';
+            setTimeout(() => {
+                btn.textContent = '🔄 Refresh Now';
+            }, 1500);
+        }
+        
+        // Har 5 second mein auto check
         setInterval(checkStatus, 5000);
         checkStatus();
     </script>
