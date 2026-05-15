@@ -198,8 +198,8 @@
         let startTime = null;
         let timerInterval = null;
         let phoneConnected = false;
+        let streamActive = false;
         
-        // ✅ WebRTC Configuration with TURN Servers
         const configuration = {
             iceServers: [
                 { urls: "stun:stun.l.google.com:19302" },
@@ -252,6 +252,7 @@
             deviceNameSpan.innerText = '—';
             deviceIdSpan.innerText = 'No device';
             phoneConnected = false;
+            streamActive = false;
             if (remoteVideo.srcObject) { remoteVideo.srcObject = null; }
             placeholder.classList.remove('hidden');
             isStreaming = false;
@@ -262,6 +263,7 @@
         function startStreamDisplay() {
             if (isStreaming) return;
             isStreaming = true;
+            streamActive = true;
             placeholder.classList.add('hidden');
             recIndicator.style.opacity = '1';
             startTimer();
@@ -269,6 +271,7 @@
         
         function stopStreamDisplay() {
             isStreaming = false;
+            streamActive = false;
             placeholder.classList.remove('hidden');
             recIndicator.style.opacity = '0.5';
             stopTimer();
@@ -283,7 +286,6 @@
                     const stream = event.streams[0];
                     if (remoteVideo.srcObject !== stream) {
                         remoteVideo.srcObject = stream;
-                        // ✅ Autoplay fix: manually call play()
                         remoteVideo.play().catch(e => console.log("Play error:", e));
                     }
                     startStreamDisplay();
@@ -308,12 +310,17 @@
         
         async function startWebRTC() {
             if (!phoneConnected) {
-                alert("No phone connected! Please open APK first.");
+                alert("❌ No phone connected! Please open APK first.");
                 return;
             }
+            
+            if (streamActive) {
+                alert("Stream already active!");
+                return;
+            }
+            
             if (!pc) await createPeerConnection();
             
-            // ✅ Fix: offerToReceiveVideo must be true
             const offer = await pc.createOffer({
                 offerToReceiveVideo: true,
                 offerToReceiveAudio: false
@@ -328,6 +335,7 @@
             if (pc) { pc.close(); pc = null; }
             if (remoteVideo.srcObject) { remoteVideo.srcObject = null; }
             stopStreamDisplay();
+            streamActive = false;
         }
         
         function initSocket() {
@@ -354,11 +362,20 @@
             socket.on('disconnect', () => { setDisconnected(); });
         }
         
-        playBtn.addEventListener('click', () => { startWebRTC(); });
-        stopBtn.addEventListener('click', () => { stopWebRTC(); });
+        // ✅ PLAY button click -> LIVE
+        playBtn.addEventListener('click', () => { 
+            startWebRTC(); 
+        });
+        
+        // ✅ STOP button click -> STOP
+        stopBtn.addEventListener('click', () => { 
+            stopWebRTC(); 
+        });
         
         setDisconnected();
         initSocket();
+        
+        console.log("✅ Website ready — PLAY button se live stream start hoga!");
     </script>
 </body>
 </html>
