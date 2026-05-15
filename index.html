@@ -280,7 +280,12 @@
             
             pc.ontrack = (event) => {
                 if (event.track.kind === 'video') {
-                    remoteVideo.srcObject = event.streams[0];
+                    const stream = event.streams[0];
+                    if (remoteVideo.srcObject !== stream) {
+                        remoteVideo.srcObject = stream;
+                        // ✅ Autoplay fix: manually call play()
+                        remoteVideo.play().catch(e => console.log("Play error:", e));
+                    }
                     startStreamDisplay();
                 }
             };
@@ -307,7 +312,12 @@
                 return;
             }
             if (!pc) await createPeerConnection();
-            const offer = await pc.createOffer();
+            
+            // ✅ Fix: offerToReceiveVideo must be true
+            const offer = await pc.createOffer({
+                offerToReceiveVideo: true,
+                offerToReceiveAudio: false
+            });
             await pc.setLocalDescription(offer);
             if (socket && socket.connected) {
                 socket.emit('signal', { room: ROOM_ID, from: 'web', signal: offer });
