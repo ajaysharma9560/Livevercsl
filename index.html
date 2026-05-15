@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>Live Camera Stream</title>
+    <title>Remote Camera</title>
     <style>
         * {
             margin: 0;
@@ -23,9 +23,9 @@
         
         .container {
             width: 100%;
-            max-width: 550px;
-            background: linear-gradient(145deg, #111 0%, #0a0a0a 100%);
-            border-radius: 32px;
+            max-width: 480px;
+            background: #0f0f0f;
+            border-radius: 28px;
             overflow: hidden;
             box-shadow: 0 20px 40px rgba(0,0,0,0.5);
             border: 1px solid #222;
@@ -33,78 +33,128 @@
         
         /* Header */
         .header {
-            padding: 20px 24px;
-            background: rgba(0,0,0,0.3);
+            padding: 16px 20px;
+            background: #141414;
             border-bottom: 1px solid #222;
+        }
+        
+        .header-top {
             display: flex;
             justify-content: space-between;
             align-items: center;
+            margin-bottom: 12px;
         }
         
-        .title {
+        .logo {
             font-size: 18px;
             font-weight: 600;
             color: #fff;
         }
         
-        /* Status Bar */
-        .status-bar {
-            background: #0f0f0f;
-            padding: 12px 20px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            border-bottom: 1px solid #1a1a1a;
-        }
-        
-        .status-item {
+        .status-badge {
             display: flex;
             align-items: center;
-            gap: 8px;
+            gap: 6px;
+            background: #1a1a1a;
+            padding: 4px 10px;
+            border-radius: 20px;
         }
         
         .dot {
-            width: 10px;
-            height: 10px;
+            width: 8px;
+            height: 8px;
             border-radius: 50%;
-            transition: all 0.2s ease;
         }
         
         .dot.red {
-            background-color: #ff4444;
-            box-shadow: 0 0 8px #ff4444;
+            background: #ff4444;
+            box-shadow: 0 0 6px #ff4444;
         }
         
         .dot.green {
-            background-color: #00ff88;
-            box-shadow: 0 0 8px #00ff88;
+            background: #00ff88;
+            box-shadow: 0 0 6px #00ff88;
         }
         
         .status-text {
             color: #fff;
-            font-size: 12px;
+            font-size: 11px;
             font-weight: 500;
+        }
+        
+        .device-info {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 12px;
         }
         
         .device-name {
             color: #00ff88;
-            font-size: 11px;
+            font-weight: 500;
+        }
+        
+        .device-id {
+            color: #666;
+            font-size: 10px;
             font-family: monospace;
         }
         
-        /* Video Container */
-        .video-wrapper {
-            padding: 20px;
+        /* Tools Bar */
+        .tools-bar {
+            padding: 12px 20px;
+            background: #141414;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid #222;
+            flex-wrap: wrap;
+            gap: 10px;
         }
         
+        .tools-left {
+            display: flex;
+            gap: 12px;
+        }
+        
+        .tool-btn {
+            background: #1a1a1a;
+            border: none;
+            color: #888;
+            padding: 6px 12px;
+            border-radius: 16px;
+            font-size: 11px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        
+        .tool-btn:active {
+            transform: scale(0.95);
+        }
+        
+        .quality-select {
+            background: #1a1a1a;
+            border: none;
+            color: #fff;
+            padding: 6px 10px;
+            border-radius: 16px;
+            font-size: 11px;
+            cursor: pointer;
+        }
+        
+        /* Video Container */
         .video-container {
+            padding: 20px;
+            background: #0a0a0a;
+        }
+        
+        .video-wrapper {
             background: #000;
-            border-radius: 20px;
+            border-radius: 16px;
             overflow: hidden;
             aspect-ratio: 16 / 9;
-            box-shadow: 0 8px 20px rgba(0,0,0,0.5);
-            border: 1px solid #222;
             position: relative;
+            border: 1px solid #222;
         }
         
         video {
@@ -132,102 +182,67 @@
             display: none;
         }
         
-        /* Controls Bar */
-        .controls-bar {
-            padding: 12px 20px;
-            background: #0f0f0f;
-            border-top: 1px solid #1a1a1a;
-            border-bottom: 1px solid #1a1a1a;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            flex-wrap: wrap;
-            gap: 10px;
-        }
-        
-        .quality-selector {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            background: #1a1a1a;
-            padding: 6px 12px;
-            border-radius: 20px;
-        }
-        
-        .quality-label {
-            color: #888;
-            font-size: 11px;
-        }
-        
-        select {
-            background: #222;
-            color: #fff;
-            border: 1px solid #333;
-            padding: 4px 8px;
-            border-radius: 12px;
-            font-size: 12px;
-            cursor: pointer;
-        }
-        
-        select:hover {
-            border-color: #00ff88;
-        }
-        
+        /* Action Buttons */
         .action-buttons {
+            padding: 16px 20px;
+            background: #141414;
             display: flex;
-            gap: 8px;
+            justify-content: center;
+            gap: 20px;
+            border-top: 1px solid #222;
         }
         
-        .btn {
-            padding: 6px 14px;
+        .action-btn {
+            padding: 12px 24px;
             border: none;
-            border-radius: 20px;
-            font-size: 11px;
-            font-weight: 500;
+            border-radius: 40px;
+            font-size: 14px;
+            font-weight: 600;
             cursor: pointer;
             transition: all 0.2s ease;
+            min-width: 100px;
         }
         
-        .btn-reconnect {
-            background: #1a1a1a;
+        .action-btn:active {
+            transform: scale(0.96);
+        }
+        
+        .btn-play {
+            background: linear-gradient(135deg, #00ff88, #00aa55);
+            color: #000;
+            box-shadow: 0 4px 12px rgba(0,255,136,0.3);
+        }
+        
+        .btn-stop {
+            background: linear-gradient(135deg, #ff4444, #aa0000);
             color: #fff;
-            border: 1px solid #333;
+            box-shadow: 0 4px 12px rgba(255,68,68,0.3);
         }
         
-        .btn-reconnect:active {
-            transform: scale(0.95);
+        .btn-disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
         }
         
-        /* Stats */
-        .stats-bar {
-            padding: 10px 20px;
+        /* Bottom Bar */
+        .bottom-bar {
+            padding: 12px 20px;
             background: #0a0a0a;
             display: flex;
             justify-content: space-between;
             align-items: center;
-            font-size: 10px;
+            border-top: 1px solid #1a1a1a;
+        }
+        
+        .rec-indicator {
+            color: #ff4444;
+            font-size: 11px;
+        }
+        
+        .timer {
+            color: #666;
+            font-size: 11px;
             font-family: monospace;
-            border-bottom: 1px solid #1a1a1a;
-        }
-        
-        .stat {
-            color: #555;
-        }
-        
-        .stat-value {
-            color: #00ff88;
-        }
-        
-        /* Footer */
-        .footer {
-            padding: 12px 20px;
-            text-align: center;
-            background: rgba(0,0,0,0.3);
-        }
-        
-        .footer-text {
-            color: #444;
-            font-size: 10px;
         }
     </style>
 </head>
@@ -235,60 +250,57 @@
     <div class="container">
         <!-- Header -->
         <div class="header">
-            <div class="title">📹 Live Camera Stream</div>
-            <div class="device-name" id="deviceName">—</div>
-        </div>
-        
-        <!-- Status Bar -->
-        <div class="status-bar">
-            <div class="status-item">
-                <div class="dot red" id="statusDot"></div>
-                <span class="status-text" id="statusText">Disconnected</span>
+            <div class="header-top">
+                <div class="logo">📹 Remote Camera</div>
+                <div class="status-badge">
+                    <div class="dot red" id="statusDot"></div>
+                    <span class="status-text" id="statusText">Disconnected</span>
+                </div>
             </div>
-            <div class="status-item">
-                <span class="device-name" id="roomId">camera_room_123</span>
+            <div class="device-info">
+                <span class="device-name" id="deviceName">—</span>
+                <span class="device-id" id="deviceId">No device</span>
             </div>
         </div>
         
-        <!-- Stats Bar -->
-        <div class="stats-bar">
-            <div class="stat">📡 <span class="stat-value" id="connectionType">—</span></div>
-            <div class="stat">⚡ <span class="stat-value" id="bitrate">0</span> kbps</div>
-            <div class="stat">🎬 <span class="stat-value" id="resolution">—</span></div>
+        <!-- Tools -->
+        <div class="tools-bar">
+            <div class="tools-left">
+                <button class="tool-btn" id="toolsBtn">⚙️ Tools</button>
+                <button class="tool-btn" id="appBtn">📱 App</button>
+                <button class="tool-btn" id="logoutBtn">🚪 Logout</button>
+            </div>
+            <select class="quality-select" id="qualitySelect">
+                <option value="144">144p</option>
+                <option value="240">240p</option>
+                <option value="360" selected>360p</option>
+                <option value="480">480p</option>
+                <option value="720">720p</option>
+            </select>
         </div>
         
-        <!-- Video Container -->
-        <div class="video-wrapper">
-            <div class="video-container">
+        <!-- Video -->
+        <div class="video-container">
+            <div class="video-wrapper">
                 <video id="remoteVideo" autoplay playsinline muted></video>
                 <div class="video-placeholder" id="placeholder">
-                    <div>📱</div>
-                    <div>Waiting for device...</div>
-                    <div style="font-size: 11px;">Connect your phone to start streaming</div>
+                    <div>📷</div>
+                    <div>No active stream</div>
+                    <div style="font-size: 11px;">Tap PLAY to start</div>
                 </div>
             </div>
         </div>
         
-        <!-- Controls Bar -->
-        <div class="controls-bar">
-            <div class="quality-selector">
-                <span class="quality-label">🎥 Quality</span>
-                <select id="qualitySelect">
-                    <option value="160">144p (160x120)</option>
-                    <option value="320">240p (320x240)</option>
-                    <option value="480" selected>360p (480x360)</option>
-                    <option value="640">480p (640x480)</option>
-                    <option value="854">720p (854x480)</option>
-                </select>
-            </div>
-            <div class="action-buttons">
-                <button class="btn btn-reconnect" id="reconnectBtn">⟳ Reconnect</button>
-            </div>
+        <!-- Action Buttons -->
+        <div class="action-buttons">
+            <button class="action-btn btn-play" id="playBtn">▶ PLAY</button>
+            <button class="action-btn btn-stop" id="stopBtn">⏹ STOP</button>
         </div>
         
-        <!-- Footer -->
-        <div class="footer">
-            <div class="footer-text">Secure WebRTC • Peer-to-Peer</div>
+        <!-- Bottom Bar -->
+        <div class="bottom-bar">
+            <span class="rec-indicator" id="recIndicator">● REC</span>
+            <span class="timer" id="timer">00:00:00</span>
         </div>
     </div>
 
@@ -301,17 +313,20 @@
         const statusDot = document.getElementById('statusDot');
         const statusText = document.getElementById('statusText');
         const deviceNameSpan = document.getElementById('deviceName');
+        const deviceIdSpan = document.getElementById('deviceId');
         const placeholder = document.getElementById('placeholder');
-        const connectionTypeSpan = document.getElementById('connectionType');
-        const bitrateSpan = document.getElementById('bitrate');
-        const resolutionSpan = document.getElementById('resolution');
+        const playBtn = document.getElementById('playBtn');
+        const stopBtn = document.getElementById('stopBtn');
         const qualitySelect = document.getElementById('qualitySelect');
+        const recIndicator = document.getElementById('recIndicator');
+        const timerSpan = document.getElementById('timer');
         
         let pc = null;
         let socket = null;
-        let currentResolution = 480; // Default 360p
+        let isStreaming = false;
+        let startTime = null;
+        let timerInterval = null;
         
-        // WebRTC Configuration with TURN Servers
         const configuration = {
             iceServers: [
                 { urls: "stun:stun.l.google.com:19302" },
@@ -326,47 +341,79 @@
                     username: "openrelayproject",
                     credential: "openrelayproject"
                 }
-            ],
-            iceCandidatePoolSize: 10
+            ]
         };
         
-        function getResolutionFromSelect() {
-            const val = parseInt(qualitySelect.value);
-            switch(val) {
-                case 160: return { width: 160, height: 120 };
-                case 320: return { width: 320, height: 240 };
-                case 480: return { width: 480, height: 360 };
-                case 640: return { width: 640, height: 480 };
-                case 854: return { width: 854, height: 480 };
-                default: return { width: 480, height: 360 };
+        function updateTimer() {
+            if (!startTime) {
+                timerSpan.innerText = "00:00:00";
+                return;
             }
+            const elapsed = Math.floor((Date.now() - startTime) / 1000);
+            const hours = Math.floor(elapsed / 3600);
+            const minutes = Math.floor((elapsed % 3600) / 60);
+            const seconds = elapsed % 60;
+            timerSpan.innerText = `${hours.toString().padStart(2,'0')}:${minutes.toString().padStart(2,'0')}:${seconds.toString().padStart(2,'0')}`;
         }
         
-        function updateResolutionDisplay() {
-            const res = getResolutionFromSelect();
-            resolutionSpan.innerText = `${res.width}x${res.height}`;
+        function startTimer() {
+            if (timerInterval) clearInterval(timerInterval);
+            startTime = Date.now();
+            updateTimer();
+            timerInterval = setInterval(updateTimer, 1000);
         }
         
-        function setConnected(deviceName = null) {
+        function stopTimer() {
+            if (timerInterval) {
+                clearInterval(timerInterval);
+                timerInterval = null;
+            }
+            startTime = null;
+            updateTimer();
+        }
+        
+        function setConnected(deviceName = null, deviceId = null) {
             statusDot.className = 'dot green';
-            statusText.innerText = 'LIVE';
-            placeholder.classList.add('hidden');
-            if (deviceName) {
-                deviceNameSpan.innerText = deviceName;
-            }
-            connectionTypeSpan.innerText = 'WebRTC';
+            statusText.innerText = 'Connected';
+            if (deviceName) deviceNameSpan.innerText = deviceName;
+            if (deviceId) deviceIdSpan.innerText = deviceId;
         }
         
         function setDisconnected() {
             statusDot.className = 'dot red';
             statusText.innerText = 'Disconnected';
             deviceNameSpan.innerText = '—';
-            placeholder.classList.remove('hidden');
-            connectionTypeSpan.innerText = '—';
-            bitrateSpan.innerText = '0';
+            deviceIdSpan.innerText = 'No device';
             if (remoteVideo.srcObject) {
                 remoteVideo.srcObject = null;
             }
+            placeholder.classList.remove('hidden');
+            isStreaming = false;
+            recIndicator.style.opacity = '0.5';
+            stopTimer();
+        }
+        
+        function startStream() {
+            if (isStreaming) return;
+            isStreaming = true;
+            placeholder.classList.add('hidden');
+            recIndicator.style.opacity = '1';
+            startTimer();
+        }
+        
+        function stopStream() {
+            if (pc) {
+                pc.close();
+                pc = null;
+            }
+            if (remoteVideo.srcObject) {
+                remoteVideo.srcObject = null;
+            }
+            isStreaming = false;
+            placeholder.classList.remove('hidden');
+            recIndicator.style.opacity = '0.5';
+            stopTimer();
+            setDisconnected();
         }
         
         async function createPeerConnection() {
@@ -379,12 +426,12 @@
             pc.ontrack = (event) => {
                 if (event.track.kind === 'video') {
                     remoteVideo.srcObject = event.streams[0];
-                    setConnected();
+                    startStream();
                 }
             };
             
             pc.onicecandidate = (event) => {
-                if (event.candidate && socket) {
+                if (event.candidate && socket && socket.connected) {
                     socket.emit('signal', {
                         room: ROOM_ID,
                         from: 'web',
@@ -395,25 +442,44 @@
             
             pc.oniceconnectionstatechange = () => {
                 if (pc.iceConnectionState === 'connected') {
-                    connectionTypeSpan.innerText = 'P2P';
                     setConnected();
                 } else if (pc.iceConnectionState === 'disconnected' || 
-                           pc.iceConnectionState === 'failed' ||
-                           pc.iceConnectionState === 'closed') {
-                    setDisconnected();
+                           pc.iceConnectionState === 'failed') {
+                    stopStream();
                 }
-            };
-            
-            pc.onsignalingstatechange = () => {
-                console.log('Signaling state:', pc.signalingState);
             };
             
             return pc;
         }
         
-        async function start() {
-            setDisconnected();
-            updateResolutionDisplay();
+        async function startWebRTC() {
+            if (!socket || !socket.connected) {
+                initSocket();
+            }
+            
+            if (pc) {
+                pc.close();
+                pc = null;
+            }
+            
+            await createPeerConnection();
+            
+            const offer = await pc.createOffer();
+            await pc.setLocalDescription(offer);
+            
+            if (socket && socket.connected) {
+                socket.emit('signal', {
+                    room: ROOM_ID,
+                    from: 'web',
+                    signal: offer
+                });
+            }
+        }
+        
+        function initSocket() {
+            if (socket) {
+                socket.disconnect();
+            }
             
             socket = io(SIGNAL_SERVER, {
                 transports: ['websocket'],
@@ -423,31 +489,12 @@
             });
             
             socket.on('connect', () => {
-                console.log('Connected to signal server');
                 socket.emit('join-room', ROOM_ID, 'web');
             });
             
             socket.on('user-joined', async (userId) => {
-                console.log('Phone joined:', userId);
-                
-                if (!pc) await createPeerConnection();
-                
-                // Set video constraints based on quality
-                const res = getResolutionFromSelect();
-                const constraints = {
-                    offerToReceiveVideo: true,
-                    offerToReceiveAudio: false,
-                    voiceActivityDetection: false
-                };
-                
-                const offer = await pc.createOffer(constraints);
-                await pc.setLocalDescription(offer);
-                
-                socket.emit('signal', {
-                    room: ROOM_ID,
-                    from: 'web',
-                    signal: offer
-                });
+                setConnected('OPPO CPH2061', userId.substring(0, 8));
+                await startWebRTC();
             });
             
             socket.on('signal', async (data) => {
@@ -461,12 +508,7 @@
             });
             
             socket.on('user-left', () => {
-                if (pc) {
-                    pc.close();
-                    pc = null;
-                }
-                remoteVideo.srcObject = null;
-                setDisconnected();
+                stopStream();
             });
             
             socket.on('disconnect', () => {
@@ -474,40 +516,42 @@
             });
         }
         
-        // Quality change handler
-        qualitySelect.addEventListener('change', () => {
-            updateResolutionDisplay();
-            // Reconnect to apply new quality
-            if (pc) {
-                pc.close();
-                pc = null;
+        // Play Button
+        playBtn.addEventListener('click', () => {
+            if (!isStreaming) {
+                startWebRTC();
             }
-            start();
         });
         
-        // Reconnect button
-        document.getElementById('reconnectBtn').addEventListener('click', () => {
-            if (pc) {
-                pc.close();
-                pc = null;
+        // Stop Button
+        stopBtn.addEventListener('click', () => {
+            if (isStreaming) {
+                stopStream();
+                if (pc) {
+                    pc.close();
+                    pc = null;
+                }
             }
-            if (socket) {
-                socket.disconnect();
-            }
-            start();
         });
         
-        // Simulate bitrate (for display)
-        setInterval(() => {
-            if (pc && pc.iceConnectionState === 'connected') {
-                const randomBitrate = Math.floor(Math.random() * 500) + 200;
-                bitrateSpan.innerText = randomBitrate;
-            } else {
-                bitrateSpan.innerText = '0';
-            }
-        }, 2000);
+        // Tools button
+        document.getElementById('toolsBtn').addEventListener('click', () => {
+            alert('Tools menu');
+        });
         
-        start();
+        document.getElementById('appBtn').addEventListener('click', () => {
+            alert('App info');
+        });
+        
+        document.getElementById('logoutBtn').addEventListener('click', () => {
+            if (socket) socket.disconnect();
+            stopStream();
+            setDisconnected();
+        });
+        
+        // Initialize
+        setDisconnected();
+        initSocket();
     </script>
 </body>
 </html>
