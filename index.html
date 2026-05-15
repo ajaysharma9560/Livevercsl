@@ -1,93 +1,265 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-  <title>Live Camera Status</title>
-  <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
-
-  <style>
-    body {
-      margin: 0;
-      background: #0f0f0f;
-      font-family: Arial;
-      display: flex;
-      justify-content: center;
-      align-items: center;
-      height: 100vh;
-      color: white;
-    }
-
-    .card {
-      background: #1c1c1c;
-      padding: 30px;
-      border-radius: 15px;
-      width: 300px;
-      text-align: center;
-      box-shadow: 0 0 20px rgba(0,0,0,0.5);
-    }
-
-    .status {
-      font-size: 22px;
-      font-weight: bold;
-      margin-bottom: 15px;
-    }
-
-    .online { color: #00ff6a; }
-    .offline { color: #ff3b3b; }
-
-    .dot {
-      width: 12px;
-      height: 12px;
-      border-radius: 50%;
-      display: inline-block;
-      margin-right: 8px;
-    }
-
-    .green { background: #00ff6a; }
-    .red { background: #ff3b3b; }
-
-    .ip {
-      margin-top: 10px;
-      font-size: 16px;
-      color: #bbb;
-    }
-  </style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Live Camera Stream</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            background: #000000;
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            padding: 16px;
+        }
+        
+        .container {
+            width: 100%;
+            max-width: 600px;
+            margin: 0 auto;
+        }
+        
+        .video-wrapper {
+            position: relative;
+            background: #1a1a1a;
+            border-radius: 24px;
+            overflow: hidden;
+            aspect-ratio: 16 / 9;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.3);
+        }
+        
+        video {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+        
+        .status-card {
+            margin-top: 20px;
+            background: #1e1e1e;
+            border-radius: 16px;
+            padding: 16px;
+            text-align: center;
+        }
+        
+        .status-indicator {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            margin-bottom: 12px;
+        }
+        
+        .dot {
+            width: 14px;
+            height: 14px;
+            border-radius: 50%;
+            transition: all 0.3s ease;
+        }
+        
+        .dot.red { 
+            background-color: #ff3333; 
+            box-shadow: 0 0 12px #ff3333;
+        }
+        .dot.green { 
+            background-color: #00ff88; 
+            box-shadow: 0 0 12px #00ff88;
+        }
+        
+        .status-text {
+            color: #fff;
+            font-size: 14px;
+            font-weight: 500;
+        }
+        
+        .room-info {
+            color: #666;
+            font-size: 12px;
+            margin-top: 8px;
+            word-break: break-all;
+        }
+        
+        .device-name {
+            margin-top: 12px;
+            padding: 8px;
+            background: #2a2a2a;
+            border-radius: 12px;
+            color: #00ff88;
+            font-size: 13px;
+            font-weight: 500;
+        }
+        
+        .footer {
+            margin-top: 20px;
+            text-align: center;
+            color: #444;
+            font-size: 11px;
+        }
+        
+        .hidden {
+            display: none;
+        }
+    </style>
 </head>
-
 <body>
+    <div class="container">
+        <div class="video-wrapper">
+            <video id="remoteVideo" autoplay playsinline muted></video>
+        </div>
+        
+        <div class="status-card">
+            <div class="status-indicator">
+                <div class="dot red" id="statusDot"></div>
+                <span class="status-text" id="statusText">Disconnected</span>
+            </div>
+            <div class="room-info" id="roomInfo">📡 Channel: camera_room_123</div>
+            <div class="device-name" id="deviceName">—</div>
+        </div>
+        <div class="footer">
+            Live Camera Stream • WebRTC
+        </div>
+    </div>
 
-<div class="card">
-  <div id="statusText" class="status offline">
-    <span class="dot red"></span> OFFLINE
-  </div>
-
-  <div class="ip" id="ipText">
-    IP: Not Connected
-  </div>
-</div>
-
-<script>
-  const socket = io("https://server-2-hwtd.onrender.com", {
-    transports: ["websocket"]
-  });
-
-  const statusText = document.getElementById("statusText");
-  const ipText = document.getElementById("ipText");
-
-  socket.on("connect", () => {
-    statusText.innerHTML = '<span class="dot green"></span> ONLINE';
-    statusText.className = "status online";
-  });
-
-  socket.on("disconnect", () => {
-    statusText.innerHTML = '<span class="dot red"></span> OFFLINE';
-    statusText.className = "status offline";
-    ipText.innerText = "IP: Not Connected";
-  });
-
-  socket.on("client-info", (data) => {
-    ipText.innerText = "IP: " + data.ip;
-  });
-</script>
-
+    <script src="https://cdn.socket.io/4.6.1/socket.io.min.js"></script>
+    <script>
+        // ========== CONFIGURATION ==========
+        const ROOM_ID = "camera_room_123";
+        const SIGNAL_SERVER = "https://server-2-hwtd.onrender.com";
+        // ===================================
+        
+        const remoteVideo = document.getElementById('remoteVideo');
+        const statusDot = document.getElementById('statusDot');
+        const statusText = document.getElementById('statusText');
+        const roomInfo = document.getElementById('roomInfo');
+        const deviceNameSpan = document.getElementById('deviceName');
+        
+        let pc = null;
+        let socket = null;
+        
+        roomInfo.innerText = `📡 Channel: ${ROOM_ID}`;
+        
+        const configuration = {
+            iceServers: [
+                { urls: "stun:stun.l.google.com:19302" },
+                { urls: "stun:stun1.l.google.com:19302" }
+            ]
+        };
+        
+        function setConnected(deviceName = null) {
+            statusDot.className = 'dot green';
+            statusText.innerText = 'Connected';
+            if (deviceName) {
+                deviceNameSpan.innerText = `📱 ${deviceName}`;
+            }
+        }
+        
+        function setDisconnected() {
+            statusDot.className = 'dot red';
+            statusText.innerText = 'Disconnected';
+            deviceNameSpan.innerText = '—';
+            if (remoteVideo.srcObject) {
+                remoteVideo.srcObject = null;
+            }
+        }
+        
+        async function createPeerConnection() {
+            if (pc) {
+                pc.close();
+            }
+            
+            pc = new RTCPeerConnection(configuration);
+            
+            pc.ontrack = (event) => {
+                if (event.track.kind === 'video') {
+                    remoteVideo.srcObject = event.streams[0];
+                    setConnected();
+                }
+            };
+            
+            pc.onicecandidate = (event) => {
+                if (event.candidate) {
+                    socket.emit('signal', {
+                        room: ROOM_ID,
+                        from: 'web',
+                        signal: event.candidate
+                    });
+                }
+            };
+            
+            pc.oniceconnectionstatechange = () => {
+                if (pc.iceConnectionState === 'connected') {
+                    setConnected();
+                } else if (pc.iceConnectionState === 'disconnected' || 
+                           pc.iceConnectionState === 'failed' ||
+                           pc.iceConnectionState === 'closed') {
+                    setDisconnected();
+                }
+            };
+            
+            return pc;
+        }
+        
+        function start() {
+            setDisconnected();
+            
+            socket = io(SIGNAL_SERVER, {
+                transports: ['websocket'],
+                reconnection: true,
+                reconnectionAttempts: 10,
+                reconnectionDelay: 2000
+            });
+            
+            socket.on('connect', () => {
+                socket.emit('join-room', ROOM_ID, 'web');
+            });
+            
+            socket.on('user-joined', async (userId) => {
+                if (!pc) await createPeerConnection();
+                
+                const offer = await pc.createOffer();
+                await pc.setLocalDescription(offer);
+                
+                socket.emit('signal', {
+                    room: ROOM_ID,
+                    from: 'web',
+                    signal: offer
+                });
+            });
+            
+            socket.on('signal', async (data) => {
+                if (!pc) await createPeerConnection();
+                
+                if (data.signal.type === 'answer') {
+                    await pc.setRemoteDescription(new RTCSessionDescription(data.signal));
+                    setConnected();
+                } else if (data.signal.candidate) {
+                    await pc.addIceCandidate(new RTCIceCandidate(data.signal));
+                }
+            });
+            
+            socket.on('user-left', () => {
+                if (pc) {
+                    pc.close();
+                    pc = null;
+                }
+                remoteVideo.srcObject = null;
+                setDisconnected();
+            });
+            
+            socket.on('disconnect', () => {
+                setDisconnected();
+            });
+        }
+        
+        start();
+    </script>
 </body>
 </html>
