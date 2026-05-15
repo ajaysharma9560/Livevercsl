@@ -60,11 +60,8 @@
             padding: 12px 20px;
             background: #141414;
             display: flex;
-            justify-content: space-between;
-            align-items: center;
+            justify-content: flex-end;
             border-bottom: 1px solid #222;
-            flex-wrap: wrap;
-            gap: 10px;
         }
         .quality-select {
             background: #1a1a1a;
@@ -201,14 +198,22 @@
         let startTime = null;
         let timerInterval = null;
         let phoneConnected = false;
-        let peerConnectionCreated = false;
         
+        // ✅ WebRTC Configuration with TURN Servers
         const configuration = {
             iceServers: [
                 { urls: "stun:stun.l.google.com:19302" },
                 { urls: "stun:stun1.l.google.com:19302" },
-                { urls: "turn:openrelay.metered.ca:80", username: "openrelayproject", credential: "openrelayproject" },
-                { urls: "turn:openrelay.metered.ca:443", username: "openrelayproject", credential: "openrelayproject" }
+                {
+                    urls: "turn:openrelay.metered.ca:80",
+                    username: "openrelayproject",
+                    credential: "openrelayproject"
+                },
+                {
+                    urls: "turn:openrelay.metered.ca:443",
+                    username: "openrelayproject",
+                    credential: "openrelayproject"
+                }
             ]
         };
         
@@ -247,7 +252,6 @@
             deviceNameSpan.innerText = '—';
             deviceIdSpan.innerText = 'No device';
             phoneConnected = false;
-            peerConnectionCreated = false;
             if (remoteVideo.srcObject) { remoteVideo.srcObject = null; }
             placeholder.classList.remove('hidden');
             isStreaming = false;
@@ -273,7 +277,6 @@
         async function createPeerConnection() {
             if (pc) { pc.close(); }
             pc = new RTCPeerConnection(configuration);
-            peerConnectionCreated = true;
             
             pc.ontrack = (event) => {
                 if (event.track.kind === 'video') {
@@ -289,7 +292,6 @@
             };
             
             pc.oniceconnectionstatechange = () => {
-                console.log('ICE state:', pc.iceConnectionState);
                 if (pc.iceConnectionState === 'connected') {
                     setConnected();
                 } else if (pc.iceConnectionState === 'disconnected' || pc.iceConnectionState === 'failed') {
@@ -304,9 +306,7 @@
                 alert("No phone connected! Please open APK first.");
                 return;
             }
-            if (!pc || !peerConnectionCreated) {
-                await createPeerConnection();
-            }
+            if (!pc) await createPeerConnection();
             const offer = await pc.createOffer();
             await pc.setLocalDescription(offer);
             if (socket && socket.connected) {
@@ -316,7 +316,6 @@
         
         function stopWebRTC() {
             if (pc) { pc.close(); pc = null; }
-            peerConnectionCreated = false;
             if (remoteVideo.srcObject) { remoteVideo.srcObject = null; }
             stopStreamDisplay();
         }
@@ -352,4 +351,4 @@
         initSocket();
     </script>
 </body>
-        </html>
+</html>
