@@ -5,153 +5,78 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
     <title>Live Camera Stream</title>
     <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-        
+        * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
             background: #0a0a0a;
             min-height: 100vh;
             display: flex;
             justify-content: center;
             align-items: center;
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            font-family: sans-serif;
             padding: 20px;
         }
-        
         .container {
             width: 100%;
             max-width: 500px;
-            background: linear-gradient(145deg, #111 0%, #0a0a0a 100%);
+            background: #111;
             border-radius: 32px;
             overflow: hidden;
-            box-shadow: 0 20px 40px rgba(0,0,0,0.5);
             border: 1px solid #222;
         }
-        
         .header {
-            padding: 20px 24px;
-            background: rgba(0,0,0,0.3);
+            padding: 20px;
+            text-align: center;
             border-bottom: 1px solid #222;
         }
-        
         .title {
             font-size: 20px;
             font-weight: 600;
             color: #fff;
         }
-        
         .status-bar {
-            background: #0f0f0f;
-            padding: 12px 20px;
+            padding: 15px;
             display: flex;
-            justify-content: space-between;
+            justify-content: center;
             align-items: center;
-            border-bottom: 1px solid #1a1a1a;
+            gap: 10px;
+            border-bottom: 1px solid #222;
         }
-        
-        .status-item {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-        
         .dot {
-            width: 10px;
-            height: 10px;
+            width: 14px;
+            height: 14px;
             border-radius: 50%;
-            transition: all 0.2s ease;
         }
-        
-        .dot.red {
-            background-color: #ff4444;
-            box-shadow: 0 0 8px #ff4444;
-        }
-        
-        .dot.green {
-            background-color: #00ff88;
-            box-shadow: 0 0 8px #00ff88;
-        }
-        
-        .status-text {
-            color: #fff;
-            font-size: 12px;
-            font-weight: 500;
-        }
-        
-        .video-wrapper {
-            padding: 20px;
-        }
-        
+        .dot.red { background: #ff4444; box-shadow: 0 0 8px #ff4444; }
+        .dot.green { background: #00ff88; box-shadow: 0 0 8px #00ff88; }
+        .status-text { color: #fff; font-size: 14px; font-weight: 500; }
+        .video-wrapper { padding: 20px; }
         .video-container {
             background: #000;
             border-radius: 20px;
             overflow: hidden;
             aspect-ratio: 16 / 9;
-            box-shadow: 0 8px 20px rgba(0,0,0,0.5);
-            border: 1px solid #222;
+            border: 1px solid #333;
         }
-        
-        video {
-            width: 100%;
-            height: 100%;
-            object-fit: cover;
-        }
-        
-        .device-info {
-            padding: 16px 20px;
-            background: #0f0f0f;
-            border-top: 1px solid #1a1a1a;
-            text-align: center;
-        }
-        
-        .device-name {
-            color: #00ff88;
-            font-size: 13px;
-            font-weight: 500;
-        }
-        
-        .footer {
-            padding: 12px 20px;
-            text-align: center;
-            background: rgba(0,0,0,0.3);
-            border-top: 1px solid #1a1a1a;
-        }
-        
-        .footer-text {
-            color: #444;
-            font-size: 10px;
-        }
+        video { width: 100%; height: 100%; object-fit: cover; }
+        .device-info { padding: 15px; text-align: center; border-top: 1px solid #222; }
+        .device-name { color: #00ff88; font-size: 13px; }
+        .footer { padding: 10px; text-align: center; color: #444; font-size: 10px; }
     </style>
 </head>
 <body>
     <div class="container">
-        <div class="header">
-            <div class="title">📹 Live Camera Stream</div>
-        </div>
-        
+        <div class="header"><div class="title">📹 Live Camera Stream</div></div>
         <div class="status-bar">
-            <div class="status-item">
-                <div class="dot red" id="statusDot"></div>
-                <span class="status-text" id="statusText">Disconnected</span>
-            </div>
+            <div class="dot red" id="statusDot"></div>
+            <span class="status-text" id="statusText">Disconnected</span>
         </div>
-        
         <div class="video-wrapper">
             <div class="video-container">
                 <video id="remoteVideo" autoplay playsinline muted></video>
             </div>
         </div>
-        
-        <div class="device-info">
-            <div class="device-name" id="deviceName">—</div>
-        </div>
-        
-        <div class="footer">
-            <div class="footer-text">Secure WebRTC • Peer-to-Peer</div>
-        </div>
+        <div class="device-info"><div class="device-name" id="deviceName">—</div></div>
+        <div class="footer"><div class="footer-text">Secure WebRTC • Peer-to-Peer</div></div>
     </div>
 
     <script src="https://cdn.socket.io/4.6.1/socket.io.min.js"></script>
@@ -162,17 +87,14 @@
         const remoteVideo = document.getElementById('remoteVideo');
         const statusDot = document.getElementById('statusDot');
         const statusText = document.getElementById('statusText');
-        const deviceNameSpan = document.getElementById('deviceName');
         
         let pc = null;
         let socket = null;
         
-        // WebRTC Configuration with TURN Servers
         const configuration = {
             iceServers: [
                 { urls: "stun:stun.l.google.com:19302" },
                 { urls: "stun:stun1.l.google.com:19302" },
-                { urls: "stun:stun2.l.google.com:19302" },
                 {
                     urls: "turn:openrelay.metered.ca:80",
                     username: "openrelayproject",
@@ -182,124 +104,38 @@
                     urls: "turn:openrelay.metered.ca:443",
                     username: "openrelayproject",
                     credential: "openrelayproject"
-                },
-                {
-                    urls: "turn:openrelay.metered.ca:443?transport=tcp",
-                    username: "openrelayproject",
-                    credential: "openrelayproject"
                 }
-            ],
-            iceCandidatePoolSize: 10
+            ]
         };
         
-        function setConnected(deviceName = null) {
+        function setConnected() {
             statusDot.className = 'dot green';
-            statusText.innerText = 'Connected';
-            if (deviceName) {
-                deviceNameSpan.innerText = `📱 ${deviceName}`;
-            }
+            statusText.innerText = 'Connected ✅';
         }
         
         function setDisconnected() {
             statusDot.className = 'dot red';
             statusText.innerText = 'Disconnected';
-            deviceNameSpan.innerText = '—';
-            if (remoteVideo.srcObject) {
-                remoteVideo.srcObject = null;
-            }
+            if (remoteVideo.srcObject) remoteVideo.srcObject = null;
         }
         
         async function createPeerConnection() {
-            if (pc) {
-                pc.close();
-            }
-            
+            if (pc) pc.close();
             pc = new RTCPeerConnection(configuration);
-            
-            pc.ontrack = (event) => {
-                if (event.track.kind === 'video') {
-                    remoteVideo.srcObject = event.streams[0];
-                    setConnected();
-                }
-            };
-            
-            pc.onicecandidate = (event) => {
-                if (event.candidate && socket) {
-                    socket.emit('signal', {
-                        room: ROOM_ID,
-                        from: 'web',
-                        signal: event.candidate
-                    });
-                }
-            };
-            
-            pc.oniceconnectionstatechange = () => {
-                console.log('ICE state:', pc.iceConnectionState);
-                if (pc.iceConnectionState === 'connected') {
-                    setConnected();
-                } else if (pc.iceConnectionState === 'disconnected' || 
-                           pc.iceConnectionState === 'failed' ||
-                           pc.iceConnectionState === 'closed') {
-                    setDisconnected();
-                }
-            };
-            
+            pc.ontrack = (event) => { if (event.track.kind === 'video') { remoteVideo.srcObject = event.streams[0]; setConnected(); } };
+            pc.onicecandidate = (event) => { if (event.candidate) socket.emit('signal', { room: ROOM_ID, from: 'web', signal: event.candidate }); };
+            pc.oniceconnectionstatechange = () => { if (pc.iceConnectionState === 'connected') setConnected(); else if (pc.iceConnectionState === 'disconnected' || pc.iceConnectionState === 'failed') setDisconnected(); };
             return pc;
         }
         
-        async function start() {
+        function start() {
             setDisconnected();
-            
-            socket = io(SIGNAL_SERVER, {
-                transports: ['websocket'],
-                reconnection: true,
-                reconnectionAttempts: 10,
-                reconnectionDelay: 2000
-            });
-            
-            socket.on('connect', () => {
-                console.log('Connected to signal server');
-                socket.emit('join-room', ROOM_ID, 'web');
-            });
-            
-            socket.on('user-joined', async (userId) => {
-                console.log('Phone joined:', userId);
-                if (!pc) await createPeerConnection();
-                
-                const offer = await pc.createOffer();
-                await pc.setLocalDescription(offer);
-                
-                socket.emit('signal', {
-                    room: ROOM_ID,
-                    from: 'web',
-                    signal: offer
-                });
-            });
-            
-            socket.on('signal', async (data) => {
-                if (!pc) await createPeerConnection();
-                
-                if (data.signal.type === 'answer') {
-                    await pc.setRemoteDescription(new RTCSessionDescription(data.signal));
-                } else if (data.signal.candidate) {
-                    await pc.addIceCandidate(new RTCIceCandidate(data.signal));
-                }
-            });
-            
-            socket.on('user-left', () => {
-                if (pc) {
-                    pc.close();
-                    pc = null;
-                }
-                remoteVideo.srcObject = null;
-                setDisconnected();
-            });
-            
-            socket.on('disconnect', () => {
-                setDisconnected();
-            });
+            socket = io(SIGNAL_SERVER, { transports: ['websocket'], reconnection: true });
+            socket.on('connect', () => socket.emit('join-room', ROOM_ID, 'web'));
+            socket.on('user-joined', async () => { if (!pc) await createPeerConnection(); const offer = await pc.createOffer(); await pc.setLocalDescription(offer); socket.emit('signal', { room: ROOM_ID, from: 'web', signal: offer }); });
+            socket.on('signal', async (data) => { if (!pc) await createPeerConnection(); if (data.signal.type === 'answer') await pc.setRemoteDescription(new RTCSessionDescription(data.signal)); else if (data.signal.candidate) await pc.addIceCandidate(new RTCIceCandidate(data.signal)); });
+            socket.on('user-left', () => { if (pc) pc.close(); pc = null; setDisconnected(); });
         }
-        
         start();
     </script>
 </body>
