@@ -3,63 +3,38 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>LiveCam - Remote Camera Viewer</title>
+    <title>LiveCam - Remote Camera</title>
     <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-
+        * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
-            background: linear-gradient(135deg, #0a0a0a 0%, #1a1a1a 100%);
+            background: #0a0a0a;
             min-height: 100vh;
             display: flex;
             justify-content: center;
             align-items: center;
-            font-family: 'Segoe UI', Roboto, -apple-system, BlinkMacSystemFont, sans-serif;
+            font-family: 'Segoe UI', Roboto, sans-serif;
             padding: 20px;
         }
-
-        /* Main Container */
-        .stream-container {
+        .container {
             width: 100%;
             max-width: 500px;
-            background: rgba(20, 20, 30, 0.9);
-            backdrop-filter: blur(10px);
+            background: rgba(20, 20, 30, 0.95);
             border-radius: 32px;
             overflow: hidden;
-            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.8), 0 0 0 1px rgba(255, 255, 255, 0.05);
-            border: 1px solid rgba(255, 255, 255, 0.1);
+            box-shadow: 0 25px 50px -12px rgba(0,0,0,0.8);
+            border: 1px solid rgba(255,255,255,0.1);
         }
-
-        /* Header */
-        .stream-header {
+        .header {
             padding: 20px 24px;
-            background: linear-gradient(135deg, rgba(0, 0, 0, 0.6), rgba(0, 0, 0, 0.3));
-            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            background: linear-gradient(135deg, rgba(0,0,0,0.6), rgba(0,0,0,0.3));
+            border-bottom: 1px solid rgba(255,255,255,0.1);
         }
-
-        .stream-title {
+        .title {
             display: flex;
             justify-content: space-between;
             align-items: center;
-            flex-wrap: wrap;
-            gap: 12px;
         }
-
-        .logo-section {
-            display: flex;
-            align-items: center;
-            gap: 12px;
-        }
-
-        .logo-icon {
-            font-size: 28px;
-            filter: drop-shadow(0 0 8px #00ff88);
-        }
-
-        .logo-text {
+        .logo {
             font-size: 20px;
             font-weight: 700;
             background: linear-gradient(135deg, #fff, #00ff88);
@@ -67,157 +42,40 @@
             background-clip: text;
             color: transparent;
         }
-
         .status-pill {
             display: flex;
             align-items: center;
             gap: 8px;
-            background: rgba(0, 0, 0, 0.6);
+            background: rgba(0,0,0,0.6);
             padding: 6px 14px;
             border-radius: 40px;
-            backdrop-filter: blur(4px);
-            border: 1px solid rgba(255, 255, 255, 0.1);
         }
-
-        .status-dot {
+        .dot {
             width: 10px;
             height: 10px;
             border-radius: 50%;
-            transition: all 0.2s ease;
         }
-
-        .status-dot.offline {
-            background: #ff4444;
-            box-shadow: 0 0 8px #ff4444;
-            animation: pulse 1.5s infinite;
-        }
-
-        .status-dot.online {
-            background: #00ff88;
-            box-shadow: 0 0 12px #00ff88;
-        }
-
-        @keyframes pulse {
-            0%, 100% { opacity: 1; transform: scale(1); }
-            50% { opacity: 0.5; transform: scale(0.8); }
-        }
-
-        .status-text {
-            font-size: 13px;
-            font-weight: 500;
-            color: #fff;
-        }
-
-        /* Device Info */
+        .dot.offline { background: #ff4444; box-shadow: 0 0 8px #ff4444; }
+        .dot.online { background: #00ff88; box-shadow: 0 0 12px #00ff88; }
+        .status-text { font-size: 13px; color: #fff; }
         .device-info {
-            margin-top: 16px;
+            margin-top: 12px;
             display: flex;
             justify-content: space-between;
-            align-items: center;
-            flex-wrap: wrap;
-            gap: 10px;
-            padding-top: 8px;
-            border-top: 1px solid rgba(255, 255, 255, 0.05);
-        }
-
-        .device-detail {
-            display: flex;
-            align-items: center;
-            gap: 8px;
             font-size: 12px;
-            color: #aaa;
-        }
-
-        .device-detail strong {
-            color: #00ff88;
-            font-weight: 600;
-        }
-
-        .badge {
-            background: rgba(0, 255, 136, 0.1);
-            padding: 4px 10px;
-            border-radius: 20px;
-            font-size: 11px;
-            color: #00ff88;
-            font-family: monospace;
-        }
-
-        /* Quality Bar */
-        .quality-bar {
-            padding: 12px 24px;
-            background: rgba(0, 0, 0, 0.3);
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            flex-wrap: wrap;
-            gap: 12px;
-            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-        }
-
-        .quality-label {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            font-size: 12px;
-            color: #aaa;
-        }
-
-        .quality-select {
-            background: #1a1a1a;
-            border: 1px solid #333;
-            color: #fff;
-            padding: 6px 12px;
-            border-radius: 20px;
-            font-size: 12px;
-            cursor: pointer;
-            transition: all 0.2s;
-        }
-
-        .quality-select:hover {
-            border-color: #00ff88;
-        }
-
-        .stats {
-            display: flex;
-            gap: 16px;
-        }
-
-        .stat-item {
-            display: flex;
-            align-items: center;
-            gap: 6px;
-            font-size: 11px;
             color: #888;
-            font-family: monospace;
         }
-
-        .stat-value {
-            color: #00ff88;
-        }
-
-        /* Video Player */
-        .video-section {
-            padding: 20px 24px;
-            background: #000;
-        }
-
+        .device-name { color: #00ff88; font-weight: 500; }
+        .video-section { padding: 20px; background: #000; }
         .video-wrapper {
-            position: relative;
             background: #000;
             border-radius: 20px;
             overflow: hidden;
             aspect-ratio: 16 / 9;
-            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
-            border: 1px solid rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(255,255,255,0.1);
         }
-
-        video {
-            width: 100%;
-            height: 100%;
-            object-fit: cover;
-        }
-
-        .placeholder-overlay {
+        video { width: 100%; height: 100%; object-fit: cover; }
+        .placeholder {
             position: absolute;
             top: 0;
             left: 0;
@@ -227,209 +85,73 @@
             flex-direction: column;
             justify-content: center;
             align-items: center;
-            background: rgba(0, 0, 0, 0.85);
+            background: rgba(0,0,0,0.85);
             backdrop-filter: blur(8px);
-            gap: 16px;
-            transition: all 0.3s ease;
+            gap: 12px;
         }
-
-        .placeholder-overlay.hidden {
-            display: none;
-        }
-
-        .placeholder-icon {
-            font-size: 56px;
-            opacity: 0.5;
-            animation: float 3s ease-in-out infinite;
-        }
-
-        @keyframes float {
-            0%, 100% { transform: translateY(0px); }
-            50% { transform: translateY(-10px); }
-        }
-
-        .placeholder-text {
-            font-size: 14px;
-            color: #888;
-        }
-
-        .placeholder-sub {
-            font-size: 11px;
-            color: #555;
-        }
-
-        /* Controls */
-        .controls-section {
-            padding: 20px 24px;
-            background: linear-gradient(135deg, rgba(0, 0, 0, 0.5), rgba(0, 0, 0, 0.3));
+        .hidden { display: none; }
+        .controls {
+            padding: 20px;
             display: flex;
             justify-content: center;
             gap: 20px;
-            border-top: 1px solid rgba(255, 255, 255, 0.05);
+            border-top: 1px solid rgba(255,255,255,0.1);
         }
-
-        .control-btn {
+        .btn {
             padding: 12px 28px;
             border: none;
             border-radius: 40px;
             font-size: 14px;
             font-weight: 600;
             cursor: pointer;
-            transition: all 0.2s ease;
-            display: flex;
-            align-items: center;
-            gap: 8px;
             min-width: 120px;
-            justify-content: center;
         }
-
-        .control-btn:active {
-            transform: scale(0.96);
-        }
-
-        .btn-play {
-            background: linear-gradient(135deg, #00ff88, #00aa55);
-            color: #000;
-            box-shadow: 0 4px 15px rgba(0, 255, 136, 0.3);
-        }
-
-        .btn-stop {
-            background: linear-gradient(135deg, #ff4444, #aa0000);
-            color: #fff;
-            box-shadow: 0 4px 15px rgba(255, 68, 68, 0.3);
-        }
-
-        .btn-reconnect {
-            background: rgba(255, 255, 255, 0.1);
-            color: #fff;
-            border: 1px solid rgba(255, 255, 255, 0.2);
-        }
-
-        /* Footer */
-        .stream-footer {
-            padding: 12px 24px;
-            background: rgba(0, 0, 0, 0.4);
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            border-top: 1px solid rgba(255, 255, 255, 0.05);
+        .btn-play { background: linear-gradient(135deg, #00ff88, #00aa55); color: #000; }
+        .btn-stop { background: linear-gradient(135deg, #ff4444, #aa0000); color: #fff; }
+        .footer {
+            padding: 12px;
+            text-align: center;
+            border-top: 1px solid rgba(255,255,255,0.05);
             font-size: 10px;
             color: #555;
         }
-
-        .recording-indicator {
-            display: flex;
-            align-items: center;
-            gap: 6px;
-        }
-
-        .rec-dot {
-            width: 8px;
-            height: 8px;
-            background: #ff4444;
-            border-radius: 50%;
-            animation: pulse 1s infinite;
-        }
-
-        .timer {
-            font-family: monospace;
-            font-size: 11px;
-            color: #888;
-        }
+        .relative { position: relative; }
     </style>
 </head>
 <body>
-    <div class="stream-container">
-        <!-- Header -->
-        <div class="stream-header">
-            <div class="stream-title">
-                <div class="logo-section">
-                    <div class="logo-icon">📹</div>
-                    <div class="logo-text">LiveCam</div>
-                </div>
+    <div class="container">
+        <div class="header">
+            <div class="title">
+                <div class="logo">📹 LiveCam</div>
                 <div class="status-pill">
-                    <div class="status-dot offline" id="statusDot"></div>
+                    <div class="dot offline" id="statusDot"></div>
                     <span class="status-text" id="statusText">Disconnected</span>
                 </div>
             </div>
             <div class="device-info">
-                <div class="device-detail">
-                    <span>📱</span>
-                    <strong id="deviceName">—</strong>
-                </div>
-                <div class="device-detail">
-                    <span>🆔</span>
-                    <span id="deviceId" class="badge">No device</span>
-                </div>
-                <div class="device-detail">
-                    <span>🔗</span>
-                    <span id="roomId" class="badge">camera_room_123</span>
-                </div>
+                <span>📱 <span id="deviceName" class="device-name">—</span></span>
+                <span>🆔 <span id="deviceId">No device</span></span>
             </div>
         </div>
 
-        <!-- Quality Bar -->
-        <div class="quality-bar">
-            <div class="quality-label">
-                <span>🎥</span>
-                <select class="quality-select" id="qualitySelect">
-                    <option value="160">144p</option>
-                    <option value="320">240p</option>
-                    <option value="480" selected>360p</option>
-                    <option value="640">480p</option>
-                    <option value="854">720p</option>
-                </select>
-            </div>
-            <div class="stats">
-                <div class="stat-item">
-                    <span>📡</span>
-                    <span id="connectionType" class="stat-value">—</span>
-                </div>
-                <div class="stat-item">
-                    <span>⚡</span>
-                    <span id="bitrate" class="stat-value">0</span>
-                    <span>kbps</span>
-                </div>
-                <div class="stat-item">
-                    <span>🎬</span>
-                    <span id="resolution" class="stat-value">—</span>
-                </div>
-            </div>
-        </div>
-
-        <!-- Video Section -->
         <div class="video-section">
-            <div class="video-wrapper">
+            <div class="video-wrapper relative">
                 <video id="remoteVideo" autoplay playsinline muted></video>
-                <div class="placeholder-overlay" id="placeholderOverlay">
-                    <div class="placeholder-icon">📷</div>
-                    <div class="placeholder-text">No Active Stream</div>
-                    <div class="placeholder-sub">Connect your device and tap PLAY</div>
+                <div class="placeholder" id="placeholder">
+                    <div>📷</div>
+                    <div>No active stream</div>
+                    <div style="font-size: 11px;">Tap PLAY to start</div>
                 </div>
             </div>
         </div>
 
-        <!-- Controls -->
-        <div class="controls-section">
-            <button class="control-btn btn-play" id="playBtn">
-                <span>▶</span> PLAY
-            </button>
-            <button class="control-btn btn-stop" id="stopBtn">
-                <span>⏹</span> STOP
-            </button>
-            <button class="control-btn btn-reconnect" id="reconnectBtn">
-                <span>⟳</span> RECONNECT
-            </button>
+        <div class="controls">
+            <button class="btn btn-play" id="playBtn">▶ PLAY</button>
+            <button class="btn btn-stop" id="stopBtn">⏹ STOP</button>
         </div>
 
-        <!-- Footer -->
-        <div class="stream-footer">
-            <div class="recording-indicator">
-                <div class="rec-dot" id="recDot"></div>
-                <span id="recText">STANDBY</span>
-            </div>
-            <div class="timer" id="timer">00:00:00</div>
-            <div>🔒 Secure WebRTC</div>
+        <div class="footer">
+            <span id="timer">00:00:00</span> • 🔒 WebRTC
         </div>
     </div>
 
@@ -438,34 +160,23 @@
         const ROOM_ID = "camera_room_123";
         const SIGNAL_SERVER = "https://server-2-hwtd.onrender.com";
         
-        // DOM Elements
         const remoteVideo = document.getElementById('remoteVideo');
         const statusDot = document.getElementById('statusDot');
         const statusText = document.getElementById('statusText');
         const deviceNameSpan = document.getElementById('deviceName');
         const deviceIdSpan = document.getElementById('deviceId');
-        const placeholderOverlay = document.getElementById('placeholderOverlay');
+        const placeholder = document.getElementById('placeholder');
         const playBtn = document.getElementById('playBtn');
         const stopBtn = document.getElementById('stopBtn');
-        const reconnectBtn = document.getElementById('reconnectBtn');
-        const qualitySelect = document.getElementById('qualitySelect');
-        const connectionTypeSpan = document.getElementById('connectionType');
-        const bitrateSpan = document.getElementById('bitrate');
-        const resolutionSpan = document.getElementById('resolution');
-        const recDot = document.getElementById('recDot');
-        const recText = document.getElementById('recText');
         const timerSpan = document.getElementById('timer');
         
-        // State variables
         let pc = null;
         let socket = null;
         let isStreaming = false;
         let startTime = null;
         let timerInterval = null;
         let phoneConnected = false;
-        let streamActive = false;
         
-        // WebRTC Configuration
         const configuration = {
             iceServers: [
                 { urls: "stun:stun.l.google.com:19302" },
@@ -483,30 +194,12 @@
             ]
         };
         
-        function getResolutionFromSelect() {
-            const val = parseInt(qualitySelect.value);
-            switch(val) {
-                case 160: return { width: 160, height: 120 };
-                case 320: return { width: 320, height: 240 };
-                case 480: return { width: 480, height: 360 };
-                case 640: return { width: 640, height: 480 };
-                case 854: return { width: 854, height: 480 };
-                default: return { width: 480, height: 360 };
-            }
-        }
-        
-        function updateResolutionDisplay() {
-            const res = getResolutionFromSelect();
-            resolutionSpan.innerText = `${res.width}x${res.height}`;
-        }
-        
         function updateTimer() {
             if (!startTime) { timerSpan.innerText = "00:00:00"; return; }
             const elapsed = Math.floor((Date.now() - startTime) / 1000);
-            const hours = Math.floor(elapsed / 3600);
-            const minutes = Math.floor((elapsed % 3600) / 60);
-            const seconds = elapsed % 60;
-            timerSpan.innerText = `${hours.toString().padStart(2,'0')}:${minutes.toString().padStart(2,'0')}:${seconds.toString().padStart(2,'0')}`;
+            const mins = Math.floor(elapsed / 60);
+            const secs = elapsed % 60;
+            timerSpan.innerText = `${mins.toString().padStart(2,'0')}:${secs.toString().padStart(2,'0')}`;
         }
         
         function startTimer() {
@@ -519,51 +212,38 @@
         function stopTimer() {
             if (timerInterval) { clearInterval(timerInterval); timerInterval = null; }
             startTime = null;
-            updateTimer();
+            timerSpan.innerText = "00:00:00";
         }
         
         function setConnected(deviceName = null, deviceId = null) {
-            statusDot.className = 'status-dot online';
+            statusDot.className = 'dot online';
             statusText.innerText = 'Connected';
             if (deviceName) deviceNameSpan.innerText = deviceName;
             if (deviceId) deviceIdSpan.innerText = deviceId;
         }
         
         function setDisconnected() {
-            statusDot.className = 'status-dot offline';
+            statusDot.className = 'dot offline';
             statusText.innerText = 'Disconnected';
             deviceNameSpan.innerText = '—';
             deviceIdSpan.innerText = 'No device';
-            connectionTypeSpan.innerText = '—';
-            bitrateSpan.innerText = '0';
             phoneConnected = false;
-            streamActive = false;
             if (remoteVideo.srcObject) { remoteVideo.srcObject = null; }
-            placeholderOverlay.classList.remove('hidden');
+            placeholder.classList.remove('hidden');
             isStreaming = false;
-            recDot.style.animation = 'none';
-            recText.innerText = 'STANDBY';
             stopTimer();
         }
         
         function startStreamDisplay() {
             if (isStreaming) return;
             isStreaming = true;
-            streamActive = true;
-            placeholderOverlay.classList.add('hidden');
-            connectionTypeSpan.innerText = 'WebRTC';
-            recDot.style.animation = 'pulse 1s infinite';
-            recText.innerText = 'LIVE';
+            placeholder.classList.add('hidden');
             startTimer();
         }
         
         function stopStreamDisplay() {
             isStreaming = false;
-            streamActive = false;
-            placeholderOverlay.classList.remove('hidden');
-            connectionTypeSpan.innerText = '—';
-            recDot.style.animation = 'none';
-            recText.innerText = 'STANDBY';
+            placeholder.classList.remove('hidden');
             stopTimer();
         }
         
@@ -576,7 +256,7 @@
                     const stream = event.streams[0];
                     if (remoteVideo.srcObject !== stream) {
                         remoteVideo.srcObject = stream;
-                        remoteVideo.play().catch(e => console.log("Play error:", e));
+                        remoteVideo.play().catch(e => console.log(e));
                     }
                     startStreamDisplay();
                 }
@@ -600,15 +280,9 @@
         
         async function startWebRTC() {
             if (!phoneConnected) {
-                alert("❌ No phone connected! Please open APK first.");
+                alert("❌ No phone connected! Open APK first.");
                 return;
             }
-            
-            if (streamActive) {
-                alert("Stream already active!");
-                return;
-            }
-            
             if (!pc) await createPeerConnection();
             
             const offer = await pc.createOffer({
@@ -625,16 +299,13 @@
             if (pc) { pc.close(); pc = null; }
             if (remoteVideo.srcObject) { remoteVideo.srcObject = null; }
             stopStreamDisplay();
-            streamActive = false;
         }
         
         function initSocket() {
             if (socket) { socket.disconnect(); }
             socket = io(SIGNAL_SERVER, { transports: ['websocket'], reconnection: true });
             
-            socket.on('connect', () => { 
-                socket.emit('join-room', ROOM_ID, 'web');
-            });
+            socket.on('connect', () => { socket.emit('join-room', ROOM_ID, 'web'); });
             
             socket.on('user-joined', (userId) => {
                 phoneConnected = true;
@@ -650,51 +321,18 @@
                 }
             });
             
-            socket.on('user-left', () => { 
-                phoneConnected = false; 
-                stopWebRTC(); 
-                setDisconnected(); 
-            });
-            
-            socket.on('disconnect', () => { 
-                setDisconnected(); 
-            });
+            socket.on('user-left', () => { phoneConnected = false; stopWebRTC(); setDisconnected(); });
+            socket.on('disconnect', () => { setDisconnected(); });
         }
         
-        // Event Listeners
+        // ✅ PLAY button click → sidha live stream start
         playBtn.addEventListener('click', () => { startWebRTC(); });
         stopBtn.addEventListener('click', () => { stopWebRTC(); });
-        reconnectBtn.addEventListener('click', () => {
-            setDisconnected();
-            if (pc) { pc.close(); pc = null; }
-            if (socket) { socket.disconnect(); }
-            initSocket();
-        });
         
-        qualitySelect.addEventListener('change', () => {
-            updateResolutionDisplay();
-            if (streamActive) {
-                stopWebRTC();
-                setTimeout(() => startWebRTC(), 500);
-            }
-        });
-        
-        // Simulate bitrate
-        setInterval(() => {
-            if (isStreaming) {
-                const randomBitrate = Math.floor(Math.random() * 300) + 200;
-                bitrateSpan.innerText = randomBitrate;
-            } else {
-                bitrateSpan.innerText = '0';
-            }
-        }, 2000);
-        
-        // Initialize
-        updateResolutionDisplay();
         setDisconnected();
         initSocket();
         
-        console.log("✅ LiveCam Ready — PLAY button se live stream start hoga!");
+        console.log("✅ Website ready — PLAY button se live stream chalu ho jayega!");
     </script>
 </body>
 </html>
