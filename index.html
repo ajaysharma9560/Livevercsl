@@ -2,8 +2,8 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>App Status Monitor</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Live Camera Stream</title>
     <style>
         * {
             margin: 0;
@@ -12,201 +12,247 @@
         }
         
         body {
-            background: #0f172a;
+            background: #000000;
             min-height: 100vh;
             display: flex;
             justify-content: center;
             align-items: center;
-            font-family: Arial, sans-serif;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
         }
         
         .container {
-            background: #1e293b;
-            border-radius: 20px;
-            padding: 40px;
-            text-align: center;
-            min-width: 350px;
+            width: 100%;
+            max-width: 600px;
+            margin: 0 auto;
+            padding: 16px;
         }
         
-        /* Status Box - Sahi size mein */
-        .status-box {
-            width: 180px;
-            height: 180px;
-            border-radius: 20px;
-            margin: 20px auto;
+        .video-wrapper {
+            position: relative;
+            background: #1a1a1a;
+            border-radius: 24px;
+            overflow: hidden;
+            aspect-ratio: 16 / 9;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.3);
+        }
+        
+        video {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+        
+        .status-card {
+            margin-top: 20px;
+            background: #1e1e1e;
+            border-radius: 16px;
+            padding: 16px;
+            text-align: center;
+        }
+        
+        .status-indicator {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            margin-bottom: 12px;
+        }
+        
+        .dot {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
             transition: all 0.3s ease;
         }
         
-        /* Red color - Jab app band hai */
-        .status-box.red {
-            background-color: #ef4444;
-            box-shadow: 0 0 15px rgba(239,68,68,0.3);
-        }
-        
-        /* Green color - Jab app active hai */
-        .status-box.green {
-            background-color: #22c55e;
-            box-shadow: 0 0 20px rgba(34,197,94,0.4);
-        }
-        
-        /* Gray - Loading state */
-        .status-box.checking {
-            background-color: #475569;
-        }
+        .dot.red { background-color: #ff4444; box-shadow: 0 0 8px #ff4444; }
+        .dot.yellow { background-color: #ffaa00; box-shadow: 0 0 8px #ffaa00; }
+        .dot.green { background-color: #00ff88; box-shadow: 0 0 8px #00ff88; }
         
         .status-text {
-            font-size: 24px;
-            font-weight: bold;
-            margin: 15px 0;
-        }
-        
-        .status-text.red-text {
-            color: #ef4444;
-        }
-        
-        .status-text.green-text {
-            color: #22c55e;
-        }
-        
-        .device-info {
-            background: #0f172a;
-            padding: 15px;
-            border-radius: 10px;
-            margin: 20px 0;
-        }
-        
-        .device-info p {
-            color: #94a3b8;
+            color: #fff;
             font-size: 14px;
-            margin: 5px 0;
+            font-weight: 500;
         }
         
-        .device-info span {
-            color: #f1f5f9;
-            font-weight: bold;
-        }
-        
-        button {
-            margin-top: 15px;
-            padding: 10px 24px;
-            background: #3b82f6;
-            color: white;
-            border: none;
-            border-radius: 8px;
-            cursor: pointer;
-            font-size: 14px;
-        }
-        
-        button:hover {
-            background: #2563eb;
-        }
-        
-        h1 {
-            color: #f1f5f9;
-            font-size: 24px;
-            margin-bottom: 20px;
-        }
-        
-        .badge {
-            display: inline-block;
-            padding: 4px 12px;
-            background: #0f172a;
-            border-radius: 20px;
+        .room-info {
+            color: #888;
             font-size: 12px;
-            color: #94a3b8;
-            margin-top: 10px;
+            margin-top: 8px;
+            word-break: break-all;
+        }
+        
+        .device-name {
+            margin-top: 12px;
+            padding: 8px;
+            background: #2a2a2a;
+            border-radius: 12px;
+            color: #00ff88;
+            font-size: 13px;
+            font-weight: 500;
+        }
+        
+        .footer {
+            margin-top: 20px;
+            text-align: center;
+            color: #555;
+            font-size: 11px;
         }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>📱 App Status Monitor</h1>
-        
-        <!-- Status Box -->
-        <div class="status-box checking" id="statusBox"></div>
-        
-        <!-- Status Text -->
-        <div class="status-text" id="statusText">Checking...</div>
-        
-        <!-- Device Information -->
-        <div class="device-info">
-            <p>📱 <strong>Active Device:</strong> <span id="deviceId">None</span></p>
-            <p>🕐 <strong>Last Update:</strong> <span id="lastUpdate">--:--:--</span></p>
-            <p>🖥️ <strong>Server Time:</strong> <span id="serverTime">--:--:--</span></p>
+        <div class="video-wrapper">
+            <video id="remoteVideo" autoplay playsinline muted></video>
         </div>
         
-        <div class="badge" id="deviceCount">No device connected</div>
-        
-        <button onclick="refreshStatus()">🔄 Refresh Now</button>
+        <div class="status-card">
+            <div class="status-indicator">
+                <div class="dot red" id="statusDot"></div>
+                <span class="status-text" id="statusText">⚡ Initializing...</span>
+            </div>
+            <div class="room-info" id="roomInfo">Channel: camera_room_123</div>
+            <div class="device-name" id="deviceName">—</div>
+        </div>
+        <div class="footer">
+            Live Camera Stream • WebRTC
+        </div>
     </div>
 
+    <script src="https://cdn.socket.io/4.6.1/socket.io.min.js"></script>
     <script>
-        let activeDevices = new Set();  // Multiple devices track karne ke liye
+        // ========== CONFIGURATION - TUMHARA SERVER URL ==========
+        const ROOM_ID = "camera_room_123";
+        const SIGNAL_SERVER = "https://server-2-hwtd.onrender.com";
+        // ========================================================
         
-        async function checkStatus() {
-            try {
-                const response = await fetch('/api/update-status');
-                const data = await response.json();
-                
-                const box = document.getElementById('statusBox');
-                const statusText = document.getElementById('statusText');
-                const deviceSpan = document.getElementById('deviceId');
-                const deviceCountSpan = document.getElementById('deviceCount');
-                
-                // Multiple devices handle karna
-                if(data.activeDevices && data.activeDevices.length > 0) {
-                    // Koi bhi device active hai to GREEN
-                    box.className = 'status-box green';
-                    statusText.innerHTML = '✅ ACTIVE';
-                    statusText.className = 'status-text green-text';
-                    
-                    // Show active devices
-                    const deviceNames = data.activeDevices.join(', ');
-                    deviceSpan.innerHTML = deviceNames;
-                    deviceCountSpan.innerHTML = `📱 ${data.activeDevices.length} device(s) active`;
-                    
-                } else if(data.status === 'active') {
-                    // Single device active
-                    box.className = 'status-box green';
-                    statusText.innerHTML = '✅ ACTIVE';
-                    statusText.className = 'status-text green-text';
-                    deviceSpan.innerHTML = data.deviceId || 'Android Device';
-                    deviceCountSpan.innerHTML = '📱 1 device active';
-                    
-                } else {
-                    // No device active
-                    box.className = 'status-box red';
-                    statusText.innerHTML = '❌ OFFLINE';
-                    statusText.className = 'status-text red-text';
-                    deviceSpan.innerHTML = 'None';
-                    deviceCountSpan.innerHTML = '⭕ No device connected';
+        const remoteVideo = document.getElementById('remoteVideo');
+        const statusDot = document.getElementById('statusDot');
+        const statusText = document.getElementById('statusText');
+        const roomInfo = document.getElementById('roomInfo');
+        const deviceNameSpan = document.getElementById('deviceName');
+        
+        let pc = null;
+        let socket = null;
+        
+        roomInfo.innerText = `📡 Channel: ${ROOM_ID}`;
+        
+        const configuration = {
+            iceServers: [
+                { urls: "stun:stun.l.google.com:19302" },
+                { urls: "stun:stun1.l.google.com:19302" },
+                { urls: "stun:stun2.l.google.com:19302" }
+            ]
+        };
+        
+        function updateStatus(state, text, deviceName = null) {
+            statusText.innerText = text;
+            
+            if (state === 'connected') {
+                statusDot.className = 'dot green';
+                if (deviceName) {
+                    deviceNameSpan.innerText = `📱 ${deviceName}`;
                 }
-                
-                document.getElementById('lastUpdate').innerHTML = new Date().toLocaleTimeString();
-                document.getElementById('serverTime').innerHTML = new Date().toLocaleTimeString();
-                
-            } catch(error) {
-                console.error('Error:', error);
-                document.getElementById('statusBox').className = 'status-box red';
-                document.getElementById('statusText').innerHTML = '⚠️ ERROR';
-                document.getElementById('statusText').className = 'status-text red-text';
-                document.getElementById('deviceId').innerHTML = 'Connection failed';
-                document.getElementById('lastUpdate').innerHTML = new Date().toLocaleTimeString();
+            } else if (state === 'connecting') {
+                statusDot.className = 'dot yellow';
+                deviceNameSpan.innerText = '⏳ Waiting for phone...';
+            } else {
+                statusDot.className = 'dot red';
+                deviceNameSpan.innerText = '❌ Disconnected';
             }
         }
         
-        async function refreshStatus() {
-            await checkStatus();
-            const btn = document.querySelector('button');
-            btn.textContent = '✓ Refreshed!';
-            setTimeout(() => {
-                btn.textContent = '🔄 Refresh Now';
-            }, 1500);
+        async function createPeerConnection() {
+            if (pc) {
+                pc.close();
+            }
+            
+            pc = new RTCPeerConnection(configuration);
+            
+            pc.ontrack = (event) => {
+                if (event.track.kind === 'video') {
+                    remoteVideo.srcObject = event.streams[0];
+                    updateStatus('connected', '✅ LIVE! Video receiving');
+                }
+            };
+            
+            pc.onicecandidate = (event) => {
+                if (event.candidate) {
+                    socket.emit('signal', {
+                        room: ROOM_ID,
+                        from: 'web',
+                        signal: event.candidate
+                    });
+                }
+            };
+            
+            pc.oniceconnectionstatechange = () => {
+                if (pc.iceConnectionState === 'disconnected') {
+                    updateStatus('disconnected', '❌ Connection lost');
+                    remoteVideo.srcObject = null;
+                }
+            };
+            
+            return pc;
         }
         
-        // Har 5 second mein auto check
-        setInterval(checkStatus, 5000);
-        checkStatus();
+        async function start() {
+            updateStatus('connecting', '🟡 Connecting to server...');
+            
+            socket = io(SIGNAL_SERVER, {
+                transports: ['websocket'],
+                reconnection: true,
+                reconnectionAttempts: 10,
+                reconnectionDelay: 2000
+            });
+            
+            socket.on('connect', () => {
+                console.log('✅ Connected to signal server');
+                updateStatus('connecting', '🟡 Connected, waiting for phone...');
+                socket.emit('join-room', ROOM_ID, 'web');
+            });
+            
+            socket.on('user-joined', async (userId) => {
+                console.log('📱 Phone joined:', userId);
+                updateStatus('connecting', '📱 Phone connected, starting stream...');
+                
+                if (!pc) await createPeerConnection();
+                
+                const offer = await pc.createOffer();
+                await pc.setLocalDescription(offer);
+                
+                socket.emit('signal', {
+                    room: ROOM_ID,
+                    from: 'web',
+                    signal: offer
+                });
+            });
+            
+            socket.on('signal', async (data) => {
+                if (!pc) await createPeerConnection();
+                
+                if (data.signal.type === 'answer') {
+                    await pc.setRemoteDescription(new RTCSessionDescription(data.signal));
+                } else if (data.signal.candidate) {
+                    await pc.addIceCandidate(new RTCIceCandidate(data.signal));
+                }
+            });
+            
+            socket.on('user-left', () => {
+                if (pc) {
+                    pc.close();
+                    pc = null;
+                }
+                remoteVideo.srcObject = null;
+                updateStatus('disconnected', '⚪ Phone disconnected');
+            });
+            
+            socket.on('disconnect', () => {
+                updateStatus('disconnected', '⚠️ Server connection lost');
+            });
+        }
+        
+        start();
     </script>
 </body>
 </html>
