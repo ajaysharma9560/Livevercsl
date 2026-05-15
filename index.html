@@ -27,11 +27,10 @@
             background: linear-gradient(145deg, #111 0%, #0a0a0a 100%);
             border-radius: 32px;
             overflow: hidden;
-            box-shadow: 0 20px 40px rgba(0,0,0,0.5), inset 0 1px 1px rgba(255,255,255,0.05);
+            box-shadow: 0 20px 40px rgba(0,0,0,0.5);
             border: 1px solid #222;
         }
         
-        /* Header */
         .header {
             padding: 20px 24px;
             background: rgba(0,0,0,0.3);
@@ -42,16 +41,8 @@
             font-size: 20px;
             font-weight: 600;
             color: #fff;
-            letter-spacing: -0.3px;
         }
         
-        .subtitle {
-            font-size: 12px;
-            color: #666;
-            margin-top: 4px;
-        }
-        
-        /* Status Bar */
         .status-bar {
             background: #0f0f0f;
             padding: 12px 20px;
@@ -65,11 +56,6 @@
             display: flex;
             align-items: center;
             gap: 8px;
-        }
-        
-        .status-label {
-            color: #888;
-            font-size: 12px;
         }
         
         .dot {
@@ -89,28 +75,17 @@
             box-shadow: 0 0 8px #00ff88;
         }
         
-        .status-value {
+        .status-text {
             color: #fff;
             font-size: 12px;
             font-weight: 500;
         }
         
-        .channel-id {
-            font-family: monospace;
-            color: #00ff88;
-            font-size: 11px;
-            background: #1a1a1a;
-            padding: 4px 10px;
-            border-radius: 20px;
-        }
-        
-        /* Video Container */
-        .video-container {
+        .video-wrapper {
             padding: 20px;
         }
         
-        .video-wrapper {
-            position: relative;
+        .video-container {
             background: #000;
             border-radius: 20px;
             overflow: hidden;
@@ -125,85 +100,11 @@
             object-fit: cover;
         }
         
-        .placeholder-overlay {
-            position: absolute;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            display: flex;
-            flex-direction: column;
-            justify-content: center;
-            align-items: center;
-            background: rgba(0,0,0,0.8);
-            backdrop-filter: blur(4px);
-            gap: 12px;
-        }
-        
-        .placeholder-icon {
-            font-size: 48px;
-            opacity: 0.5;
-        }
-        
-        .placeholder-text {
-            color: #666;
-            font-size: 14px;
-        }
-        
-        .hidden {
-            display: none;
-        }
-        
-        /* Controls */
-        .controls {
-            padding: 0 20px 20px 20px;
-            display: flex;
-            justify-content: center;
-            gap: 16px;
-        }
-        
-        .btn {
-            padding: 14px 28px;
-            border: none;
-            border-radius: 40px;
-            font-size: 14px;
-            font-weight: 600;
-            cursor: pointer;
-            transition: all 0.2s ease;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-        
-        .btn:active {
-            transform: scale(0.96);
-        }
-        
-        .btn-live {
-            background: linear-gradient(135deg, #ff4444, #cc0000);
-            color: white;
-            box-shadow: 0 4px 12px rgba(255,68,68,0.3);
-        }
-        
-        .btn-live.playing {
-            background: linear-gradient(135deg, #00ff88, #00aa55);
-            box-shadow: 0 4px 12px rgba(0,255,136,0.3);
-        }
-        
-        .btn-play {
-            background: #1a1a1a;
-            color: #fff;
-            border: 1px solid #333;
-        }
-        
-        /* Device Info */
         .device-info {
             padding: 16px 20px;
             background: #0f0f0f;
             border-top: 1px solid #1a1a1a;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
+            text-align: center;
         }
         
         .device-name {
@@ -212,18 +113,6 @@
             font-weight: 500;
         }
         
-        .stats {
-            display: flex;
-            gap: 16px;
-        }
-        
-        .stat {
-            color: #666;
-            font-size: 10px;
-            font-family: monospace;
-        }
-        
-        /* Footer */
         .footer {
             padding: 12px 20px;
             text-align: center;
@@ -239,113 +128,85 @@
 </head>
 <body>
     <div class="container">
-        <!-- Header -->
         <div class="header">
             <div class="title">📹 Live Camera Stream</div>
-            <div class="subtitle">WebRTC Real-time Streaming</div>
         </div>
         
-        <!-- Status Bar -->
         <div class="status-bar">
             <div class="status-item">
-                <span class="status-label">STATUS</span>
                 <div class="dot red" id="statusDot"></div>
-                <span class="status-value" id="statusText">Disconnected</span>
+                <span class="status-text" id="statusText">Disconnected</span>
             </div>
-            <div class="channel-id" id="channelId">camera_room_123</div>
         </div>
         
-        <!-- Video Container -->
-        <div class="video-container">
-            <div class="video-wrapper">
+        <div class="video-wrapper">
+            <div class="video-container">
                 <video id="remoteVideo" autoplay playsinline muted></video>
-                <div class="placeholder-overlay" id="placeholderOverlay">
-                    <div class="placeholder-icon">📷</div>
-                    <div class="placeholder-text">No active stream</div>
-                    <div class="placeholder-text" style="font-size: 11px;">Tap LIVE to start</div>
-                </div>
             </div>
         </div>
         
-        <!-- Controls -->
-        <div class="controls">
-            <button class="btn btn-live" id="liveBtn">
-                <span>●</span> LIVE
-            </button>
-            <button class="btn btn-play" id="reconnectBtn">
-                <span>↻</span> RECONNECT
-            </button>
-        </div>
-        
-        <!-- Device Info -->
         <div class="device-info">
             <div class="device-name" id="deviceName">—</div>
-            <div class="stats">
-                <div class="stat" id="streamStat">Stream: 🔴 OFF</div>
-            </div>
         </div>
         
-        <!-- Footer -->
         <div class="footer">
-            <div class="footer-text">Secure WebRTC Connection • Peer-to-Peer</div>
+            <div class="footer-text">Secure WebRTC • Peer-to-Peer</div>
         </div>
     </div>
 
     <script src="https://cdn.socket.io/4.6.1/socket.io.min.js"></script>
     <script>
-        // ========== CONFIGURATION ==========
         const ROOM_ID = "camera_room_123";
         const SIGNAL_SERVER = "https://server-2-hwtd.onrender.com";
-        // ===================================
         
         const remoteVideo = document.getElementById('remoteVideo');
         const statusDot = document.getElementById('statusDot');
         const statusText = document.getElementById('statusText');
         const deviceNameSpan = document.getElementById('deviceName');
-        const liveBtn = document.getElementById('liveBtn');
-        const reconnectBtn = document.getElementById('reconnectBtn');
-        const placeholderOverlay = document.getElementById('placeholderOverlay');
-        const streamStat = document.getElementById('streamStat');
-        const channelIdSpan = document.getElementById('channelId');
         
         let pc = null;
         let socket = null;
-        let isLive = false;
         
-        channelIdSpan.innerText = ROOM_ID;
-        
+        // WebRTC Configuration with TURN Servers
         const configuration = {
             iceServers: [
                 { urls: "stun:stun.l.google.com:19302" },
-                { urls: "stun:stun1.l.google.com:19302" }
-            ]
+                { urls: "stun:stun1.l.google.com:19302" },
+                { urls: "stun:stun2.l.google.com:19302" },
+                {
+                    urls: "turn:openrelay.metered.ca:80",
+                    username: "openrelayproject",
+                    credential: "openrelayproject"
+                },
+                {
+                    urls: "turn:openrelay.metered.ca:443",
+                    username: "openrelayproject",
+                    credential: "openrelayproject"
+                },
+                {
+                    urls: "turn:openrelay.metered.ca:443?transport=tcp",
+                    username: "openrelayproject",
+                    credential: "openrelayproject"
+                }
+            ],
+            iceCandidatePoolSize: 10
         };
         
         function setConnected(deviceName = null) {
             statusDot.className = 'dot green';
             statusText.innerText = 'Connected';
-            streamStat.innerHTML = 'Stream: 🟢 LIVE';
             if (deviceName) {
                 deviceNameSpan.innerText = `📱 ${deviceName}`;
             }
-            placeholderOverlay.classList.add('hidden');
-            liveBtn.classList.add('playing');
-            liveBtn.innerHTML = '<span>●</span> LIVE';
-            isLive = true;
         }
         
         function setDisconnected() {
             statusDot.className = 'dot red';
             statusText.innerText = 'Disconnected';
             deviceNameSpan.innerText = '—';
-            streamStat.innerHTML = 'Stream: 🔴 OFF';
-            placeholderOverlay.classList.remove('hidden');
-            liveBtn.classList.remove('playing');
-            liveBtn.innerHTML = '<span>●</span> LIVE';
             if (remoteVideo.srcObject) {
                 remoteVideo.srcObject = null;
             }
-            isLive = false;
         }
         
         async function createPeerConnection() {
@@ -373,6 +234,7 @@
             };
             
             pc.oniceconnectionstatechange = () => {
+                console.log('ICE state:', pc.iceConnectionState);
                 if (pc.iceConnectionState === 'connected') {
                     setConnected();
                 } else if (pc.iceConnectionState === 'disconnected' || 
@@ -385,42 +247,8 @@
             return pc;
         }
         
-        async function startStream() {
-            if (!socket || !socket.connected) {
-                initSocket();
-            }
-            
-            if (pc) {
-                pc.close();
-                pc = null;
-            }
-            
-            await createPeerConnection();
-            
-            const offer = await pc.createOffer();
-            await pc.setLocalDescription(offer);
-            
-            if (socket && socket.connected) {
-                socket.emit('signal', {
-                    room: ROOM_ID,
-                    from: 'web',
-                    signal: offer
-                });
-            }
-        }
-        
-        function stopStream() {
-            if (pc) {
-                pc.close();
-                pc = null;
-            }
+        async function start() {
             setDisconnected();
-        }
-        
-        function initSocket() {
-            if (socket) {
-                socket.disconnect();
-            }
             
             socket = io(SIGNAL_SERVER, {
                 transports: ['websocket'],
@@ -430,11 +258,22 @@
             });
             
             socket.on('connect', () => {
+                console.log('Connected to signal server');
                 socket.emit('join-room', ROOM_ID, 'web');
             });
             
             socket.on('user-joined', async (userId) => {
-                await startStream();
+                console.log('Phone joined:', userId);
+                if (!pc) await createPeerConnection();
+                
+                const offer = await pc.createOffer();
+                await pc.setLocalDescription(offer);
+                
+                socket.emit('signal', {
+                    room: ROOM_ID,
+                    from: 'web',
+                    signal: offer
+                });
             });
             
             socket.on('signal', async (data) => {
@@ -442,14 +281,18 @@
                 
                 if (data.signal.type === 'answer') {
                     await pc.setRemoteDescription(new RTCSessionDescription(data.signal));
-                    setConnected();
                 } else if (data.signal.candidate) {
                     await pc.addIceCandidate(new RTCIceCandidate(data.signal));
                 }
             });
             
             socket.on('user-left', () => {
-                stopStream();
+                if (pc) {
+                    pc.close();
+                    pc = null;
+                }
+                remoteVideo.srcObject = null;
+                setDisconnected();
             });
             
             socket.on('disconnect', () => {
@@ -457,27 +300,7 @@
             });
         }
         
-        // Live Button Click
-        liveBtn.addEventListener('click', () => {
-            if (isLive) {
-                stopStream();
-            } else {
-                startStream();
-            }
-        });
-        
-        // Reconnect Button
-        reconnectBtn.addEventListener('click', () => {
-            setDisconnected();
-            if (socket) {
-                socket.disconnect();
-            }
-            initSocket();
-        });
-        
-        // Initialize
-        setDisconnected();
-        initSocket();
+        start();
     </script>
 </body>
 </html>
