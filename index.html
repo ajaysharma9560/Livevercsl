@@ -205,9 +205,15 @@
             border-top: 1px solid #222;
         }
 
-        .loading, .no-videos {
+        .loading {
             text-align: center;
             color: #888;
+            padding: 40px;
+        }
+
+        .no-videos {
+            text-align: center;
+            color: #555;
             padding: 40px;
         }
     </style>
@@ -240,7 +246,7 @@
         </div>
 
         <div class="footer">
-            🔒 Tap PLAY to watch • Auto-refresh every 10 sec
+            🔒 Tap PLAY button to watch video • Auto-refresh every 10 sec
         </div>
     </div>
 
@@ -260,25 +266,40 @@
 
         let videoElements = [];
 
-        // ========== ONLINE STATUS ==========
-        const socket = io(SIGNAL_SERVER);
+        // ========== ONLINE STATUS (SOCKET.IO) ==========
+        const socket = io(SIGNAL_SERVER, {
+            transports: ['websocket'],
+            reconnection: true
+        });
 
         socket.on('status', (data) => {
             if (data.online) {
                 statusDot.className = 'dot green';
                 statusText.innerText = 'Live';
                 deviceNameSpan.innerText = `📱 ${data.deviceName}`;
+                console.log('✅ Device Online:', data.deviceName);
             } else {
                 statusDot.className = 'dot red';
                 statusText.innerText = 'Offline';
                 deviceNameSpan.innerText = '—';
+                console.log('❌ Device Offline');
             }
+        });
+
+        socket.on('connect', () => {
+            console.log('✅ Connected to signaling server');
+        });
+
+        socket.on('connect_error', (err) => {
+            console.error('❌ Connection error:', err.message);
         });
 
         // ========== VIDEO PLAY HANDLER ==========
         function setupVideoCard(videoElement, overlayElement) {
-            // Play button click
-            overlayElement.addEventListener('click', () => {
+            // PLAY BUTTON CLICK - Video play karo
+            overlayElement.addEventListener('click', (e) => {
+                e.stopPropagation();
+                
                 // Pause all other videos
                 videoElements.forEach(v => {
                     if (v !== videoElement && !v.paused) {
@@ -289,18 +310,30 @@
                     }
                 });
                 
-                videoElement.play();
-                overlayElement.classList.add('hidden');
+                // Play current video
+                videoElement.play().then(() => {
+                    overlayElement.classList.add('hidden');
+                    console.log('▶ Video playing');
+                }).catch(err => {
+                    console.error('Play error:', err);
+                });
             });
             
-            // When video ends, show play button again
+            // Video end hone par play button wapas dikhao
             videoElement.addEventListener('ended', () => {
+                overlayElement.classList.remove('hidden');
+                console.log('⏹ Video ended');
+            });
+            
+            // Video pause hone par (user ne pause kiya)
+            videoElement.addEventListener('pause', () => {
+                if (videoElement.currentTime === videoElement.duration) return;
                 overlayElement.classList.remove('hidden');
             });
             
-            // When video is paused by user, show play button
-            videoElement.addEventListener('pause', () => {
-                if (videoElement.currentTime === videoElement.duration) return;
+            // Video error handling
+            videoElement.addEventListener('error', (err) => {
+                console.error('Video error:', err);
                 overlayElement.classList.remove('hidden');
             });
         }
@@ -308,18 +341,23 @@
         // ========== FETCH VIDEOS FROM CLOUDINARY ==========
         async function fetchVideos() {
             try {
-                const response = await fetch(`https://res.cloudinary.com/${CLOUD_NAME}/video/list/${FOLDER}.json`);
+                const url = `https://res.cloudinary.com/${CLOUD_NAME}/video/list/${FOLDER}.json`;
+                console.log('📹 Fetching videos from:', url);
+                
+                const response = await fetch(url);
                 const data = await response.json();
                 
                 if (data.resources && data.resources.length > 0) {
-                    // Latest first
+                    // Latest videos first (reverse order)
                     const videos = [...data.resources].reverse();
+                    console.log(`📹 Found ${videos.length} videos`);
                     
                     videoList.innerHTML = videos.map((video, index) => `
                         <div class="video-card" data-id="${index}">
                             <div class="video-wrapper">
                                 <video id="video-${index}" preload="metadata" muted playsinline>
                                     <source src="${video.secure_url}" type="video/mp4">
+                                    Your browser does not support the video tag.
                                 </video>
                                 <div class="play-overlay" id="overlay-${index}">
                                     <div class="play-btn">
@@ -333,7 +371,7 @@
                         </div>
                     `).join('');
                     
-                    // Setup video players
+                    // Setup event listeners for each video
                     videoElements = [];
                     for (let i = 0; i < videos.length; i++) {
                         const video = document.getElementById(`video-${i}`);
@@ -347,16 +385,16 @@
                     videoList.innerHTML = '<div class="no-videos">📭 No videos yet. Waiting for stream...</div>';
                 }
             } catch (error) {
-                console.error('Error:', error);
-                videoList.innerHTML = '<div class="no-videos">⚠️ Error loading videos</div>';
+                console.error('❌ Error fetching videos:', error);
+                videoList.innerHTML = '<div class="no-videos">⚠️ Error loading videos. Check Cloudinary settings.</div>';
             }
         }
 
-        // Initial load and auto-refresh
+        // Auto-refresh videos every 10 seconds
         fetchVideos();
         setInterval(fetchVideos, 10000);
         
-        console.log('✅ Ludo Cam Ready — Tap PLAY button to watch');
+        console.log('✅ Ludo Cam Ready — Green dot = Phone online, Tap PLAY button to watch video');
     </script>
 </body>
 </html>
