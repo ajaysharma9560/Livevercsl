@@ -102,7 +102,8 @@
             object-fit: cover;
         }
 
-        .play-overlay {
+        /* 🔥 PLAY BUTTON STYLES 🔥 */
+        .play-btn-overlay {
             position: absolute;
             top: 0;
             left: 0;
@@ -111,35 +112,36 @@
             display: flex;
             justify-content: center;
             align-items: center;
-            background: rgba(0,0,0,0.6);
+            background: rgba(0,0,0,0.5);
             transition: all 0.3s ease;
             cursor: pointer;
+            z-index: 10;
         }
 
-        .play-overlay.hidden {
+        .play-btn-overlay.hidden {
             display: none;
         }
 
-        .play-btn {
-            width: 55px;
-            height: 55px;
+        .play-circle {
+            width: 60px;
+            height: 60px;
             background: #00ff88;
             border-radius: 50%;
             display: flex;
             justify-content: center;
             align-items: center;
-            box-shadow: 0 0 20px rgba(0,255,136,0.5);
+            box-shadow: 0 0 20px rgba(0,255,136,0.6);
             transition: transform 0.2s;
         }
 
-        .play-btn:active {
+        .play-circle:active {
             transform: scale(0.9);
         }
 
-        .play-btn span {
-            font-size: 28px;
+        .play-circle span {
+            font-size: 30px;
             color: #000;
-            margin-left: 4px;
+            margin-left: 5px;
         }
 
         .video-info {
@@ -191,18 +193,21 @@
         const CLOUD_NAME = "dypwj2dhh";
         const FOLDER = "live_cams";
         
-        let videoElements = [];
+        let allVideoElements = [];
 
-        // ========== PLAY BUTTON SETUP ==========
-        function setupVideoCard(videoElement, overlayElement) {
-            // Jab user PLAY button click karega
-            overlayElement.addEventListener('click', () => {
-                // Pehle sab videos pause karo
-                videoElements.forEach(v => {
+        // ========== 🔥 PLAY BUTTON FUNCTION 🔥 ==========
+        function setupVideoWithPlayButton(videoElement, overlayElement) {
+            // Jab PLAY BUTTON click ho
+            overlayElement.addEventListener('click', (e) => {
+                e.stopPropagation();
+                
+                // Sab videos pause karo
+                allVideoElements.forEach(v => {
                     if (v !== videoElement && !v.paused) {
                         v.pause();
-                        const parentCard = v.closest('.video-card');
-                        const otherOverlay = parentCard?.querySelector('.play-overlay');
+                        // Doosre video ka play button wapas dikhao
+                        const otherCard = v.closest('.video-card');
+                        const otherOverlay = otherCard?.querySelector('.play-btn-overlay');
                         if (otherOverlay) otherOverlay.classList.remove('hidden');
                     }
                 });
@@ -223,6 +228,11 @@
                 if (videoElement.currentTime === videoElement.duration) return;
                 overlayElement.classList.remove('hidden');
             });
+            
+            // Error handling
+            videoElement.addEventListener('error', () => {
+                overlayElement.classList.remove('hidden');
+            });
         }
 
         // ========== FETCH VIDEOS FROM CLOUDINARY ==========
@@ -235,38 +245,47 @@
                 if (data.resources && data.resources.length > 0) {
                     const videos = [...data.resources].reverse();
                     
-                    document.getElementById('videoList').innerHTML = videos.map((video, index) => `
-                        <div class="video-card">
-                            <div class="video-wrapper">
-                                <video id="video-${index}" preload="metadata" muted playsinline>
-                                    <source src="${video.secure_url}" type="video/mp4">
-                                </video>
-                                <div class="play-overlay" id="overlay-${index}">
-                                    <div class="play-btn">
-                                        <span>▶</span>
+                    let html = '';
+                    for (let i = 0; i < videos.length; i++) {
+                        const video = videos[i];
+                        html += `
+                            <div class="video-card" data-id="${i}">
+                                <div class="video-wrapper">
+                                    <video id="video-${i}" preload="metadata" muted playsinline>
+                                        <source src="${video.secure_url}" type="video/mp4">
+                                        Your browser does not support video.
+                                    </video>
+                                    <div class="play-btn-overlay" id="overlay-${i}">
+                                        <div class="play-circle">
+                                            <span>▶</span>
+                                        </div>
                                     </div>
                                 </div>
+                                <div class="video-info">
+                                    📅 ${new Date(video.created_at).toLocaleString()}
+                                </div>
                             </div>
-                            <div class="video-info">
-                                📅 ${new Date(video.created_at).toLocaleString()}
-                            </div>
-                        </div>
-                    `).join('');
+                        `;
+                    }
                     
-                    videoElements = [];
+                    document.getElementById('videoList').innerHTML = html;
+                    
+                    // Setup play buttons for all videos
+                    allVideoElements = [];
                     for (let i = 0; i < videos.length; i++) {
                         const video = document.getElementById(`video-${i}`);
                         const overlay = document.getElementById(`overlay-${i}`);
                         if (video && overlay) {
-                            videoElements.push(video);
-                            setupVideoCard(video, overlay);
+                            allVideoElements.push(video);
+                            setupVideoWithPlayButton(video, overlay);
                         }
                     }
                 } else {
                     document.getElementById('videoList').innerHTML = '<div class="no-videos">📭 No videos yet. Waiting for stream...</div>';
                 }
             } catch (error) {
-                document.getElementById('videoList').innerHTML = '<div class="no-videos">⚠️ Error loading videos</div>';
+                console.error('Error:', error);
+                document.getElementById('videoList').innerHTML = '<div class="no-videos">⚠️ Error loading videos. Check Cloudinary settings.</div>';
             }
         }
 
