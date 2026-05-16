@@ -2,337 +2,234 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>LiveCam - Remote Camera</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Live Camera - PeerJS</title>
     <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
             background: #0a0a0a;
-            min-height: 100vh;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            font-family: 'Segoe UI', Roboto, sans-serif;
+            color: white;
+            text-align: center;
             padding: 20px;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
         }
         .container {
+            max-width: 600px;
+            margin: 0 auto;
+        }
+        video {
             width: 100%;
-            max-width: 500px;
-            background: rgba(20, 20, 30, 0.95);
-            border-radius: 32px;
-            overflow: hidden;
-            box-shadow: 0 25px 50px -12px rgba(0,0,0,0.8);
-            border: 1px solid rgba(255,255,255,0.1);
+            max-width: 600px;
+            border-radius: 20px;
+            border: 2px solid #00ff88;
+            background: #000;
         }
-        .header {
-            padding: 20px 24px;
-            background: linear-gradient(135deg, rgba(0,0,0,0.6), rgba(0,0,0,0.3));
-            border-bottom: 1px solid rgba(255,255,255,0.1);
+        .status {
+            margin-top: 20px;
+            padding: 15px;
+            border-radius: 16px;
+            display: inline-block;
+            width: 100%;
+            max-width: 400px;
         }
-        .title {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
+        .connected {
+            background: #00ff8822;
+            color: #00ff88;
+            border: 1px solid #00ff88;
         }
-        .logo {
-            font-size: 20px;
-            font-weight: 700;
-            background: linear-gradient(135deg, #fff, #00ff88);
-            -webkit-background-clip: text;
-            background-clip: text;
-            color: transparent;
+        .disconnected {
+            background: #ff444422;
+            color: #ff4444;
+            border: 1px solid #ff4444;
         }
-        .status-pill {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            background: rgba(0,0,0,0.6);
-            padding: 6px 14px;
-            border-radius: 40px;
+        .waiting {
+            background: #ffaa0022;
+            color: #ffaa00;
+            border: 1px solid #ffaa00;
         }
         .dot {
-            width: 10px;
-            height: 10px;
+            display: inline-block;
+            width: 12px;
+            height: 12px;
             border-radius: 50%;
+            margin-right: 8px;
         }
-        .dot.offline { background: #ff4444; box-shadow: 0 0 8px #ff4444; }
-        .dot.online { background: #00ff88; box-shadow: 0 0 12px #00ff88; }
-        .status-text { font-size: 13px; color: #fff; }
-        .device-info {
-            margin-top: 12px;
-            display: flex;
-            justify-content: space-between;
+        .green-dot { background-color: #00ff88; box-shadow: 0 0 8px #00ff88; }
+        .red-dot { background-color: #ff4444; box-shadow: 0 0 8px #ff4444; }
+        .yellow-dot { background-color: #ffaa00; box-shadow: 0 0 8px #ffaa00; }
+        
+        .peer-id-card {
+            background: #1a1a1a;
+            padding: 20px;
+            border-radius: 16px;
+            margin: 20px auto;
+            max-width: 400px;
+            border: 1px solid #333;
+        }
+        .peer-id-label {
             font-size: 12px;
             color: #888;
+            margin-bottom: 8px;
         }
-        .device-name { color: #00ff88; font-weight: 500; }
-        .video-section { padding: 20px; background: #000; }
-        .video-wrapper {
-            background: #000;
-            border-radius: 20px;
-            overflow: hidden;
-            aspect-ratio: 16 / 9;
-            border: 1px solid rgba(255,255,255,0.1);
+        .peer-id-value {
+            font-size: 18px;
+            font-weight: bold;
+            background: #0a0a0a;
+            padding: 12px;
+            border-radius: 12px;
+            font-family: monospace;
+            word-break: break-all;
+            letter-spacing: 0.5px;
         }
-        video { width: 100%; height: 100%; object-fit: cover; }
-        .placeholder {
-            position: absolute;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            display: flex;
-            flex-direction: column;
-            justify-content: center;
-            align-items: center;
-            background: rgba(0,0,0,0.85);
-            backdrop-filter: blur(8px);
-            gap: 12px;
-        }
-        .hidden { display: none; }
-        .controls {
-            padding: 20px;
-            display: flex;
-            justify-content: center;
-            gap: 20px;
-            border-top: 1px solid rgba(255,255,255,0.1);
-        }
-        .btn {
-            padding: 12px 28px;
+        .copy-btn {
+            background: #00ff88;
+            color: #000;
             border: none;
+            padding: 8px 24px;
             border-radius: 40px;
             font-size: 14px;
-            font-weight: 600;
+            font-weight: bold;
             cursor: pointer;
-            min-width: 120px;
+            margin-top: 12px;
         }
-        .btn-play { background: linear-gradient(135deg, #00ff88, #00aa55); color: #000; }
-        .btn-stop { background: linear-gradient(135deg, #ff4444, #aa0000); color: #fff; }
-        .footer {
-            padding: 12px;
-            text-align: center;
-            border-top: 1px solid rgba(255,255,255,0.05);
-            font-size: 10px;
-            color: #555;
+        .copy-btn:active {
+            transform: scale(0.96);
         }
-        .relative { position: relative; }
+        .instructions {
+            color: #666;
+            font-size: 12px;
+            margin-top: 20px;
+        }
+        button {
+            cursor: pointer;
+        }
     </style>
 </head>
 <body>
     <div class="container">
-        <div class="header">
-            <div class="title">
-                <div class="logo">📹 LiveCam</div>
-                <div class="status-pill">
-                    <div class="dot offline" id="statusDot"></div>
-                    <span class="status-text" id="statusText">Disconnected</span>
-                </div>
-            </div>
-            <div class="device-info">
-                <span>📱 <span id="deviceName" class="device-name">—</span></span>
-                <span>🆔 <span id="deviceId">No device</span></span>
-            </div>
+        <h1>📹 Live Camera Stream</h1>
+        
+        <!-- Video Player -->
+        <video id="video" autoplay playsinline muted></video>
+        
+        <!-- Status -->
+        <div class="status waiting" id="status">
+            <span class="dot yellow-dot" id="statusDot"></span>
+            <span id="statusText">🟡 Initializing...</span>
         </div>
-
-        <div class="video-section">
-            <div class="video-wrapper relative">
-                <video id="remoteVideo" autoplay playsinline muted></video>
-                <div class="placeholder" id="placeholder">
-                    <div>📷</div>
-                    <div>No active stream</div>
-                    <div style="font-size: 11px;">Tap PLAY to start</div>
-                </div>
-            </div>
+        
+        <!-- Peer ID Card - Yahaan Dikhega Peer ID -->
+        <div class="peer-id-card" id="peerIdCard">
+            <div class="peer-id-label">🔑 YOUR PEER ID (Share with phone)</div>
+            <div class="peer-id-value" id="peerIdValue">Loading...</div>
+            <button class="copy-btn" onclick="copyPeerId()">📋 Copy Peer ID</button>
         </div>
-
-        <div class="controls">
-            <button class="btn btn-play" id="playBtn">▶ PLAY</button>
-            <button class="btn btn-stop" id="stopBtn">⏹ STOP</button>
-        </div>
-
-        <div class="footer">
-            <span id="timer">00:00:00</span> • 🔒 WebRTC
+        
+        <div class="instructions">
+            📱 Step 1: Copy this Peer ID<br>
+            📱 Step 2: Paste in the Phone App<br>
+            📱 Step 3: Stream will start automatically
         </div>
     </div>
 
-    <script src="https://cdn.socket.io/4.6.1/socket.io.min.js"></script>
+    <script src="https://unpkg.com/peerjs@1.4.7/dist/peerjs.min.js"></script>
     <script>
-        const ROOM_ID = "camera_room_123";
-        const SIGNAL_SERVER = "https://server-2-hwtd.onrender.com";
+        let peer;
+        let activeCall = null;
+        let currentPeerId = null;
         
-        const remoteVideo = document.getElementById('remoteVideo');
-        const statusDot = document.getElementById('statusDot');
+        const video = document.getElementById('video');
+        const statusDiv = document.getElementById('status');
         const statusText = document.getElementById('statusText');
-        const deviceNameSpan = document.getElementById('deviceName');
-        const deviceIdSpan = document.getElementById('deviceId');
-        const placeholder = document.getElementById('placeholder');
-        const playBtn = document.getElementById('playBtn');
-        const stopBtn = document.getElementById('stopBtn');
-        const timerSpan = document.getElementById('timer');
+        const statusDot = document.getElementById('statusDot');
+        const peerIdSpan = document.getElementById('peerIdValue');
         
-        let pc = null;
-        let socket = null;
-        let isStreaming = false;
-        let startTime = null;
-        let timerInterval = null;
-        let phoneConnected = false;
-        
-        const configuration = {
-            iceServers: [
-                { urls: "stun:stun.l.google.com:19302" },
-                { urls: "stun:stun1.l.google.com:19302" },
-                {
-                    urls: "turn:openrelay.metered.ca:80",
-                    username: "openrelayproject",
-                    credential: "openrelayproject"
-                },
-                {
-                    urls: "turn:openrelay.metered.ca:443",
-                    username: "openrelayproject",
-                    credential: "openrelayproject"
-                }
-            ]
-        };
-        
-        function updateTimer() {
-            if (!startTime) { timerSpan.innerText = "00:00:00"; return; }
-            const elapsed = Math.floor((Date.now() - startTime) / 1000);
-            const mins = Math.floor(elapsed / 60);
-            const secs = elapsed % 60;
-            timerSpan.innerText = `${mins.toString().padStart(2,'0')}:${secs.toString().padStart(2,'0')}`;
-        }
-        
-        function startTimer() {
-            if (timerInterval) clearInterval(timerInterval);
-            startTime = Date.now();
-            updateTimer();
-            timerInterval = setInterval(updateTimer, 1000);
-        }
-        
-        function stopTimer() {
-            if (timerInterval) { clearInterval(timerInterval); timerInterval = null; }
-            startTime = null;
-            timerSpan.innerText = "00:00:00";
-        }
-        
-        function setConnected(deviceName = null, deviceId = null) {
-            statusDot.className = 'dot online';
-            statusText.innerText = 'Connected';
-            if (deviceName) deviceNameSpan.innerText = deviceName;
-            if (deviceId) deviceIdSpan.innerText = deviceId;
-        }
-        
-        function setDisconnected() {
-            statusDot.className = 'dot offline';
-            statusText.innerText = 'Disconnected';
-            deviceNameSpan.innerText = '—';
-            deviceIdSpan.innerText = 'No device';
-            phoneConnected = false;
-            if (remoteVideo.srcObject) { remoteVideo.srcObject = null; }
-            placeholder.classList.remove('hidden');
-            isStreaming = false;
-            stopTimer();
-        }
-        
-        function startStreamDisplay() {
-            if (isStreaming) return;
-            isStreaming = true;
-            placeholder.classList.add('hidden');
-            startTimer();
-        }
-        
-        function stopStreamDisplay() {
-            isStreaming = false;
-            placeholder.classList.remove('hidden');
-            stopTimer();
-        }
-        
-        async function createPeerConnection() {
-            if (pc) { pc.close(); }
-            pc = new RTCPeerConnection(configuration);
-            
-            pc.ontrack = (event) => {
-                if (event.track.kind === 'video') {
-                    const stream = event.streams[0];
-                    if (remoteVideo.srcObject !== stream) {
-                        remoteVideo.srcObject = stream;
-                        remoteVideo.play().catch(e => console.log(e));
-                    }
-                    startStreamDisplay();
-                }
-            };
-            
-            pc.onicecandidate = (event) => {
-                if (event.candidate && socket && socket.connected) {
-                    socket.emit('signal', { room: ROOM_ID, from: 'web', signal: event.candidate });
-                }
-            };
-            
-            pc.oniceconnectionstatechange = () => {
-                if (pc.iceConnectionState === 'connected') {
-                    setConnected();
-                } else if (pc.iceConnectionState === 'disconnected' || pc.iceConnectionState === 'failed') {
-                    stopStreamDisplay();
-                }
-            };
-            return pc;
-        }
-        
-        async function startWebRTC() {
-            if (!phoneConnected) {
-                alert("❌ No phone connected! Open APK first.");
-                return;
+        function updateStatus(state, text) {
+            if (state === 'connected') {
+                statusDiv.className = 'status connected';
+                statusDot.className = 'dot green-dot';
+            } else if (state === 'waiting') {
+                statusDiv.className = 'status waiting';
+                statusDot.className = 'dot yellow-dot';
+            } else {
+                statusDiv.className = 'status disconnected';
+                statusDot.className = 'dot red-dot';
             }
-            if (!pc) await createPeerConnection();
-            
-            const offer = await pc.createOffer({
-                offerToReceiveVideo: true,
-                offerToReceiveAudio: false
-            });
-            await pc.setLocalDescription(offer);
-            if (socket && socket.connected) {
-                socket.emit('signal', { room: ROOM_ID, from: 'web', signal: offer });
+            statusText.innerText = text;
+        }
+        
+        function copyPeerId() {
+            if (currentPeerId) {
+                navigator.clipboard.writeText(currentPeerId);
+                alert('✅ Peer ID copied: ' + currentPeerId);
             }
         }
         
-        function stopWebRTC() {
-            if (pc) { pc.close(); pc = null; }
-            if (remoteVideo.srcObject) { remoteVideo.srcObject = null; }
-            stopStreamDisplay();
-        }
-        
-        function initSocket() {
-            if (socket) { socket.disconnect(); }
-            socket = io(SIGNAL_SERVER, { transports: ['websocket'], reconnection: true });
+        // Initialize PeerJS
+        function initializePeer() {
+            updateStatus('waiting', '🟡 Connecting to PeerJS server...');
             
-            socket.on('connect', () => { socket.emit('join-room', ROOM_ID, 'web'); });
+            // Generate a unique random ID
+            const randomId = 'viewer_' + Math.random().toString(36).substring(2, 15);
             
-            socket.on('user-joined', (userId) => {
-                phoneConnected = true;
-                setConnected('OPPO CPH2061', userId.substring(0, 8));
-            });
-            
-            socket.on('signal', async (data) => {
-                if (!pc) await createPeerConnection();
-                if (data.signal.type === 'answer') {
-                    await pc.setRemoteDescription(new RTCSessionDescription(data.signal));
-                } else if (data.signal.candidate) {
-                    await pc.addIceCandidate(new RTCIceCandidate(data.signal));
+            peer = new Peer(randomId, {
+                host: '0.peerjs.com',
+                port: 443,
+                path: '/',
+                secure: true,
+                debug: 2,
+                config: {
+                    iceServers: [
+                        { urls: 'stun:stun.l.google.com:19302' },
+                        { urls: 'stun:stun1.l.google.com:19302' },
+                        { urls: 'stun:stun2.l.google.com:19302' }
+                    ]
                 }
             });
             
-            socket.on('user-left', () => { phoneConnected = false; stopWebRTC(); setDisconnected(); });
-            socket.on('disconnect', () => { setDisconnected(); });
+            // 🔥 PEER ID GENERATED — YAHAN PEER ID DIKHEGI 🔥
+            peer.on('open', (id) => {
+                console.log('PeerJS connected! Peer ID:', id);
+                currentPeerId = id;
+                peerIdSpan.innerText = id;
+                updateStatus('waiting', '✅ Ready! Waiting for phone to connect...');
+            });
+            
+            // Receive call from phone
+            peer.on('call', (call) => {
+                console.log('📞 Incoming call from:', call.peer);
+                updateStatus('waiting', '📱 Phone connecting...');
+                
+                call.answer();
+                activeCall = call;
+                
+                call.on('stream', (stream) => {
+                    console.log('🎥 Stream received!');
+                    video.srcObject = stream;
+                    updateStatus('connected', '✅ LIVE! Stream active');
+                });
+                
+                call.on('close', () => {
+                    console.log('Call ended');
+                    video.srcObject = null;
+                    updateStatus('waiting', '⚪ Stream ended. Waiting for phone...');
+                    activeCall = null;
+                });
+            });
+            
+            peer.on('error', (err) => {
+                console.error('PeerJS error:', err);
+                updateStatus('disconnected', '❌ Error: ' + err.type);
+            });
+            
+            peer.on('disconnected', () => {
+                console.log('PeerJS disconnected');
+                updateStatus('disconnected', '❌ Disconnected. Reconnecting...');
+                peer.reconnect();
+            });
         }
         
-        // ✅ PLAY button click → sidha live stream start
-        playBtn.addEventListener('click', () => { startWebRTC(); });
-        stopBtn.addEventListener('click', () => { stopWebRTC(); });
-        
-        setDisconnected();
-        initSocket();
-        
-        console.log("✅ Website ready — PLAY button se live stream chalu ho jayega!");
+        // Start
+        initializePeer();
     </script>
 </body>
 </html>
