@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>Connection Test</title>
+    <title>Live Cam - Ludo</title>
     <style>
         * {
             margin: 0;
@@ -23,203 +23,231 @@
 
         .container {
             width: 100%;
-            max-width: 400px;
-            background: #111;
+            max-width: 500px;
+            background: #0f0f0f;
             border-radius: 32px;
             overflow: hidden;
             border: 1px solid #222;
-            padding: 32px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.5);
+        }
+
+        /* Header */
+        .header {
+            padding: 20px;
+            background: #141414;
             text-align: center;
+            border-bottom: 1px solid #222;
         }
 
         .logo {
-            font-size: 48px;
-            margin-bottom: 20px;
-        }
-
-        .title {
             font-size: 24px;
             font-weight: bold;
             color: #fff;
-            margin-bottom: 32px;
         }
 
-        .status-box {
-            background: #1a1a1a;
-            border-radius: 20px;
-            padding: 24px;
-            margin-bottom: 24px;
+        .logo span {
+            color: #00ff88;
+        }
+
+        /* Status Bar */
+        .status-bar {
+            padding: 12px 20px;
+            background: #0f0f0f;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid #222;
+        }
+
+        .status-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
         }
 
         .dot {
-            width: 60px;
-            height: 60px;
+            width: 10px;
+            height: 10px;
             border-radius: 50%;
-            margin: 0 auto 16px auto;
-            transition: all 0.3s ease;
+            transition: all 0.2s ease;
         }
 
         .dot.red {
-            background-color: #ff4444;
-            box-shadow: 0 0 20px #ff4444;
+            background: #ff4444;
+            box-shadow: 0 0 8px #ff4444;
         }
 
         .dot.green {
-            background-color: #00ff88;
-            box-shadow: 0 0 20px #00ff88;
+            background: #00ff88;
+            box-shadow: 0 0 8px #00ff88;
         }
 
         .status-text {
-            font-size: 18px;
-            font-weight: 500;
             color: #fff;
-        }
-
-        .peer-id-box {
-            background: #1a1a1a;
-            border-radius: 16px;
-            padding: 16px;
-            margin-bottom: 16px;
-        }
-
-        .peer-label {
             font-size: 12px;
-            color: #888;
-            margin-bottom: 8px;
+            font-weight: 500;
         }
 
-        .peer-value {
-            font-size: 14px;
-            font-family: monospace;
+        .device-name {
             color: #00ff88;
-            word-break: break-all;
-            background: #0a0a0a;
-            padding: 8px;
-            border-radius: 8px;
-        }
-
-        .copy-btn {
-            background: #00ff88;
-            color: #000;
-            border: none;
-            padding: 10px 20px;
-            border-radius: 40px;
-            font-size: 14px;
-            font-weight: bold;
-            cursor: pointer;
-            margin-top: 12px;
-        }
-
-        .copy-btn:active {
-            transform: scale(0.96);
-        }
-
-        .footer {
             font-size: 11px;
+            font-family: monospace;
+        }
+
+        /* Video Section */
+        .video-section {
+            padding: 20px;
+            background: #000;
+        }
+
+        .video-title {
+            color: #888;
+            font-size: 12px;
+            margin-bottom: 12px;
+        }
+
+        .video-list {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+
+        .video-card {
+            background: #0a0a0a;
+            border-radius: 16px;
+            overflow: hidden;
+            border: 1px solid #222;
+        }
+
+        video {
+            width: 100%;
+            aspect-ratio: 16 / 9;
+            object-fit: cover;
+            background: #000;
+        }
+
+        .video-info {
+            padding: 10px;
+            color: #666;
+            font-size: 11px;
+            text-align: center;
+            border-top: 1px solid #222;
+        }
+
+        /* Footer */
+        .footer {
+            padding: 12px;
+            text-align: center;
+            font-size: 10px;
+            color: #444;
+            border-top: 1px solid #222;
+        }
+
+        .loading {
+            text-align: center;
+            color: #888;
+            padding: 40px;
+        }
+
+        .no-videos {
+            text-align: center;
             color: #555;
-            margin-top: 16px;
+            padding: 40px;
         }
     </style>
 </head>
 <body>
     <div class="container">
-        <div class="logo">📹</div>
-        <div class="title">Connection Test</div>
-
-        <div class="status-box">
-            <div class="dot red" id="statusDot"></div>
-            <div class="status-text" id="statusText">Disconnected</div>
+        <!-- Header -->
+        <div class="header">
+            <div class="logo">📹 <span>LUDO</span> CAM</div>
         </div>
 
-        <div class="peer-id-box">
-            <div class="peer-label">🔑 YOUR PEER ID (Share with APK)</div>
-            <div class="peer-value" id="peerIdValue">Loading...</div>
-            <button class="copy-btn" id="copyBtn">📋 Copy Peer ID</button>
+        <!-- Status Bar -->
+        <div class="status-bar">
+            <div class="status-item">
+                <div class="dot red" id="statusDot"></div>
+                <span class="status-text" id="statusText">Offline</span>
+            </div>
+            <div class="device-name" id="deviceName">—</div>
+        </div>
+
+        <!-- Video Section -->
+        <div class="video-section">
+            <div class="video-title">📹 LATEST STREAMS</div>
+            <div class="video-list" id="videoList">
+                <div class="loading">Loading videos...</div>
+            </div>
         </div>
 
         <div class="footer">
-            APK me Peer ID paste karo → Connect → Green dot aayega
+            🔒 Live Camera Stream • Auto-refresh every 10 sec
         </div>
     </div>
 
-    <script src="https://unpkg.com/peerjs@1.4.7/dist/peerjs.min.js"></script>
+    <script src="https://cdn.socket.io/4.6.1/socket.io.min.js"></script>
     <script>
+        // ========== CONFIGURATION ==========
+        const SIGNAL_SERVER = "https://server-2-hwtd.onrender.com";
+        const CLOUD_NAME = "dypwj2dhh";
+        const FOLDER = "live_cams";
+        // ====================================
+
+        // DOM Elements
         const statusDot = document.getElementById('statusDot');
         const statusText = document.getElementById('statusText');
-        const peerIdSpan = document.getElementById('peerIdValue');
-        const copyBtn = document.getElementById('copyBtn');
+        const deviceNameSpan = document.getElementById('deviceName');
+        const videoList = document.getElementById('videoList');
 
-        let peer = null;
-        let currentPeerId = null;
-        let isConnected = false;
+        // ========== ONLINE STATUS (SOCKET.IO) ==========
+        const socket = io(SIGNAL_SERVER);
 
-        function setConnected() {
-            statusDot.className = 'dot green';
-            statusText.innerText = 'Connected ✅';
-            isConnected = true;
-        }
+        socket.on('status', (data) => {
+            if (data.online) {
+                statusDot.className = 'dot green';
+                statusText.innerText = 'Online';
+                deviceNameSpan.innerText = `📱 ${data.deviceName}`;
+            } else {
+                statusDot.className = 'dot red';
+                statusText.innerText = 'Offline';
+                deviceNameSpan.innerText = '—';
+            }
+        });
 
-        function setDisconnected() {
-            statusDot.className = 'dot red';
-            statusText.innerText = 'Disconnected';
-            isConnected = false;
-        }
-
-        function copyPeerId() {
-            if (currentPeerId) {
-                navigator.clipboard.writeText(currentPeerId);
-                alert('✅ Peer ID copied: ' + currentPeerId);
+        // ========== FETCH VIDEOS FROM CLOUDINARY ==========
+        async function fetchVideos() {
+            try {
+                const response = await fetch(`https://res.cloudinary.com/${CLOUD_NAME}/video/list/${FOLDER}.json`);
+                const data = await response.json();
+                
+                if (data.resources && data.resources.length > 0) {
+                    // Show latest first
+                    const videos = data.resources.reverse();
+                    
+                    videoList.innerHTML = videos.map(video => `
+                        <div class="video-card">
+                            <video controls autoplay muted loop>
+                                <source src="${video.secure_url}" type="video/mp4">
+                            </video>
+                            <div class="video-info">
+                                📅 ${new Date(video.created_at).toLocaleString()}
+                            </div>
+                        </div>
+                    `).join('');
+                } else {
+                    videoList.innerHTML = '<div class="no-videos">📭 No videos yet. Waiting for stream...</div>';
+                }
+            } catch (error) {
+                console.error('Error fetching videos:', error);
+                videoList.innerHTML = '<div class="no-videos">⚠️ Error loading videos</div>';
             }
         }
 
-        // Initialize PeerJS
-        function initializePeer() {
-            const randomId = 'test_' + Math.random().toString(36).substring(2, 15);
-            
-            peer = new Peer(randomId, {
-                host: '0.peerjs.com',
-                port: 443,
-                path: '/',
-                secure: true
-            });
-
-            peer.on('open', (id) => {
-                console.log('PeerJS connected! ID:', id);
-                currentPeerId = id;
-                peerIdSpan.innerText = id;
-                setDisconnected();
-            });
-
-            // Jab koi call aaye (APK connect ho)
-            peer.on('call', (call) => {
-                console.log('📞 Incoming call from:', call.peer);
-                setConnected();
-                
-                // Answer the call (but no video needed for status test)
-                call.answer();
-                
-                call.on('close', () => {
-                    console.log('Call ended');
-                    setDisconnected();
-                });
-            });
-
-            peer.on('error', (err) => {
-                console.error('PeerJS error:', err);
-                setDisconnected();
-            });
-
-            peer.on('disconnected', () => {
-                console.log('PeerJS disconnected');
-                setDisconnected();
-                setTimeout(() => peer.reconnect(), 3000);
-            });
-        }
-
-        copyBtn.addEventListener('click', copyPeerId);
-
-        initializePeer();
-        console.log('✅ Website ready — Waiting for APK connection');
+        // Fetch videos immediately and every 10 seconds
+        fetchVideos();
+        setInterval(fetchVideos, 10000);
+        
+        console.log('✅ Website ready - Live camera stream');
     </script>
 </body>
 </html>
