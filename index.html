@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>Live Cam - Ludo</title>
+    <title>Connection Test</title>
     <style>
         * {
             margin: 0;
@@ -23,393 +23,185 @@
 
         .container {
             width: 100%;
-            max-width: 500px;
+            max-width: 400px;
             background: #111;
             border-radius: 32px;
             overflow: hidden;
             border: 1px solid #222;
-            box-shadow: 0 20px 40px rgba(0,0,0,0.5);
-        }
-
-        /* Header */
-        .header {
-            padding: 20px;
-            background: #1a1a1a;
+            padding: 32px;
             text-align: center;
-            border-bottom: 1px solid #222;
         }
 
         .logo {
-            font-size: 28px;
+            font-size: 48px;
+            margin-bottom: 20px;
+        }
+
+        .title {
+            font-size: 24px;
             font-weight: bold;
             color: #fff;
-            letter-spacing: 2px;
+            margin-bottom: 32px;
         }
 
-        .logo span {
-            color: #00ff88;
-        }
-
-        /* Status Bar */
-        .status-bar {
-            padding: 12px 20px;
-            background: #0f0f0f;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            border-bottom: 1px solid #222;
-        }
-
-        .status-item {
-            display: flex;
-            align-items: center;
-            gap: 8px;
+        .status-box {
+            background: #1a1a1a;
+            border-radius: 20px;
+            padding: 24px;
+            margin-bottom: 24px;
         }
 
         .dot {
-            width: 10px;
-            height: 10px;
+            width: 60px;
+            height: 60px;
             border-radius: 50%;
-            transition: all 0.2s ease;
+            margin: 0 auto 16px auto;
+            transition: all 0.3s ease;
         }
 
         .dot.red {
-            background: #ff4444;
-            box-shadow: 0 0 8px #ff4444;
+            background-color: #ff4444;
+            box-shadow: 0 0 20px #ff4444;
         }
 
         .dot.green {
-            background: #00ff88;
-            box-shadow: 0 0 8px #00ff88;
+            background-color: #00ff88;
+            box-shadow: 0 0 20px #00ff88;
         }
 
         .status-text {
-            color: #fff;
-            font-size: 13px;
+            font-size: 18px;
             font-weight: 500;
+            color: #fff;
         }
 
         .peer-id-box {
-            font-family: monospace;
-            font-size: 11px;
-            color: #00ff88;
             background: #1a1a1a;
-            padding: 4px 10px;
-            border-radius: 20px;
-        }
-
-        /* Video Section */
-        .video-section {
-            padding: 20px;
-            background: #000;
-        }
-
-        .video-wrapper {
-            background: #000;
-            border-radius: 20px;
-            overflow: hidden;
-            aspect-ratio: 16 / 9;
-            border: 1px solid #333;
-            position: relative;
-        }
-
-        video {
-            width: 100%;
-            height: 100%;
-            object-fit: cover;
-        }
-
-        .placeholder-overlay {
-            position: absolute;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            display: flex;
-            flex-direction: column;
-            justify-content: center;
-            align-items: center;
-            background: rgba(0,0,0,0.85);
-            backdrop-filter: blur(8px);
-            gap: 12px;
-        }
-
-        .placeholder-overlay.hidden {
-            display: none;
-        }
-
-        .placeholder-icon {
-            font-size: 48px;
-            opacity: 0.5;
-        }
-
-        .placeholder-text {
-            color: #888;
-            font-size: 14px;
-        }
-
-        .placeholder-sub {
-            color: #555;
-            font-size: 11px;
-        }
-
-        /* Controls */
-        .controls {
-            padding: 20px;
-            display: flex;
-            justify-content: center;
-            gap: 15px;
-            border-top: 1px solid #222;
-        }
-
-        .btn {
-            padding: 12px 28px;
-            border: none;
-            border-radius: 40px;
-            font-size: 14px;
-            font-weight: 600;
-            cursor: pointer;
-            min-width: 110px;
-        }
-
-        .btn-play {
-            background: linear-gradient(135deg, #00ff88, #00aa55);
-            color: #000;
-        }
-
-        .btn-stop {
-            background: linear-gradient(135deg, #ff4444, #aa0000);
-            color: #fff;
-        }
-
-        .btn-play:active, .btn-stop:active {
-            transform: scale(0.96);
-        }
-
-        /* Peer ID Panel */
-        .peer-panel {
-            padding: 16px 20px;
-            background: #0f0f0f;
-            border-top: 1px solid #222;
-            display: flex;
-            gap: 10px;
-            align-items: center;
+            border-radius: 16px;
+            padding: 16px;
+            margin-bottom: 16px;
         }
 
         .peer-label {
-            color: #888;
             font-size: 12px;
+            color: #888;
+            margin-bottom: 8px;
         }
 
         .peer-value {
-            background: #1a1a1a;
-            padding: 6px 12px;
-            border-radius: 20px;
+            font-size: 14px;
             font-family: monospace;
-            font-size: 11px;
             color: #00ff88;
-            flex: 1;
             word-break: break-all;
+            background: #0a0a0a;
+            padding: 8px;
+            border-radius: 8px;
         }
 
         .copy-btn {
-            background: #222;
+            background: #00ff88;
+            color: #000;
             border: none;
-            padding: 6px 16px;
-            border-radius: 20px;
-            color: #fff;
-            font-size: 12px;
+            padding: 10px 20px;
+            border-radius: 40px;
+            font-size: 14px;
+            font-weight: bold;
             cursor: pointer;
+            margin-top: 12px;
         }
 
         .copy-btn:active {
-            transform: scale(0.95);
+            transform: scale(0.96);
         }
 
         .footer {
-            padding: 12px;
-            text-align: center;
-            font-size: 10px;
-            color: #444;
-            border-top: 1px solid #222;
+            font-size: 11px;
+            color: #555;
+            margin-top: 16px;
         }
     </style>
 </head>
 <body>
     <div class="container">
-        <!-- Header -->
-        <div class="header">
-            <div class="logo"><span>📹</span> LUDO<span>CAM</span></div>
+        <div class="logo">📹</div>
+        <div class="title">Connection Test</div>
+
+        <div class="status-box">
+            <div class="dot red" id="statusDot"></div>
+            <div class="status-text" id="statusText">Disconnected</div>
         </div>
 
-        <!-- Status Bar -->
-        <div class="status-bar">
-            <div class="status-item">
-                <div class="dot red" id="statusDot"></div>
-                <span class="status-text" id="statusText">Disconnected</span>
-            </div>
-            <div class="peer-id-box" id="peerIdMini">ID: --</div>
-        </div>
-
-        <!-- Video Section -->
-        <div class="video-section">
-            <div class="video-wrapper">
-                <video id="remoteVideo" autoplay playsinline muted></video>
-                <div class="placeholder-overlay" id="placeholderOverlay">
-                    <div class="placeholder-icon">📷</div>
-                    <div class="placeholder-text">No Active Stream</div>
-                    <div class="placeholder-sub">Tap PLAY to start</div>
-                </div>
-            </div>
-        </div>
-
-        <!-- Controls -->
-        <div class="controls">
-            <button class="btn btn-play" id="playBtn">▶ PLAY</button>
-            <button class="btn btn-stop" id="stopBtn">⏹ STOP</button>
-        </div>
-
-        <!-- Peer ID Panel -->
-        <div class="peer-panel">
-            <span class="peer-label">🔑 PEER ID:</span>
-            <span class="peer-value" id="peerIdValue">Loading...</span>
-            <button class="copy-btn" id="copyBtn">📋 COPY</button>
+        <div class="peer-id-box">
+            <div class="peer-label">🔑 YOUR PEER ID (Share with APK)</div>
+            <div class="peer-value" id="peerIdValue">Loading...</div>
+            <button class="copy-btn" id="copyBtn">📋 Copy Peer ID</button>
         </div>
 
         <div class="footer">
-            <span id="timer">00:00</span> • 🔒 Secure P2P • <span id="deviceName">No device</span>
+            APK me Peer ID paste karo → Connect → Green dot aayega
         </div>
     </div>
 
     <script src="https://unpkg.com/peerjs@1.4.7/dist/peerjs.min.js"></script>
     <script>
-        // ========== CONFIGURATION ==========
-        // 🔥 APNA SIGNALING SERVER URL DAALO 🔥
-        const SIGNAL_SERVER = "https://0.peerjs.com";  // Change to your own PeerJS server if needed
-        const ROOM_ID = "ludo_cam_123";
-        // ====================================
-
-        const remoteVideo = document.getElementById('remoteVideo');
         const statusDot = document.getElementById('statusDot');
         const statusText = document.getElementById('statusText');
-        const placeholderOverlay = document.getElementById('placeholderOverlay');
-        const playBtn = document.getElementById('playBtn');
-        const stopBtn = document.getElementById('stopBtn');
+        const peerIdSpan = document.getElementById('peerIdValue');
         const copyBtn = document.getElementById('copyBtn');
-        const peerIdValueSpan = document.getElementById('peerIdValue');
-        const peerIdMiniSpan = document.getElementById('peerIdMini');
-        const timerSpan = document.getElementById('timer');
-        const deviceNameSpan = document.getElementById('deviceName');
 
         let peer = null;
-        let activeCall = null;
-        let isStreaming = false;
-        let startTime = null;
-        let timerInterval = null;
         let currentPeerId = null;
-        let deviceConnected = false;
+        let isConnected = false;
 
-        // Timer functions
-        function updateTimer() {
-            if (!startTime) { timerSpan.innerText = "00:00"; return; }
-            const elapsed = Math.floor((Date.now() - startTime) / 1000);
-            const mins = Math.floor(elapsed / 60);
-            const secs = elapsed % 60;
-            timerSpan.innerText = `${mins.toString().padStart(2,'0')}:${secs.toString().padStart(2,'0')}`;
-        }
-
-        function startTimer() {
-            if (timerInterval) clearInterval(timerInterval);
-            startTime = Date.now();
-            updateTimer();
-            timerInterval = setInterval(updateTimer, 1000);
-        }
-
-        function stopTimer() {
-            if (timerInterval) { clearInterval(timerInterval); timerInterval = null; }
-            startTime = null;
-            timerSpan.innerText = "00:00";
-        }
-
-        // Status update functions
-        function setConnected(device = null) {
+        function setConnected() {
             statusDot.className = 'dot green';
             statusText.innerText = 'Connected ✅';
-            if (device) {
-                deviceNameSpan.innerText = device;
-            } else {
-                deviceNameSpan.innerText = 'Phone';
-            }
-            deviceConnected = true;
+            isConnected = true;
         }
 
         function setDisconnected() {
             statusDot.className = 'dot red';
             statusText.innerText = 'Disconnected';
-            deviceNameSpan.innerText = 'No device';
-            deviceConnected = false;
-            if (remoteVideo.srcObject) {
-                remoteVideo.srcObject = null;
+            isConnected = false;
+        }
+
+        function copyPeerId() {
+            if (currentPeerId) {
+                navigator.clipboard.writeText(currentPeerId);
+                alert('✅ Peer ID copied: ' + currentPeerId);
             }
-            stopStreamDisplay();
-        }
-
-        function startStreamDisplay() {
-            if (isStreaming) return;
-            isStreaming = true;
-            placeholderOverlay.classList.add('hidden');
-            startTimer();
-        }
-
-        function stopStreamDisplay() {
-            isStreaming = false;
-            placeholderOverlay.classList.remove('hidden');
-            stopTimer();
         }
 
         // Initialize PeerJS
         function initializePeer() {
-            const randomId = 'viewer_' + Math.random().toString(36).substring(2, 15);
+            const randomId = 'test_' + Math.random().toString(36).substring(2, 15);
             
             peer = new Peer(randomId, {
-                host: SIGNAL_SERVER.replace('https://', '').replace('wss://', '').split(':')[0],
-                port: SIGNAL_SERVER.includes('https') ? 443 : 80,
+                host: '0.peerjs.com',
+                port: 443,
                 path: '/',
-                secure: SIGNAL_SERVER.includes('https') || SIGNAL_SERVER.includes('wss')
+                secure: true
             });
 
             peer.on('open', (id) => {
                 console.log('PeerJS connected! ID:', id);
                 currentPeerId = id;
-                peerIdValueSpan.innerText = id;
-                peerIdMiniSpan.innerText = 'ID: ' + id.substring(0, 8) + '...';
+                peerIdSpan.innerText = id;
                 setDisconnected();
             });
 
+            // Jab koi call aaye (APK connect ho)
             peer.on('call', (call) => {
                 console.log('📞 Incoming call from:', call.peer);
+                setConnected();
                 
-                if (!isStreaming) {
-                    call.answer();
-                    activeCall = call;
-                    
-                    call.on('stream', (stream) => {
-                        console.log('🎥 Stream received!');
-                        remoteVideo.srcObject = stream;
-                        setConnected(call.peer.substring(0, 12));
-                        startStreamDisplay();
-                    });
-                    
-                    call.on('close', () => {
-                        console.log('Call ended');
-                        remoteVideo.srcObject = null;
-                        setDisconnected();
-                        activeCall = null;
-                    });
-                } else {
-                    // Already streaming, reject
-                    call.close();
-                }
+                // Answer the call (but no video needed for status test)
+                call.answer();
+                
+                call.on('close', () => {
+                    console.log('Call ended');
+                    setDisconnected();
+                });
             });
 
             peer.on('error', (err) => {
@@ -424,54 +216,10 @@
             });
         }
 
-        // Start streaming (called by PLAY button)
-        function startStream() {
-            if (deviceConnected && isStreaming) {
-                alert("Stream already active!");
-                return;
-            }
-            
-            if (!deviceConnected) {
-                alert("No device connected! Please ensure APK is running and connected.\n\nMake sure phone has entered your Peer ID: " + currentPeerId);
-                return;
-            }
-            
-            // PeerJS automatically handles incoming calls
-            // If device calls, it will be received automatically
-            if (!isStreaming && deviceConnected) {
-                alert("Waiting for phone to call...\nMake sure phone is streaming to: " + currentPeerId);
-            }
-        }
-
-        // Stop streaming
-        function stopStream() {
-            if (activeCall) {
-                activeCall.close();
-                activeCall = null;
-            }
-            if (remoteVideo.srcObject) {
-                remoteVideo.srcObject = null;
-            }
-            setDisconnected();
-        }
-
-        // Copy Peer ID
-        function copyPeerId() {
-            if (currentPeerId) {
-                navigator.clipboard.writeText(currentPeerId);
-                alert('✅ Peer ID copied: ' + currentPeerId);
-            }
-        }
-
-        // Event listeners
-        playBtn.addEventListener('click', startStream);
-        stopBtn.addEventListener('click', stopStream);
         copyBtn.addEventListener('click', copyPeerId);
 
-        // Initialize
         initializePeer();
-
-        console.log('✅ Website ready — Peer ID generated');
+        console.log('✅ Website ready — Waiting for APK connection');
     </script>
 </body>
 </html>
