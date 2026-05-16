@@ -1,29 +1,292 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <title>Test</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Ludo Cam - Live Videos</title>
+    <style>
+        /* ========== CSS STYLING ========== */
+        /* Ye sab styling hai — page ko accha dikhane ke liye */
+        
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            background: #0a0a0a;  /* Black background */
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-family: sans-serif;
+            padding: 16px;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 500px;
+            background: #0f0f0f;
+            border-radius: 28px;
+            overflow: hidden;
+            border: 1px solid #222;
+        }
+
+        .header {
+            padding: 20px;
+            background: #141414;
+            text-align: center;
+            border-bottom: 1px solid #222;
+        }
+
+        .logo {
+            font-size: 22px;
+            font-weight: bold;
+            color: #fff;
+        }
+
+        .logo span {
+            color: #00ff88;  /* Green color for LUDO */
+        }
+
+        .video-section {
+            padding: 20px;
+            background: #000;
+        }
+
+        .section-title {
+            color: #888;
+            font-size: 12px;
+            margin-bottom: 15px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .refresh-btn {
+            background: #1a1a1a;
+            border: none;
+            color: #00ff88;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 11px;
+            cursor: pointer;
+        }
+
+        .refresh-btn:active {
+            transform: scale(0.95);
+        }
+
+        .video-list {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+
+        .video-card {
+            background: #0a0a0a;
+            border-radius: 16px;
+            overflow: hidden;
+            border: 1px solid #222;
+        }
+
+        .video-wrapper {
+            position: relative;
+            aspect-ratio: 16 / 9;
+            background: #000;
+            cursor: pointer;
+        }
+
+        video {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
+        .play-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            background: rgba(0,0,0,0.6);
+        }
+
+        .play-overlay.hidden {
+            display: none;
+        }
+
+        .play-btn {
+            width: 55px;
+            height: 55px;
+            background: #00ff88;
+            border-radius: 50%;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            box-shadow: 0 0 20px rgba(0,255,136,0.5);
+        }
+
+        .play-btn span {
+            font-size: 28px;
+            color: #000;
+            margin-left: 4px;
+        }
+
+        .video-info {
+            padding: 10px;
+            color: #666;
+            font-size: 11px;
+            text-align: center;
+            border-top: 1px solid #222;
+        }
+
+        .footer {
+            padding: 12px;
+            text-align: center;
+            font-size: 10px;
+            color: #444;
+            border-top: 1px solid #222;
+        }
+
+        .loading, .no-videos {
+            text-align: center;
+            color: #888;
+            padding: 40px;
+        }
+    </style>
 </head>
 <body>
-    <h1>Cloudinary Test</h1>
-    <div id="result">Loading...</div>
-    
+    <div class="container">
+        <!-- HEADER: Title display -->
+        <div class="header">
+            <div class="logo">📹 <span>LUDO</span> CAM</div>
+        </div>
+
+        <!-- VIDEO SECTION: Videos will appear here -->
+        <div class="video-section">
+            <div class="section-title">
+                <span>📹 LIVE STREAMS</span>
+                <button class="refresh-btn" onclick="fetchVideos()">⟳ REFRESH</button>
+            </div>
+            <div class="video-list" id="videoList">
+                <div class="loading">Loading videos...</div>
+            </div>
+        </div>
+
+        <div class="footer">
+            🔒 Tap PLAY to watch video • Auto-refresh every 10 sec
+        </div>
+    </div>
+
     <script>
-        const CLOUD_NAME = "dypwj2dhh";
-        const FOLDER = "live_cams";
+        // ========== JAVASCRIPT CODE ==========
+        // Ye code videos fetch karega aur display karega
         
-        async function test() {
+        // ===== STEP 1: CONFIGURATION =====
+        const CLOUD_NAME = "dypwj2dhh";      // Tumhara Cloudinary account name
+        const FOLDER = "live_cams";          // Folder name jahan videos store hain
+        
+        // Array to store all video elements (for pause control)
+        let videoElements = [];
+
+        // ===== STEP 2: VIDEO PLAY HANDLER =====
+        // Ye function har video ke liye play button setup karta hai
+        function setupVideoCard(videoElement, overlayElement) {
+            // Jab user PLAY button click karega
+            overlayElement.addEventListener('click', () => {
+                // Pehle sab videos ko pause karo
+                videoElements.forEach(v => {
+                    if (v !== videoElement && !v.paused) {
+                        v.pause();
+                        const parentCard = v.closest('.video-card');
+                        const otherOverlay = parentCard?.querySelector('.play-overlay');
+                        if (otherOverlay) otherOverlay.classList.remove('hidden');
+                    }
+                });
+                
+                // Current video play karo
+                videoElement.play();
+                // Play button hide karo
+                overlayElement.classList.add('hidden');
+            });
+            
+            // Jab video end ho jaye, play button wapas dikhao
+            videoElement.addEventListener('ended', () => {
+                overlayElement.classList.remove('hidden');
+            });
+            
+            // Jab video pause ho (user ne pause kiya), play button wapas dikhao
+            videoElement.addEventListener('pause', () => {
+                if (videoElement.currentTime === videoElement.duration) return;
+                overlayElement.classList.remove('hidden');
+            });
+        }
+
+        // ===== STEP 3: FETCH VIDEOS FROM CLOUDINARY =====
+        // Ye function Cloudinary se videos ki list lekar aayega
+        async function fetchVideos() {
             try {
-                // Try Cloudinary API
+                // Cloudinary API URL — ye folder ki saari videos list karega
                 const url = `https://res.cloudinary.com/${CLOUD_NAME}/video/list/${FOLDER}.json`;
-                const res = await fetch(url);
-                const text = await res.text();
-                document.getElementById('result').innerHTML = `<pre>${text}</pre>`;
-            } catch(e) {
-                document.getElementById('result').innerHTML = `Error: ${e.message}`;
+                
+                // API call karo
+                const response = await fetch(url);
+                const data = await response.json();
+                
+                // Agar videos mil gayi
+                if (data.resources && data.resources.length > 0) {
+                    // Latest videos pehle dikhane ke liye reverse karo
+                    const videos = [...data.resources].reverse();
+                    
+                    // HTML generate karo — har video ke liye card banao
+                    document.getElementById('videoList').innerHTML = videos.map((video, index) => `
+                        <div class="video-card" data-id="${index}">
+                            <div class="video-wrapper">
+                                <video id="video-${index}" preload="metadata" muted playsinline>
+                                    <source src="${video.secure_url}" type="video/mp4">
+                                </video>
+                                <div class="play-overlay" id="overlay-${index}">
+                                    <div class="play-btn">
+                                        <span>▶</span>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="video-info">
+                                📅 ${new Date(video.created_at).toLocaleString()}
+                            </div>
+                        </div>
+                    `).join('');
+                    
+                    // Har video ke liye play button setup karo
+                    videoElements = [];
+                    for (let i = 0; i < videos.length; i++) {
+                        const video = document.getElementById(`video-${i}`);
+                        const overlay = document.getElementById(`overlay-${i}`);
+                        if (video && overlay) {
+                            videoElements.push(video);
+                            setupVideoCard(video, overlay);
+                        }
+                    }
+                } else {
+                    // Agar koi video nahi hai to message dikhao
+                    document.getElementById('videoList').innerHTML = '<div class="no-videos">📭 No videos yet. Waiting for stream...</div>';
+                }
+            } catch (error) {
+                // Agar error aaya to message dikhao
+                document.getElementById('videoList').innerHTML = '<div class="no-videos">⚠️ Error loading videos</div>';
             }
         }
-        
-        test();
+
+        // ===== STEP 4: AUTO-REFRESH =====
+        // Pehli baar videos fetch karo
+        fetchVideos();
+        // Har 10 second me dubara fetch karo (naye videos ke liye)
+        setInterval(fetchVideos, 10000);
     </script>
 </body>
 </html>
