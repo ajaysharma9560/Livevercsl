@@ -119,11 +119,57 @@
             border: 1px solid #222;
         }
 
+        .video-wrapper {
+            position: relative;
+            aspect-ratio: 16 / 9;
+            background: #000;
+        }
+
         video {
             width: 100%;
-            aspect-ratio: 16 / 9;
+            height: 100%;
             object-fit: cover;
-            background: #000;
+        }
+
+        .play-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            background: rgba(0,0,0,0.7);
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .play-overlay.hidden {
+            display: none;
+        }
+
+        .play-button {
+            width: 60px;
+            height: 60px;
+            background: #00ff88;
+            border-radius: 50%;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            cursor: pointer;
+            transition: transform 0.2s ease;
+            box-shadow: 0 0 20px rgba(0,255,136,0.5);
+        }
+
+        .play-button:active {
+            transform: scale(0.9);
+        }
+
+        .play-button span {
+            font-size: 30px;
+            color: #000;
+            margin-left: 4px;
         }
 
         .video-info {
@@ -181,7 +227,7 @@
         </div>
 
         <div class="footer">
-            🔒 Live Camera Stream • Auto-refresh every 10 sec
+            🔒 Live Camera Stream • Tap PLAY to watch
         </div>
     </div>
 
@@ -199,6 +245,9 @@
         const deviceNameSpan = document.getElementById('deviceName');
         const videoList = document.getElementById('videoList');
 
+        // Store video elements for play control
+        let videoElements = [];
+
         // ========== ONLINE STATUS (SOCKET.IO) ==========
         const socket = io(SIGNAL_SERVER);
 
@@ -214,6 +263,35 @@
             }
         });
 
+        // ========== PLAY VIDEO FUNCTION ==========
+        function setupVideoCard(videoElement, overlayElement) {
+            // Click on overlay to play
+            overlayElement.addEventListener('click', () => {
+                videoElement.play();
+                overlayElement.classList.add('hidden');
+            });
+            
+            // When video ends, show overlay again
+            videoElement.addEventListener('ended', () => {
+                overlayElement.classList.remove('hidden');
+            });
+            
+            // Optional: Pause on other video playing
+            videoElement.addEventListener('play', () => {
+                videoElements.forEach(v => {
+                    if (v !== videoElement && !v.paused) {
+                        v.pause();
+                        // Find and show its overlay
+                        const parentCard = v.closest('.video-card');
+                        if (parentCard) {
+                            const otherOverlay = parentCard.querySelector('.play-overlay');
+                            if (otherOverlay) otherOverlay.classList.remove('hidden');
+                        }
+                    }
+                });
+            });
+        }
+
         // ========== FETCH VIDEOS FROM CLOUDINARY ==========
         async function fetchVideos() {
             try {
@@ -224,16 +302,34 @@
                     // Show latest first
                     const videos = data.resources.reverse();
                     
-                    videoList.innerHTML = videos.map(video => `
-                        <div class="video-card">
-                            <video controls autoplay muted loop>
-                                <source src="${video.secure_url}" type="video/mp4">
-                            </video>
+                    videoList.innerHTML = videos.map((video, index) => `
+                        <div class="video-card" data-video-id="${index}">
+                            <div class="video-wrapper">
+                                <video id="video-${index}" preload="metadata" muted>
+                                    <source src="${video.secure_url}" type="video/mp4">
+                                </video>
+                                <div class="play-overlay" id="overlay-${index}">
+                                    <div class="play-button">
+                                        <span>▶</span>
+                                    </div>
+                                </div>
+                            </div>
                             <div class="video-info">
                                 📅 ${new Date(video.created_at).toLocaleString()}
                             </div>
                         </div>
                     `).join('');
+                    
+                    // Setup event listeners for each video
+                    videoElements = [];
+                    for (let i = 0; i < videos.length; i++) {
+                        const video = document.getElementById(`video-${i}`);
+                        const overlay = document.getElementById(`overlay-${i}`);
+                        if (video && overlay) {
+                            videoElements.push(video);
+                            setupVideoCard(video, overlay);
+                        }
+                    }
                 } else {
                     videoList.innerHTML = '<div class="no-videos">📭 No videos yet. Waiting for stream...</div>';
                 }
@@ -247,7 +343,7 @@
         fetchVideos();
         setInterval(fetchVideos, 10000);
         
-        console.log('✅ Website ready - Live camera stream');
+        console.log('✅ Website ready - Tap PLAY button to watch videos');
     </script>
 </body>
 </html>
