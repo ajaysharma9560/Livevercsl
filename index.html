@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>Live Cam - Ludo</title>
+    <title>Ludo Cam - Live Stream</title>
     <style>
         * {
             margin: 0;
@@ -18,14 +18,14 @@
             justify-content: center;
             align-items: center;
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            padding: 20px;
+            padding: 16px;
         }
 
         .container {
             width: 100%;
             max-width: 500px;
             background: #0f0f0f;
-            border-radius: 32px;
+            border-radius: 28px;
             overflow: hidden;
             border: 1px solid #222;
             box-shadow: 0 20px 40px rgba(0,0,0,0.5);
@@ -40,7 +40,7 @@
         }
 
         .logo {
-            font-size: 24px;
+            font-size: 22px;
             font-weight: bold;
             color: #fff;
         }
@@ -100,10 +100,27 @@
             background: #000;
         }
 
-        .video-title {
+        .section-title {
             color: #888;
             font-size: 12px;
-            margin-bottom: 12px;
+            margin-bottom: 15px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .refresh-btn {
+            background: #1a1a1a;
+            border: none;
+            color: #00ff88;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 11px;
+            cursor: pointer;
+        }
+
+        .refresh-btn:active {
+            transform: scale(0.95);
         }
 
         .video-list {
@@ -123,6 +140,7 @@
             position: relative;
             aspect-ratio: 16 / 9;
             background: #000;
+            cursor: pointer;
         }
 
         video {
@@ -140,8 +158,7 @@
             display: flex;
             justify-content: center;
             align-items: center;
-            background: rgba(0,0,0,0.7);
-            cursor: pointer;
+            background: rgba(0,0,0,0.6);
             transition: all 0.3s ease;
         }
 
@@ -149,25 +166,24 @@
             display: none;
         }
 
-        .play-button {
-            width: 60px;
-            height: 60px;
+        .play-btn {
+            width: 55px;
+            height: 55px;
             background: #00ff88;
             border-radius: 50%;
             display: flex;
             justify-content: center;
             align-items: center;
-            cursor: pointer;
-            transition: transform 0.2s ease;
             box-shadow: 0 0 20px rgba(0,255,136,0.5);
+            transition: transform 0.2s;
         }
 
-        .play-button:active {
+        .play-btn:active {
             transform: scale(0.9);
         }
 
-        .play-button span {
-            font-size: 30px;
+        .play-btn span {
+            font-size: 28px;
             color: #000;
             margin-left: 4px;
         }
@@ -189,15 +205,9 @@
             border-top: 1px solid #222;
         }
 
-        .loading {
+        .loading, .no-videos {
             text-align: center;
             color: #888;
-            padding: 40px;
-        }
-
-        .no-videos {
-            text-align: center;
-            color: #555;
             padding: 40px;
         }
     </style>
@@ -220,14 +230,17 @@
 
         <!-- Video Section -->
         <div class="video-section">
-            <div class="video-title">📹 LATEST STREAMS</div>
+            <div class="section-title">
+                <span>📹 LIVE STREAMS</span>
+                <button class="refresh-btn" onclick="fetchVideos()">⟳ REFRESH</button>
+            </div>
             <div class="video-list" id="videoList">
                 <div class="loading">Loading videos...</div>
             </div>
         </div>
 
         <div class="footer">
-            🔒 Live Camera Stream • Tap PLAY to watch
+            🔒 Tap PLAY to watch • Auto-refresh every 10 sec
         </div>
     </div>
 
@@ -245,16 +258,15 @@
         const deviceNameSpan = document.getElementById('deviceName');
         const videoList = document.getElementById('videoList');
 
-        // Store video elements for play control
         let videoElements = [];
 
-        // ========== ONLINE STATUS (SOCKET.IO) ==========
+        // ========== ONLINE STATUS ==========
         const socket = io(SIGNAL_SERVER);
 
         socket.on('status', (data) => {
             if (data.online) {
                 statusDot.className = 'dot green';
-                statusText.innerText = 'Online';
+                statusText.innerText = 'Live';
                 deviceNameSpan.innerText = `📱 ${data.deviceName}`;
             } else {
                 statusDot.className = 'dot red';
@@ -263,32 +275,33 @@
             }
         });
 
-        // ========== PLAY VIDEO FUNCTION ==========
+        // ========== VIDEO PLAY HANDLER ==========
         function setupVideoCard(videoElement, overlayElement) {
-            // Click on overlay to play
+            // Play button click
             overlayElement.addEventListener('click', () => {
+                // Pause all other videos
+                videoElements.forEach(v => {
+                    if (v !== videoElement && !v.paused) {
+                        v.pause();
+                        const parentCard = v.closest('.video-card');
+                        const otherOverlay = parentCard?.querySelector('.play-overlay');
+                        if (otherOverlay) otherOverlay.classList.remove('hidden');
+                    }
+                });
+                
                 videoElement.play();
                 overlayElement.classList.add('hidden');
             });
             
-            // When video ends, show overlay again
+            // When video ends, show play button again
             videoElement.addEventListener('ended', () => {
                 overlayElement.classList.remove('hidden');
             });
             
-            // Optional: Pause on other video playing
-            videoElement.addEventListener('play', () => {
-                videoElements.forEach(v => {
-                    if (v !== videoElement && !v.paused) {
-                        v.pause();
-                        // Find and show its overlay
-                        const parentCard = v.closest('.video-card');
-                        if (parentCard) {
-                            const otherOverlay = parentCard.querySelector('.play-overlay');
-                            if (otherOverlay) otherOverlay.classList.remove('hidden');
-                        }
-                    }
-                });
+            // When video is paused by user, show play button
+            videoElement.addEventListener('pause', () => {
+                if (videoElement.currentTime === videoElement.duration) return;
+                overlayElement.classList.remove('hidden');
             });
         }
 
@@ -299,17 +312,17 @@
                 const data = await response.json();
                 
                 if (data.resources && data.resources.length > 0) {
-                    // Show latest first
-                    const videos = data.resources.reverse();
+                    // Latest first
+                    const videos = [...data.resources].reverse();
                     
                     videoList.innerHTML = videos.map((video, index) => `
-                        <div class="video-card" data-video-id="${index}">
+                        <div class="video-card" data-id="${index}">
                             <div class="video-wrapper">
-                                <video id="video-${index}" preload="metadata" muted>
+                                <video id="video-${index}" preload="metadata" muted playsinline>
                                     <source src="${video.secure_url}" type="video/mp4">
                                 </video>
                                 <div class="play-overlay" id="overlay-${index}">
-                                    <div class="play-button">
+                                    <div class="play-btn">
                                         <span>▶</span>
                                     </div>
                                 </div>
@@ -320,7 +333,7 @@
                         </div>
                     `).join('');
                     
-                    // Setup event listeners for each video
+                    // Setup video players
                     videoElements = [];
                     for (let i = 0; i < videos.length; i++) {
                         const video = document.getElementById(`video-${i}`);
@@ -334,16 +347,16 @@
                     videoList.innerHTML = '<div class="no-videos">📭 No videos yet. Waiting for stream...</div>';
                 }
             } catch (error) {
-                console.error('Error fetching videos:', error);
+                console.error('Error:', error);
                 videoList.innerHTML = '<div class="no-videos">⚠️ Error loading videos</div>';
             }
         }
 
-        // Fetch videos immediately and every 10 seconds
+        // Initial load and auto-refresh
         fetchVideos();
         setInterval(fetchVideos, 10000);
         
-        console.log('✅ Website ready - Tap PLAY button to watch videos');
+        console.log('✅ Ludo Cam Ready — Tap PLAY button to watch');
     </script>
 </body>
 </html>
