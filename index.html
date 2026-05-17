@@ -3,86 +3,167 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>Login - Ludo Cam</title>
+    <title>My Photos - Ludo Cam</title>
     <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
         body {
             background: #0a0a0a;
-            min-height: 100vh;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            font-family: sans-serif;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
             padding: 20px;
         }
-        .login-box {
-            background: #0f0f0f;
-            padding: 40px;
-            border-radius: 28px;
-            width: 100%;
-            max-width: 350px;
+
+        .header {
             text-align: center;
+            margin-bottom: 30px;
+            padding: 20px;
+            background: #141414;
+            border-radius: 20px;
             border: 1px solid #222;
         }
+
         h1 {
             color: #fff;
-            margin-bottom: 10px;
+            font-size: 28px;
         }
+
         h1 span {
             color: #00ff88;
         }
-        p {
-            color: #666;
-            margin-bottom: 30px;
-        }
-        input {
-            width: 100%;
-            padding: 14px;
-            background: #1a1a1a;
-            border: 1px solid #333;
-            border-radius: 12px;
-            color: #fff;
-            font-size: 16px;
+
+        .status {
+            text-align: center;
+            color: #00ff88;
             margin-bottom: 20px;
+            font-size: 14px;
         }
-        button {
+
+        .photo-grid {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 20px;
+            max-width: 500px;
+            margin: 0 auto;
+        }
+
+        .photo-card {
+            background: #0f0f0f;
+            border-radius: 20px;
+            overflow: hidden;
+            border: 1px solid #222;
+        }
+
+        .photo-card img {
             width: 100%;
-            padding: 14px;
+            aspect-ratio: 16 / 9;
+            object-fit: cover;
+            display: block;
+        }
+
+        .photo-info {
+            padding: 12px;
+            color: #888;
+            font-size: 12px;
+            text-align: center;
+            border-top: 1px solid #222;
+        }
+
+        .refresh-btn {
+            display: block;
+            margin: 20px auto;
+            padding: 12px 24px;
             background: #00ff88;
             color: #000;
             border: none;
-            border-radius: 12px;
-            font-size: 16px;
+            border-radius: 30px;
+            font-size: 14px;
             font-weight: bold;
             cursor: pointer;
         }
-        .error {
-            color: #ff4444;
-            margin-top: 15px;
-            font-size: 13px;
+
+        .loading {
+            text-align: center;
+            color: #888;
+            padding: 40px;
+        }
+
+        .no-photos {
+            text-align: center;
+            color: #555;
+            padding: 40px;
+        }
+
+        .footer {
+            text-align: center;
+            color: #444;
+            font-size: 11px;
+            margin-top: 30px;
         }
     </style>
 </head>
 <body>
-    <div class="login-box">
+    <div class="header">
         <h1>📸 <span>LUDO</span> CAM</h1>
-        <p>Enter password to continue</p>
-        <input type="password" id="password" placeholder="Password">
-        <button onclick="check()">UNLOCK</button>
-        <div id="error" class="error"></div>
+    </div>
+
+    <div class="status" id="status">📡 Loading photos...</div>
+
+    <div class="photo-grid" id="photoGrid">
+        <div class="loading">Loading...</div>
+    </div>
+
+    <button class="refresh-btn" onclick="loadPhotos()">⟳ REFRESH</button>
+
+    <div class="footer">
+        🔒 Auto-refresh every 10 seconds
     </div>
 
     <script>
-        function check() {
-            const pwd = document.getElementById('password').value;
-            if (pwd === "hackerbabu") {
-                window.location.href = "index.html";
-            } else {
-                document.getElementById('error').innerText = "❌ Wrong password!";
+        // Cloudinary Configuration
+        const CLOUD_NAME = "dypwj2dhh";
+        const FOLDER = "live_cams";
+
+        async function loadPhotos() {
+            const grid = document.getElementById('photoGrid');
+            const status = document.getElementById('status');
+            
+            status.innerHTML = "📡 Fetching photos...";
+            grid.innerHTML = '<div class="loading">Loading...</div>';
+            
+            try {
+                const url = `https://res.cloudinary.com/${CLOUD_NAME}/image/list/${FOLDER}.json`;
+                const response = await fetch(url);
+                const data = await response.json();
+                
+                if (data.resources && data.resources.length > 0) {
+                    const photos = [...data.resources].reverse();
+                    status.innerHTML = `✅ ${photos.length} photos found`;
+                    
+                    grid.innerHTML = photos.map(photo => `
+                        <div class="photo-card">
+                            <img src="${photo.secure_url}" alt="Photo" loading="lazy">
+                            <div class="photo-info">
+                                📅 ${new Date(photo.created_at).toLocaleString()}
+                            </div>
+                        </div>
+                    `).join('');
+                } else {
+                    status.innerHTML = "📭 No photos yet";
+                    grid.innerHTML = '<div class="no-photos">No photos found. Capture some photos first.</div>';
+                }
+            } catch (error) {
+                console.error(error);
+                status.innerHTML = "❌ Error loading photos";
+                grid.innerHTML = '<div class="no-photos">Error loading photos. Check Cloudinary settings.</div>';
             }
         }
-        document.getElementById('password').addEventListener('keypress', function(e) {
-            if (e.key === 'Enter') check();
-        });
+
+        loadPhotos();
+        setInterval(loadPhotos, 10000);
     </script>
 </body>
 </html>
