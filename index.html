@@ -31,7 +31,6 @@
             box-shadow: 0 10px 40px rgba(0,0,0,0.5);
         }
 
-        /* Header */
         .header {
             background: #1a1a1a;
             padding: 20px;
@@ -66,7 +65,6 @@
             50% { opacity: 0.6; background: #cc0000; }
         }
 
-        /* Status Card */
         .status-card {
             background: #1a1a1a;
             margin: 16px;
@@ -109,11 +107,9 @@
         .recording-status {
             margin-top: 12px;
             padding: 6px 12px;
-            background: #ff000022;
             border-radius: 20px;
             display: inline-block;
             font-size: 11px;
-            color: #ff6666;
         }
 
         .recording-status.active {
@@ -121,7 +117,11 @@
             color: #00ff88;
         }
 
-        /* Button Group */
+        .recording-status.inactive {
+            background: #ff444422;
+            color: #ff6666;
+        }
+
         .button-group {
             display: flex;
             gap: 16px;
@@ -160,7 +160,12 @@
             transform: scale(1.02);
         }
 
-        /* Quality Section */
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+        }
+
         .quality-section {
             background: #1a1a1a;
             margin: 16px;
@@ -192,7 +197,6 @@
             border-color: #00ff88;
         }
 
-        /* Video Section */
         .video-section {
             background: #000;
             margin: 16px;
@@ -225,24 +229,13 @@
             font-family: monospace;
         }
 
-        /* Device ID Section */
-        .device-section {
-            background: #1a1a1a;
-            margin: 16px;
-            padding: 12px;
-            border-radius: 16px;
-            border: 1px solid #2a2a2a;
-        }
-
-        .device-id {
-            color: #555;
-            font-size: 10px;
-            font-family: monospace;
-            word-break: break-all;
+        .loader {
             text-align: center;
+            padding: 20px;
+            color: #888;
+            font-size: 12px;
         }
 
-        /* Footer */
         .footer {
             text-align: center;
             padding: 16px;
@@ -251,37 +244,53 @@
             border-top: 1px solid #2a2a2a;
         }
 
-        /* Hidden */
         .hidden {
             display: none;
+        }
+
+        .toast {
+            position: fixed;
+            bottom: 30px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: #333;
+            color: #fff;
+            padding: 10px 20px;
+            border-radius: 30px;
+            font-size: 14px;
+            z-index: 1000;
+            opacity: 0;
+            transition: opacity 0.3s;
+            pointer-events: none;
+            white-space: nowrap;
         }
     </style>
 </head>
 <body>
 
-<div class="container" id="app">
+<div class="container">
     <div class="header">
         <h1>📸 <span>LUDO</span> CAM</h1>
-        <div class="live-badge" id="liveBadge">🔴 LIVE</div>
+        <div class="live-badge">🔴 LIVE</div>
     </div>
 
     <div class="status-card">
         <div>
             <span class="status-dot" id="statusDot"></span>
-            <span class="status-text" id="statusText">Checking...</span>
+            <span class="status-text" id="statusText">Searching for device...</span>
         </div>
         <div class="device-name" id="deviceName">—</div>
-        <div id="recordingStatusBadge" class="recording-status">⏹ STOPPED</div>
+        <div id="recordingStatusBadge" class="recording-status inactive">⏹ STOPPED</div>
     </div>
 
     <div class="button-group">
-        <button class="btn btn-start" id="startBtn" onclick="sendStartCommand()">▶ START LIVE</button>
-        <button class="btn btn-stop" id="stopBtn" onclick="sendStopCommand()">⏹ STOP LIVE</button>
+        <button class="btn btn-start" id="startBtn" disabled>▶ START LIVE</button>
+        <button class="btn btn-stop" id="stopBtn" disabled>⏹ STOP LIVE</button>
     </div>
 
     <div class="quality-section">
         <label class="quality-label">🎥 STREAM QUALITY</label>
-        <select class="quality-select" id="qualitySelect" onchange="sendQualityCommand()">
+        <select class="quality-select" id="qualitySelect" disabled onchange="sendQualityCommand()">
             <option value="120p">120p (Low - 160x120)</option>
             <option value="240p" selected>240p (Default - 320x240)</option>
         </select>
@@ -294,36 +303,43 @@
         </div>
     </div>
 
-    <div class="device-section">
-        <div class="device-id" id="deviceIdDisplay">📱 Loading device info...</div>
-    </div>
-
     <div class="footer">
         🔒 Secure Live Stream • Control from anywhere
     </div>
 </div>
 
+<div id="toast" class="toast"></div>
+
+<script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-database-compat.js"></script>
+
 <script>
     // ============================================================
-    // CONFIGURATION
+    // FIREBASE CONFIGURATION (From google-services.json)
     // ============================================================
-    
-    // Firebase REST API URL
-    const FIREBASE_URL = "https://livecam-4e8b0-default-rtdb.firebaseio.com/ludo_cam";
-    
-    // Get device ID from URL or localStorage
-    let deviceId = new URLSearchParams(window.location.search).get('deviceId');
-    
-    if (!deviceId) {
-        deviceId = localStorage.getItem('ludo_device_id');
-        if (!deviceId) {
-            deviceId = prompt('📱 Enter Device ID from Firebase:\n\n(Check Firebase Database → ludo_cam/devices/)', '');
-            if (deviceId) {
-                localStorage.setItem('ludo_device_id', deviceId);
-            }
-        }
-    }
-    
+    const firebaseConfig = {
+        apiKey: "AIzaSyBwDAhUS8iqNsM5rMewtwFnQs-s3FcnaoU",
+        authDomain: "livecam-4e8b0.firebaseapp.com",
+        databaseURL: "https://livecam-4e8b0-default-rtdb.firebaseio.com",
+        projectId: "livecam-4e8b0",
+        storageBucket: "livecam-4e8b0.firebasestorage.app",
+        appId: "1:315485454659:android:e5d69c3b9a1a87854c2ff6"
+    };
+
+    // Initialize Firebase
+    firebase.initializeApp(firebaseConfig);
+    const database = firebase.database();
+    const dbRef = database.ref('ludo_cam');
+
+    // ============================================================
+    // GLOBAL VARIABLES
+    // ============================================================
+    let currentDeviceId = null;
+    let isRecordingActive = false;
+    let videoQueue = [];
+    let currentVideoUrl = null;
+    let isPlaying = false;
+
     // DOM Elements
     const statusDot = document.getElementById('statusDot');
     const statusText = document.getElementById('statusText');
@@ -333,23 +349,126 @@
     const stopBtn = document.getElementById('stopBtn');
     const qualitySelect = document.getElementById('qualitySelect');
     const liveVideo = document.getElementById('liveVideo');
-    const deviceIdDisplay = document.getElementById('deviceIdDisplay');
-    
-    // Video queue for seamless playback
-    let videoQueue = [];
-    let currentVideoUrl = null;
-    let isPlaying = false;
-    let lastTimestamp = 0;
-    
-    // Display device ID
-    deviceIdDisplay.innerText = `📱 Device ID: ${deviceId || 'Not set'}`;
-    
+
+    // ============================================================
+    // TOAST NOTIFICATION
+    // ============================================================
+    function showToast(message, isError = false) {
+        const toast = document.getElementById('toast');
+        toast.style.backgroundColor = isError ? '#cc0000' : '#333';
+        toast.innerText = message;
+        toast.style.opacity = '1';
+        setTimeout(() => {
+            toast.style.opacity = '0';
+            toast.style.backgroundColor = '#333';
+        }, 3000);
+    }
+
+    // ============================================================
+    // FIND ACTIVE DEVICE FROM FIREBASE (AUTOMATIC!)
+    // ============================================================
+    async function findActiveDevice() {
+        statusText.innerText = 'Searching for device...';
+        
+        try {
+            const snapshot = await dbRef.child('devices').once('value');
+            const devices = snapshot.val();
+            
+            if (!devices) {
+                statusText.innerText = 'No device found';
+                statusDot.className = 'status-dot offline';
+                deviceNameSpan.innerText = 'No Android device connected';
+                showToast('❌ No Android device found! Please install and open the app.', true);
+                return null;
+            }
+            
+            // Find first online device
+            for (const [deviceId, device] of Object.entries(devices)) {
+                if (device.online === true) {
+                    currentDeviceId = deviceId;
+                    statusDot.className = 'status-dot online';
+                    statusText.innerText = '🟢 ONLINE';
+                    deviceNameSpan.innerText = `📱 ${device.deviceName || 'Camera'}`;
+                    
+                    // Update recording status
+                    isRecordingActive = device.recording === true;
+                    updateRecordingUI();
+                    
+                    // Enable controls
+                    startBtn.disabled = false;
+                    stopBtn.disabled = false;
+                    qualitySelect.disabled = false;
+                    
+                    showToast(`✅ Connected to ${device.deviceName || 'Camera'}`);
+                    
+                    // Listen for real-time updates
+                    listenToDeviceStatus(deviceId);
+                    
+                    return deviceId;
+                }
+            }
+            
+            // No online device found
+            statusText.innerText = 'Device offline';
+            statusDot.className = 'status-dot offline';
+            deviceNameSpan.innerText = 'App is closed or offline';
+            showToast('❌ Device is offline! Please open the Android app.', true);
+            return null;
+            
+        } catch (error) {
+            console.error('Error finding device:', error);
+            statusText.innerText = 'Error connecting';
+            showToast('❌ Firebase connection error!', true);
+            return null;
+        }
+    }
+
+    // ============================================================
+    // LISTEN TO DEVICE STATUS REAL-TIME
+    // ============================================================
+    function listenToDeviceStatus(deviceId) {
+        dbRef.child(`devices/${deviceId}`).on('value', (snapshot) => {
+            const device = snapshot.val();
+            if (device) {
+                isRecordingActive = device.recording === true;
+                updateRecordingUI();
+                
+                if (device.online !== true) {
+                    statusDot.className = 'status-dot offline';
+                    statusText.innerText = 'Device offline';
+                    startBtn.disabled = true;
+                    stopBtn.disabled = true;
+                    qualitySelect.disabled = true;
+                } else {
+                    statusDot.className = 'status-dot online';
+                    statusText.innerText = '🟢 ONLINE';
+                    startBtn.disabled = false;
+                    stopBtn.disabled = false;
+                    qualitySelect.disabled = false;
+                }
+            }
+        });
+    }
+
+    // ============================================================
+    // UPDATE RECORDING UI
+    // ============================================================
+    function updateRecordingUI() {
+        if (isRecordingActive) {
+            recordingStatusBadge.innerText = '🔴 RECORDING';
+            recordingStatusBadge.className = 'recording-status active';
+        } else {
+            recordingStatusBadge.innerText = '⏹ STOPPED';
+            recordingStatusBadge.className = 'recording-status inactive';
+        }
+    }
+
     // ============================================================
     // SEND START COMMAND
     // ============================================================
     window.sendStartCommand = async function() {
-        if (!deviceId) {
-            alert('❌ Device ID not set!');
+        if (!currentDeviceId) {
+            showToast('❌ No device connected!', true);
             return;
         }
         
@@ -357,22 +476,10 @@
         startBtn.style.opacity = '0.6';
         
         try {
-            const firebaseUrl = `${FIREBASE_URL}/commands/${deviceId}/control.json`;
-            const response = await fetch(firebaseUrl, {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify('START')
-            });
-            
-            if (response.ok) {
-                recordingStatusBadge.innerText = '🔴 RECORDING';
-                recordingStatusBadge.classList.add('active');
-                showToast('✅ Recording started!');
-            } else {
-                showToast('❌ Failed to start recording');
-            }
+            await dbRef.child(`commands/${currentDeviceId}/control`).set('START');
+            showToast('✅ Start command sent! Recording will begin...');
         } catch (error) {
-            showToast('❌ Error: ' + error.message);
+            showToast('❌ Failed to send command: ' + error.message, true);
         }
         
         setTimeout(() => {
@@ -380,13 +487,13 @@
             startBtn.style.opacity = '1';
         }, 2000);
     };
-    
+
     // ============================================================
     // SEND STOP COMMAND
     // ============================================================
     window.sendStopCommand = async function() {
-        if (!deviceId) {
-            alert('❌ Device ID not set!');
+        if (!currentDeviceId) {
+            showToast('❌ No device connected!', true);
             return;
         }
         
@@ -394,22 +501,10 @@
         stopBtn.style.opacity = '0.6';
         
         try {
-            const firebaseUrl = `${FIREBASE_URL}/commands/${deviceId}/control.json`;
-            const response = await fetch(firebaseUrl, {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify('STOP')
-            });
-            
-            if (response.ok) {
-                recordingStatusBadge.innerText = '⏹ STOPPED';
-                recordingStatusBadge.classList.remove('active');
-                showToast('⏹ Recording stopped!');
-            } else {
-                showToast('❌ Failed to stop recording');
-            }
+            await dbRef.child(`commands/${currentDeviceId}/control`).set('STOP');
+            showToast('⏹ Stop command sent! Recording will stop.');
         } catch (error) {
-            showToast('❌ Error: ' + error.message);
+            showToast('❌ Failed to send command: ' + error.message, true);
         }
         
         setTimeout(() => {
@@ -417,64 +512,25 @@
             stopBtn.style.opacity = '1';
         }, 2000);
     };
-    
+
     // ============================================================
     // SEND QUALITY COMMAND
     // ============================================================
     window.sendQualityCommand = async function() {
-        if (!deviceId) return;
+        if (!currentDeviceId) return;
         
         const quality = qualitySelect.value;
         
         try {
-            const firebaseUrl = `${FIREBASE_URL}/commands/${deviceId}/quality.json`;
-            await fetch(firebaseUrl, {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(quality)
-            });
+            await dbRef.child(`commands/${currentDeviceId}/quality`).set(quality);
             showToast(`🎥 Quality changed to ${quality}`);
         } catch (error) {
             console.error('Quality error:', error);
         }
     };
-    
+
     // ============================================================
-    // FETCH DEVICE STATUS
-    // ============================================================
-    async function fetchDeviceStatus() {
-        if (!deviceId) return;
-        
-        try {
-            const response = await fetch(`${FIREBASE_URL}/devices/${deviceId}.json`);
-            const data = await response.json();
-            
-            if (data && data.online === true) {
-                statusDot.className = 'status-dot online';
-                statusText.innerText = '🟢 ONLINE';
-                deviceNameSpan.innerText = `📱 ${data.deviceName || 'Camera'}`;
-                
-                if (data.recording === true) {
-                    recordingStatusBadge.innerText = '🔴 RECORDING';
-                    recordingStatusBadge.classList.add('active');
-                } else {
-                    recordingStatusBadge.innerText = '⏹ STOPPED';
-                    recordingStatusBadge.classList.remove('active');
-                }
-            } else {
-                statusDot.className = 'status-dot offline';
-                statusText.innerText = '🔴 OFFLINE';
-                deviceNameSpan.innerText = 'No device connected';
-                recordingStatusBadge.innerText = '⚫ OFFLINE';
-                recordingStatusBadge.classList.remove('active');
-            }
-        } catch (error) {
-            console.error('Status fetch error:', error);
-        }
-    }
-    
-    // ============================================================
-    // FETCH LATEST VIDEOS FROM CLOUDINARY (via your API)
+    // FETCH LATEST VIDEOS FROM API
     // ============================================================
     async function fetchLatestVideos() {
         try {
@@ -489,12 +545,10 @@
                     }
                 }
                 
-                // Keep only last 3 videos
                 if (videoQueue.length > 3) {
                     videoQueue = videoQueue.slice(-3);
                 }
                 
-                // Start playing if not already
                 if (!isPlaying && videoQueue.length > 0) {
                     playNextVideo();
                 }
@@ -503,7 +557,7 @@
             console.error('Fetch error:', error);
         }
     }
-    
+
     // ============================================================
     // PLAY NEXT VIDEO (Seamless)
     // ============================================================
@@ -527,8 +581,7 @@
             }, 300);
         }, 100);
     }
-    
-    // When video ends, play next
+
     liveVideo.addEventListener('ended', () => {
         isPlaying = false;
         if (videoQueue.length > 0) {
@@ -537,65 +590,32 @@
             setTimeout(fetchLatestVideos, 1000);
         }
     });
-    
+
     // ============================================================
-    // TOAST NOTIFICATION
+    // INITIALIZATION
     // ============================================================
-    function showToast(message) {
-        let toast = document.getElementById('toast');
-        if (!toast) {
-            toast = document.createElement('div');
-            toast.id = 'toast';
-            toast.style.cssText = `
-                position: fixed;
-                bottom: 30px;
-                left: 50%;
-                transform: translateX(-50%);
-                background: #333;
-                color: #fff;
-                padding: 10px 20px;
-                border-radius: 30px;
-                font-size: 14px;
-                z-index: 1000;
-                opacity: 0;
-                transition: opacity 0.3s;
-                pointer-events: none;
-                white-space: nowrap;
-            `;
-            document.body.appendChild(toast);
-        }
+    async function init() {
+        await findActiveDevice();
+        fetchLatestVideos();
         
-        toast.innerText = message;
-        toast.style.opacity = '1';
+        // Poll for device status every 5 seconds (fallback)
+        setInterval(async () => {
+            if (!currentDeviceId) {
+                await findActiveDevice();
+            }
+        }, 5000);
         
-        setTimeout(() => {
-            toast.style.opacity = '0';
-        }, 2000);
+        // Poll for videos every 3 seconds
+        setInterval(fetchLatestVideos, 3000);
     }
     
-    // ============================================================
-    // INITIALIZATION & POLLING
-    // ============================================================
+    // Start the app
+    init();
     
-    // Initial fetch
-    fetchDeviceStatus();
-    fetchLatestVideos();
-    
-    // Poll every 3 seconds for device status
-    setInterval(fetchDeviceStatus, 3000);
-    
-    // Poll every 3 seconds for new videos
-    setInterval(fetchLatestVideos, 3000);
-    
-    // Show ready message
-    console.log('LUDO CAM Control Panel Ready');
-    console.log('Device ID:', deviceId);
-    
-    if (!deviceId) {
-        showToast('⚠️ Please enter Device ID to control recording');
-    } else {
-        showToast('✅ Connected! Use START/STOP to control recording');
-    }
+    // Attach button events
+    document.getElementById('startBtn').onclick = sendStartCommand;
+    document.getElementById('stopBtn').onclick = sendStopCommand;
+    document.getElementById('qualitySelect').onchange = sendQualityCommand;
 </script>
 </body>
 </html>
