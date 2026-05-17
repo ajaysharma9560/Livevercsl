@@ -3,147 +3,101 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>Ludo Cam - Live Stream</title>
+    <title>Ludo Cam - Live</title>
     <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-
+        * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
             background: #0a0a0a;
-            min-height: 100vh;
-            display: flex;
-            justify-content: center;
-            align-items: center;
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
             padding: 20px;
         }
-
         .container {
-            width: 100%;
             max-width: 550px;
-            background: #0f0f0f;
-            border-radius: 32px;
-            overflow: hidden;
-            border: 1px solid #222;
-            box-shadow: 0 20px 40px rgba(0,0,0,0.5);
+            margin: 0 auto;
         }
-
-        /* Header */
         .header {
+            text-align: center;
             padding: 20px;
             background: #141414;
-            text-align: center;
-            border-bottom: 1px solid #222;
+            border-radius: 24px;
+            margin-bottom: 20px;
+            border: 1px solid #222;
         }
-
-        .logo {
-            font-size: 24px;
-            font-weight: bold;
-            color: #fff;
-        }
-
-        .logo span {
-            color: #00ff88;
-        }
-
-        /* Status Bar */
-        .status-bar {
-            padding: 14px 20px;
-            background: #0f0f0f;
+        h1 { color: #fff; font-size: 28px; }
+        h1 span { color: #00ff88; }
+        .status-card {
+            background: #1a1a1a;
+            padding: 20px;
+            border-radius: 20px;
             display: flex;
-            justify-content: space-between;
             align-items: center;
-            border-bottom: 1px solid #222;
+            justify-content: space-between;
+            margin-bottom: 20px;
+            border: 1px solid #333;
         }
-
         .status-item {
             display: flex;
             align-items: center;
-            gap: 8px;
+            gap: 12px;
         }
-
         .dot {
-            width: 10px;
-            height: 10px;
+            width: 14px;
+            height: 14px;
             border-radius: 50%;
-            transition: all 0.2s ease;
+            transition: all 0.2s;
         }
-
         .dot.red {
             background: #ff4444;
-            box-shadow: 0 0 8px #ff4444;
+            box-shadow: 0 0 10px #ff4444;
         }
-
         .dot.green {
             background: #00ff88;
-            box-shadow: 0 0 8px #00ff88;
+            box-shadow: 0 0 10px #00ff88;
         }
-
         .status-text {
             color: #fff;
-            font-size: 13px;
+            font-size: 16px;
             font-weight: 500;
         }
-
         .device-name {
             color: #00ff88;
-            font-size: 11px;
+            font-size: 13px;
             font-family: monospace;
         }
-
-        /* Quality Bar */
         .quality-bar {
-            padding: 12px 20px;
             background: #1a1a1a;
+            padding: 15px;
+            border-radius: 20px;
             display: flex;
             justify-content: space-between;
             align-items: center;
-            border-bottom: 1px solid #222;
+            margin-bottom: 20px;
         }
-
-        .quality-label {
-            color: #888;
-            font-size: 12px;
-        }
-
         .quality-select {
             background: #2a2a2a;
             border: 1px solid #444;
             color: #fff;
-            padding: 6px 12px;
-            border-radius: 20px;
-            font-size: 12px;
+            padding: 8px 16px;
+            border-radius: 24px;
             cursor: pointer;
         }
-
-        .quality-select:hover {
-            border-color: #00ff88;
-        }
-
-        /* Video Section */
         .video-section {
-            padding: 20px;
-            background: #000;
-        }
-
-        .video-wrapper {
-            position: relative;
             background: #000;
             border-radius: 20px;
             overflow: hidden;
-            aspect-ratio: 16 / 9;
+            margin-bottom: 20px;
             border: 1px solid #333;
         }
-
+        .video-wrapper {
+            position: relative;
+            aspect-ratio: 16 / 9;
+            background: #000;
+        }
         video {
             width: 100%;
             height: 100%;
             object-fit: cover;
         }
-
         .play-overlay {
             position: absolute;
             top: 0;
@@ -155,13 +109,8 @@
             align-items: center;
             background: rgba(0,0,0,0.7);
             cursor: pointer;
-            transition: all 0.3s ease;
         }
-
-        .play-overlay.hidden {
-            display: none;
-        }
-
+        .play-overlay.hidden { display: none; }
         .play-btn {
             width: 70px;
             height: 70px;
@@ -171,19 +120,8 @@
             justify-content: center;
             align-items: center;
             box-shadow: 0 0 25px rgba(0,255,136,0.6);
-            transition: transform 0.2s;
         }
-
-        .play-btn:active {
-            transform: scale(0.9);
-        }
-
-        .play-btn span {
-            font-size: 35px;
-            color: #000;
-            margin-left: 5px;
-        }
-
+        .play-btn span { font-size: 35px; color: #000; margin-left: 5px; }
         .no-video {
             position: absolute;
             top: 0;
@@ -194,48 +132,33 @@
             justify-content: center;
             align-items: center;
             color: #555;
-            font-size: 14px;
             background: #0a0a0a;
         }
-
-        /* Info Bar */
         .info-bar {
-            padding: 12px 20px;
-            background: #0f0f0f;
+            padding: 12px 16px;
+            background: #1a1a1a;
+            border-radius: 20px;
             display: flex;
             justify-content: space-between;
-            align-items: center;
-            border-top: 1px solid #222;
             font-size: 11px;
             color: #666;
         }
-
-        .auto-refresh {
-            color: #00ff88;
-        }
-
-        .timestamp {
-            font-family: monospace;
-        }
-
         .footer {
-            padding: 12px;
             text-align: center;
-            font-size: 10px;
             color: #444;
-            border-top: 1px solid #222;
+            font-size: 10px;
+            margin-top: 20px;
         }
     </style>
 </head>
 <body>
     <div class="container">
-        <!-- Header -->
         <div class="header">
-            <div class="logo">📸 <span>LUDO</span> CAM</div>
+            <h1>📸 <span>LUDO</span> CAM</h1>
         </div>
 
-        <!-- Status Bar -->
-        <div class="status-bar">
+        <!-- Status Card -->
+        <div class="status-card">
             <div class="status-item">
                 <div class="dot red" id="statusDot"></div>
                 <span class="status-text" id="statusText">Offline</span>
@@ -245,12 +168,12 @@
 
         <!-- Quality Bar -->
         <div class="quality-bar">
-            <span class="quality-label">🎥 STREAM QUALITY</span>
+            <span>🎥 QUALITY</span>
             <select class="quality-select" id="qualitySelect">
-                <option value="120p">120p (Low)</option>
+                <option value="120p">120p</option>
                 <option value="240p">240p</option>
-                <option value="360p" selected>360p (Default)</option>
-                <option value="480p">480p (HD)</option>
+                <option value="360p" selected>360p</option>
+                <option value="480p">480p</option>
             </select>
         </div>
 
@@ -259,18 +182,15 @@
             <div class="video-wrapper">
                 <video id="liveVideo" controls muted></video>
                 <div class="play-overlay" id="playOverlay">
-                    <div class="play-btn" id="playBtn">
-                        <span>▶</span>
-                    </div>
+                    <div class="play-btn" id="playBtn"><span>▶</span></div>
                 </div>
                 <div class="no-video" id="noVideo">Waiting for stream...</div>
             </div>
         </div>
 
-        <!-- Info Bar -->
         <div class="info-bar">
-            <span>📡 <span class="auto-refresh" id="refreshStatus">Auto-refresh: 10s</span></span>
-            <span class="timestamp" id="timestamp">—</span>
+            <span>📡 Auto-refresh: 10s</span>
+            <span id="timestamp">—</span>
         </div>
 
         <div class="footer">
@@ -281,7 +201,6 @@
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-database-compat.js"></script>
     <script>
-        // ========== FIREBASE CONFIG ==========
         const firebaseConfig = {
             apiKey: "AIzaSyBwDAhUS8iqNsM5rMewtwFnQs-s3FcnaoU",
             authDomain: "livecam-4e8b0.firebaseapp.com",
@@ -291,12 +210,9 @@
             messagingSenderId: "315485454659",
             appId: "1:315485454659:android:e5d69c3b9a1a87854c2ff6"
         };
-        // ===================================
 
-        // Cloudinary API URL
         const API_URL = "/api/photos";
 
-        // DOM Elements
         const statusDot = document.getElementById('statusDot');
         const statusText = document.getElementById('statusText');
         const deviceNameSpan = document.getElementById('deviceName');
@@ -309,13 +225,11 @@
 
         let currentVideoUrl = null;
         let deviceId = null;
-        let autoRefreshInterval = null;
 
-        // Initialize Firebase
         firebase.initializeApp(firebaseConfig);
         const database = firebase.database();
 
-        // ========== ONLINE STATUS LISTENER ==========
+        // 🔥 ONLINE STATUS LISTENER (Real-time green/red dot)
         database.ref('ludo_cam/devices').on('value', (snapshot) => {
             const devices = snapshot.val();
             let isOnline = false;
@@ -341,117 +255,57 @@
             }
         });
 
-        // ========== SEND QUALITY COMMAND ==========
+        // Quality command
         function sendQualityCommand(quality) {
-            if (!deviceId) {
-                console.log('No device online');
-                return;
-            }
-            
-            const commandRef = database.ref(`ludo_cam/commands/${deviceId}`);
-            commandRef.set({ quality: quality }).then(() => {
-                console.log(`✅ Quality command sent: ${quality}`);
-                showToastMessage(`Quality set to ${quality}`);
-            }).catch(err => console.error('Error:', err));
+            if (!deviceId) return;
+            database.ref(`ludo_cam/commands/${deviceId}`).set({ quality: quality });
         }
 
         qualitySelect.addEventListener('change', (e) => {
             sendQualityCommand(e.target.value);
         });
 
-        // Toast notification
-        function showToastMessage(message) {
-            const toast = document.createElement('div');
-            toast.innerText = message;
-            toast.style.position = 'fixed';
-            toast.style.bottom = '100px';
-            toast.style.left = '50%';
-            toast.style.transform = 'translateX(-50%)';
-            toast.style.backgroundColor = '#00ff88';
-            toast.style.color = '#000';
-            toast.style.padding = '10px 20px';
-            toast.style.borderRadius = '30px';
-            toast.style.fontSize = '12px';
-            toast.style.fontWeight = 'bold';
-            toast.style.zIndex = '1000';
-            document.body.appendChild(toast);
-            setTimeout(() => toast.remove(), 2000);
-        }
+        // Video player
+        playBtn.addEventListener('click', () => {
+            liveVideo.play().then(() => playOverlay.classList.add('hidden')).catch(e => console.log(e));
+        });
 
-        // ========== VIDEO PLAY HANDLER ==========
-        function setupVideoPlayer() {
-            playOverlay.addEventListener('click', () => {
-                liveVideo.play().then(() => {
-                    playOverlay.classList.add('hidden');
-                }).catch(e => console.log('Play error:', e));
-            });
-            
-            liveVideo.addEventListener('ended', () => {
-                playOverlay.classList.remove('hidden');
-            });
-            
-            liveVideo.addEventListener('pause', () => {
-                if (liveVideo.currentTime === liveVideo.duration) return;
-                playOverlay.classList.remove('hidden');
-            });
-            
-            liveVideo.addEventListener('playing', () => {
-                playOverlay.classList.add('hidden');
-            });
-        }
+        liveVideo.addEventListener('ended', () => playOverlay.classList.remove('hidden'));
+        liveVideo.addEventListener('pause', () => {
+            if (liveVideo.currentTime !== liveVideo.duration) playOverlay.classList.remove('hidden');
+        });
 
-        // ========== FETCH VIDEOS FROM CLOUDINARY ==========
+        // Fetch videos
         async function refreshVideo() {
             try {
-                const response = await fetch(API_URL);
-                const data = await response.json();
-                
+                const res = await fetch(API_URL);
+                const data = await res.json();
+
                 if (data.success && data.videos && data.videos.length > 0) {
                     const latestVideo = data.videos[0];
-                    
                     if (currentVideoUrl !== latestVideo.url) {
                         currentVideoUrl = latestVideo.url;
                         liveVideo.src = currentVideoUrl;
                         liveVideo.load();
                         noVideo.style.display = 'none';
                         liveVideo.style.display = 'block';
-                        
-                        // Update timestamp
-                        const date = new Date(latestVideo.created_at);
-                        timestampSpan.innerText = date.toLocaleTimeString();
-                        
-                        // Don't auto-play, show play button
                         playOverlay.classList.remove('hidden');
+                        timestampSpan.innerText = new Date(latestVideo.created_at).toLocaleTimeString();
                     } else {
-                        noVideo.style.display = 'none';
                         liveVideo.style.display = 'block';
+                        noVideo.style.display = 'none';
                     }
                 } else {
                     liveVideo.style.display = 'none';
                     noVideo.style.display = 'flex';
-                    noVideo.innerText = 'No videos yet. Waiting for stream...';
-                    timestampSpan.innerText = '—';
                 }
-            } catch (error) {
-                console.error('Error fetching videos:', error);
-                liveVideo.style.display = 'none';
-                noVideo.style.display = 'flex';
-                noVideo.innerText = '⚠️ Error loading stream';
+            } catch(e) {
+                console.error(e);
             }
         }
 
-        // ========== AUTO-REFRESH SETUP (No manual refresh button) ==========
-        function startAutoRefresh() {
-            if (autoRefreshInterval) clearInterval(autoRefreshInterval);
-            refreshVideo();
-            autoRefreshInterval = setInterval(refreshVideo, 10000);
-        }
-
-        // Initialize
-        setupVideoPlayer();
-        startAutoRefresh();
-        
-        console.log('✅ Live Stream Ready — Auto-refresh every 10 seconds');
+        refreshVideo();
+        setInterval(refreshVideo, 10000);
     </script>
 </body>
-    </html>
+</html>
