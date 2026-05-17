@@ -37,12 +37,16 @@
 
         .status {
             text-align: center;
-            color: #ffaa00;
+            color: #00ff88;
             margin-bottom: 20px;
             font-size: 14px;
             padding: 10px;
             background: #1a1a1a;
             border-radius: 12px;
+        }
+
+        .status.error {
+            color: #ff4444;
         }
 
         .photo-grid {
@@ -58,6 +62,11 @@
             border-radius: 20px;
             overflow: hidden;
             border: 1px solid #222;
+            transition: transform 0.2s;
+        }
+
+        .photo-card:active {
+            transform: scale(0.98);
         }
 
         .photo-card img {
@@ -65,6 +74,7 @@
             aspect-ratio: 16 / 9;
             object-fit: cover;
             display: block;
+            cursor: pointer;
         }
 
         .photo-info {
@@ -86,6 +96,11 @@
             font-size: 14px;
             font-weight: bold;
             cursor: pointer;
+            transition: transform 0.2s;
+        }
+
+        .refresh-btn:active {
+            transform: scale(0.97);
         }
 
         .loading {
@@ -106,6 +121,41 @@
             font-size: 11px;
             margin-top: 30px;
         }
+
+        /* Lightbox for fullscreen */
+        .lightbox {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0,0,0,0.95);
+            z-index: 1000;
+            justify-content: center;
+            align-items: center;
+            cursor: pointer;
+        }
+
+        .lightbox.active {
+            display: flex;
+        }
+
+        .lightbox img {
+            max-width: 90%;
+            max-height: 90%;
+            object-fit: contain;
+        }
+
+        .lightbox-close {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            color: white;
+            font-size: 30px;
+            cursor: pointer;
+            font-family: sans-serif;
+        }
     </style>
 </head>
 <body>
@@ -122,56 +172,72 @@
     <button class="refresh-btn" onclick="loadPhotos()">⟳ REFRESH</button>
 
     <div class="footer">
-        🔒 Auto-refresh every 10 seconds
+        🔒 Auto-refresh every 10 seconds • Tap photo to enlarge
+    </div>
+
+    <!-- Lightbox -->
+    <div class="lightbox" id="lightbox" onclick="closeLightbox()">
+        <span class="lightbox-close">&times;</span>
+        <img id="lightboxImg" src="">
     </div>
 
     <script>
-        // 🔥 APNA CLOUDINARY CONFIG 🔥
-        const CLOUD_NAME = "dypwj2dhh";
-        const FOLDER = "live_cams";
+        // 🔥 API CALL — VERCEL SERVERLESS FUNCTION 🔥
+        const API_URL = "/api/photos";
 
         async function loadPhotos() {
             const grid = document.getElementById('photoGrid');
             const statusDiv = document.getElementById('status');
             
+            statusDiv.className = 'status';
             statusDiv.innerHTML = "📡 Fetching photos...";
             grid.innerHTML = '<div class="loading">Loading...</div>';
             
             try {
-                // Try direct Cloudinary API
-                const url = `https://res.cloudinary.com/${CLOUD_NAME}/image/list/${FOLDER}.json`;
-                const response = await fetch(url);
+                const response = await fetch(API_URL);
                 const data = await response.json();
                 
-                if (data.error) {
-                    statusDiv.innerHTML = "⚠️ Cloudinary public access disabled. Enable 'Resource list' in Settings → Security";
-                    grid.innerHTML = '<div class="no-photos">🔒 Cloudinary API not public. Enable resource list in Cloudinary settings.</div>';
-                    return;
-                }
-                
-                if (data.resources && data.resources.length > 0) {
-                    const photos = [...data.resources].reverse();
-                    statusDiv.innerHTML = `✅ ${photos.length} photos found`;
+                if (data.success && data.photos && data.photos.length > 0) {
+                    const photos = [...data.photos].reverse();
+                    statusDiv.innerHTML = `✅ ${data.count} photos found • Last: ${new Date(photos[0].created_at).toLocaleTimeString()}`;
                     
                     grid.innerHTML = photos.map(photo => `
                         <div class="photo-card">
-                            <img src="${photo.secure_url}" alt="Photo" loading="lazy" onclick="window.open('${photo.secure_url}','_blank')">
+                            <img src="${photo.secure_url}" alt="Photo" loading="lazy" onclick="openLightbox('${photo.secure_url}')">
                             <div class="photo-info">
                                 📅 ${new Date(photo.created_at).toLocaleString()}
                             </div>
                         </div>
                     `).join('');
+                } else if (data.photos && data.photos.length === 0) {
+                    statusDiv.innerHTML = "📭 No photos yet. Capture some photos first.";
+                    grid.innerHTML = '<div class="no-photos">📭 No photos found</div>';
                 } else {
-                    statusDiv.innerHTML = "📭 No photos yet";
-                    grid.innerHTML = '<div class="no-photos">No photos found. Capture some photos first.</div>';
+                    statusDiv.className = 'status error';
+                    statusDiv.innerHTML = "❌ " + (data.error || "Failed to load photos");
+                    grid.innerHTML = '<div class="no-photos">⚠️ Error loading photos</div>';
                 }
             } catch (error) {
-                console.error(error);
-                statusDiv.innerHTML = "❌ Error: Cloudinary API not accessible";
-                grid.innerHTML = '<div class="no-photos">⚠️ Error loading photos. Make sure Cloudinary "Resource list" is enabled in Settings → Security.</div>';
+                console.error('Error:', error);
+                statusDiv.className = 'status error';
+                statusDiv.innerHTML = "❌ Connection error: " + error.message;
+                grid.innerHTML = '<div class="no-photos">⚠️ Cannot connect to server</div>';
             }
         }
 
+        // Lightbox functions
+        function openLightbox(imageUrl) {
+            const lightbox = document.getElementById('lightbox');
+            const lightboxImg = document.getElementById('lightboxImg');
+            lightboxImg.src = imageUrl;
+            lightbox.classList.add('active');
+        }
+
+        function closeLightbox() {
+            document.getElementById('lightbox').classList.remove('active');
+        }
+
+        // Initial load and auto-refresh
         loadPhotos();
         setInterval(loadPhotos, 10000);
     </script>
