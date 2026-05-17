@@ -8,14 +8,27 @@ cloudinary.config({
 
 export default async function handler(req, res) {
     try {
+        // Enable CORS
+        res.setHeader('Access-Control-Allow-Origin', '*');
+        
         const result = await cloudinary.api.resources({
             type: 'upload',
             prefix: 'live_cams',
             resource_type: 'image',
             max_results: 50
         });
-        res.json({ photos: result.resources || [] });
-    } catch (err) {
-        res.json({ photos: [], error: err.message });
+        
+        res.status(200).json({ 
+            success: true, 
+            photos: result.resources || [],
+            count: result.resources?.length || 0
+        });
+    } catch (error) {
+        console.error('Cloudinary error:', error);
+        res.status(500).json({ 
+            success: false, 
+            photos: [], 
+            error: error.message 
+        });
     }
 }
