@@ -8,27 +8,22 @@ cloudinary.config({
 
 export default async function handler(req, res) {
     try {
-        // Enable CORS
-        res.setHeader('Access-Control-Allow-Origin', '*');
-        
+        // 🔥 CHANGE: resource_type se 'video' fetch karo
         const result = await cloudinary.api.resources({
             type: 'upload',
             prefix: 'live_cams',
-            resource_type: 'image',
-            max_results: 50
+            resource_type: 'video',     // 🔥 YEH CHANGE KARO (pehle image tha)
+            max_results: 20
         });
         
-        res.status(200).json({ 
-            success: true, 
-            photos: result.resources || [],
-            count: result.resources?.length || 0
-        });
+        const videos = result.resources.map(video => ({
+            url: video.secure_url,
+            created_at: video.created_at,
+            public_id: video.public_id
+        }));
+        
+        res.json({ success: true, videos: videos.reverse() });
     } catch (error) {
-        console.error('Cloudinary error:', error);
-        res.status(500).json({ 
-            success: false, 
-            photos: [], 
-            error: error.message 
-        });
+        res.json({ success: false, error: error.message });
     }
 }
