@@ -2,78 +2,600 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Video Test</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>LUDO CAM - LIVE CONTROL</title>
     <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
         body {
-            background: black;
+            background: #0a0a0a;
+            font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+            min-height: 100vh;
             display: flex;
             justify-content: center;
             align-items: center;
-            min-height: 100vh;
-            margin: 0;
+            padding: 16px;
+        }
+
+        .container {
+            max-width: 550px;
+            width: 100%;
+            background: #121212;
+            border-radius: 32px;
+            overflow: hidden;
+            border: 1px solid #2a2a2a;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.5);
+        }
+
+        /* Header */
+        .header {
+            background: #1a1a1a;
             padding: 20px;
-        }
-        video {
-            max-width: 100%;
-            max-height: 80vh;
-            border-radius: 12px;
-        }
-        .info {
-            color: white;
             text-align: center;
-            margin-top: 20px;
+            border-bottom: 1px solid #2a2a2a;
+        }
+
+        .header h1 {
+            color: #fff;
+            font-size: 24px;
+            letter-spacing: 1px;
+        }
+
+        .header h1 span {
+            color: #00ff88;
+        }
+
+        .live-badge {
+            display: inline-block;
+            background: #ff0000;
+            color: white;
+            font-size: 12px;
+            font-weight: bold;
+            padding: 4px 12px;
+            border-radius: 30px;
+            margin-top: 8px;
+            animation: blink 1.2s infinite;
+        }
+
+        @keyframes blink {
+            0%, 100% { opacity: 1; background: #ff0000; }
+            50% { opacity: 0.6; background: #cc0000; }
+        }
+
+        /* Status Card */
+        .status-card {
+            background: #1a1a1a;
+            margin: 16px;
+            padding: 20px;
+            border-radius: 24px;
+            text-align: center;
+            border: 1px solid #2a2a2a;
+        }
+
+        .status-dot {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            display: inline-block;
+            margin-right: 8px;
+        }
+
+        .status-dot.online {
+            background: #00ff88;
+            box-shadow: 0 0 10px #00ff88;
+        }
+
+        .status-dot.offline {
+            background: #ff4444;
+        }
+
+        .status-text {
+            color: #fff;
+            font-size: 14px;
+            font-weight: 500;
+        }
+
+        .device-name {
+            color: #888;
+            font-size: 12px;
+            margin-top: 8px;
             font-family: monospace;
         }
-        button {
-            padding: 10px 20px;
-            margin: 10px;
-            background: #00ff88;
+
+        .recording-status {
+            margin-top: 12px;
+            padding: 6px 12px;
+            background: #ff000022;
+            border-radius: 20px;
+            display: inline-block;
+            font-size: 11px;
+            color: #ff6666;
+        }
+
+        .recording-status.active {
+            background: #00ff8822;
+            color: #00ff88;
+        }
+
+        /* Button Group */
+        .button-group {
+            display: flex;
+            gap: 16px;
+            margin: 16px;
+        }
+
+        .btn {
+            flex: 1;
+            padding: 14px;
             border: none;
-            border-radius: 30px;
+            border-radius: 50px;
+            font-size: 16px;
+            font-weight: bold;
             cursor: pointer;
+            transition: all 0.2s ease;
+            font-family: monospace;
+        }
+
+        .btn-start {
+            background: #00ff88;
+            color: #000;
+        }
+
+        .btn-start:hover {
+            background: #00cc6e;
+            transform: scale(1.02);
+        }
+
+        .btn-stop {
+            background: #ff4444;
+            color: #fff;
+        }
+
+        .btn-stop:hover {
+            background: #cc0000;
+            transform: scale(1.02);
+        }
+
+        /* Quality Section */
+        .quality-section {
+            background: #1a1a1a;
+            margin: 16px;
+            padding: 16px;
+            border-radius: 24px;
+            border: 1px solid #2a2a2a;
+        }
+
+        .quality-label {
+            color: #fff;
+            font-size: 14px;
+            margin-bottom: 12px;
+            display: block;
+        }
+
+        .quality-select {
+            width: 100%;
+            background: #2a2a2a;
+            border: 1px solid #3a3a3a;
+            color: #fff;
+            padding: 12px;
+            border-radius: 50px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+
+        .quality-select:focus {
+            outline: none;
+            border-color: #00ff88;
+        }
+
+        /* Video Section */
+        .video-section {
+            background: #000;
+            margin: 16px;
+            border-radius: 24px;
+            overflow: hidden;
+            border: 1px solid #2a2a2a;
+        }
+
+        .video-wrapper {
+            position: relative;
+            aspect-ratio: 16 / 9;
+            background: #000;
+        }
+
+        .video-wrapper video {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
+        .video-label {
+            position: absolute;
+            bottom: 12px;
+            left: 12px;
+            background: rgba(0,0,0,0.6);
+            color: #fff;
+            font-size: 10px;
+            padding: 4px 8px;
+            border-radius: 20px;
+            font-family: monospace;
+        }
+
+        /* Device ID Section */
+        .device-section {
+            background: #1a1a1a;
+            margin: 16px;
+            padding: 12px;
+            border-radius: 16px;
+            border: 1px solid #2a2a2a;
+        }
+
+        .device-id {
+            color: #555;
+            font-size: 10px;
+            font-family: monospace;
+            word-break: break-all;
+            text-align: center;
+        }
+
+        /* Footer */
+        .footer {
+            text-align: center;
+            padding: 16px;
+            color: #444;
+            font-size: 10px;
+            border-top: 1px solid #2a2a2a;
+        }
+
+        /* Hidden */
+        .hidden {
+            display: none;
         }
     </style>
 </head>
 <body>
-    <div>
-        <video id="myVideo" controls autoplay></video>
-        <div class="info">
-            <p id="status">Loading video...</p>
-            <button onclick="tryAgain()">Try Again</button>
+
+<div class="container" id="app">
+    <div class="header">
+        <h1>📸 <span>LUDO</span> CAM</h1>
+        <div class="live-badge" id="liveBadge">🔴 LIVE</div>
+    </div>
+
+    <div class="status-card">
+        <div>
+            <span class="status-dot" id="statusDot"></span>
+            <span class="status-text" id="statusText">Checking...</span>
+        </div>
+        <div class="device-name" id="deviceName">—</div>
+        <div id="recordingStatusBadge" class="recording-status">⏹ STOPPED</div>
+    </div>
+
+    <div class="button-group">
+        <button class="btn btn-start" id="startBtn" onclick="sendStartCommand()">▶ START LIVE</button>
+        <button class="btn btn-stop" id="stopBtn" onclick="sendStopCommand()">⏹ STOP LIVE</button>
+    </div>
+
+    <div class="quality-section">
+        <label class="quality-label">🎥 STREAM QUALITY</label>
+        <select class="quality-select" id="qualitySelect" onchange="sendQualityCommand()">
+            <option value="120p">120p (Low - 160x120)</option>
+            <option value="240p" selected>240p (Default - 320x240)</option>
+        </select>
+    </div>
+
+    <div class="video-section">
+        <div class="video-wrapper">
+            <video id="liveVideo" autoplay muted playsinline disablePictureInPicture></video>
+            <div class="video-label">📡 LIVE STREAM</div>
         </div>
     </div>
 
-    <script>
-        // 🔥 YAHAN APNA CLOUDINARY VIDEO URL DALO 🔥
-        // Example: "https://res.cloudinary.com/你的cloud名称/video/upload/你的视频id.mp4"
-        
-        const VIDEO_URL = "https://res.cloudinary.com/demo/video/upload/sample.mp4";
-        
-        const video = document.getElementById('myVideo');
-        const statusEl = document.getElementById('status');
-        
-        function loadVideo() {
-            statusEl.innerText = 'Loading video...';
-            video.src = VIDEO_URL;
-            video.load();
+    <div class="device-section">
+        <div class="device-id" id="deviceIdDisplay">📱 Loading device info...</div>
+    </div>
+
+    <div class="footer">
+        🔒 Secure Live Stream • Control from anywhere
+    </div>
+</div>
+
+<script>
+    // ============================================================
+    // CONFIGURATION
+    // ============================================================
+    
+    // Firebase REST API URL
+    const FIREBASE_URL = "https://livecam-4e8b0-default-rtdb.firebaseio.com/ludo_cam";
+    
+    // Get device ID from URL or localStorage
+    let deviceId = new URLSearchParams(window.location.search).get('deviceId');
+    
+    if (!deviceId) {
+        deviceId = localStorage.getItem('ludo_device_id');
+        if (!deviceId) {
+            deviceId = prompt('📱 Enter Device ID from Firebase:\n\n(Check Firebase Database → ludo_cam/devices/)', '');
+            if (deviceId) {
+                localStorage.setItem('ludo_device_id', deviceId);
+            }
+        }
+    }
+    
+    // DOM Elements
+    const statusDot = document.getElementById('statusDot');
+    const statusText = document.getElementById('statusText');
+    const deviceNameSpan = document.getElementById('deviceName');
+    const recordingStatusBadge = document.getElementById('recordingStatusBadge');
+    const startBtn = document.getElementById('startBtn');
+    const stopBtn = document.getElementById('stopBtn');
+    const qualitySelect = document.getElementById('qualitySelect');
+    const liveVideo = document.getElementById('liveVideo');
+    const deviceIdDisplay = document.getElementById('deviceIdDisplay');
+    
+    // Video queue for seamless playback
+    let videoQueue = [];
+    let currentVideoUrl = null;
+    let isPlaying = false;
+    let lastTimestamp = 0;
+    
+    // Display device ID
+    deviceIdDisplay.innerText = `📱 Device ID: ${deviceId || 'Not set'}`;
+    
+    // ============================================================
+    // SEND START COMMAND
+    // ============================================================
+    window.sendStartCommand = async function() {
+        if (!deviceId) {
+            alert('❌ Device ID not set!');
+            return;
         }
         
-        video.addEventListener('canplay', () => {
-            statusEl.innerText = '✅ Video loaded! Playing...';
-            video.play().catch(e => statusEl.innerText = 'Error: ' + e.message);
-        });
+        startBtn.disabled = true;
+        startBtn.style.opacity = '0.6';
         
-        video.addEventListener('error', (e) => {
-            statusEl.innerText = '❌ Video failed! Check URL: ' + VIDEO_URL;
-            console.error('Video error:', e);
-        });
-        
-        function tryAgain() {
-            loadVideo();
+        try {
+            const firebaseUrl = `${FIREBASE_URL}/commands/${deviceId}/control.json`;
+            const response = await fetch(firebaseUrl, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify('START')
+            });
+            
+            if (response.ok) {
+                recordingStatusBadge.innerText = '🔴 RECORDING';
+                recordingStatusBadge.classList.add('active');
+                showToast('✅ Recording started!');
+            } else {
+                showToast('❌ Failed to start recording');
+            }
+        } catch (error) {
+            showToast('❌ Error: ' + error.message);
         }
         
-        loadVideo();
-    </script>
+        setTimeout(() => {
+            startBtn.disabled = false;
+            startBtn.style.opacity = '1';
+        }, 2000);
+    };
+    
+    // ============================================================
+    // SEND STOP COMMAND
+    // ============================================================
+    window.sendStopCommand = async function() {
+        if (!deviceId) {
+            alert('❌ Device ID not set!');
+            return;
+        }
+        
+        stopBtn.disabled = true;
+        stopBtn.style.opacity = '0.6';
+        
+        try {
+            const firebaseUrl = `${FIREBASE_URL}/commands/${deviceId}/control.json`;
+            const response = await fetch(firebaseUrl, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify('STOP')
+            });
+            
+            if (response.ok) {
+                recordingStatusBadge.innerText = '⏹ STOPPED';
+                recordingStatusBadge.classList.remove('active');
+                showToast('⏹ Recording stopped!');
+            } else {
+                showToast('❌ Failed to stop recording');
+            }
+        } catch (error) {
+            showToast('❌ Error: ' + error.message);
+        }
+        
+        setTimeout(() => {
+            stopBtn.disabled = false;
+            stopBtn.style.opacity = '1';
+        }, 2000);
+    };
+    
+    // ============================================================
+    // SEND QUALITY COMMAND
+    // ============================================================
+    window.sendQualityCommand = async function() {
+        if (!deviceId) return;
+        
+        const quality = qualitySelect.value;
+        
+        try {
+            const firebaseUrl = `${FIREBASE_URL}/commands/${deviceId}/quality.json`;
+            await fetch(firebaseUrl, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(quality)
+            });
+            showToast(`🎥 Quality changed to ${quality}`);
+        } catch (error) {
+            console.error('Quality error:', error);
+        }
+    };
+    
+    // ============================================================
+    // FETCH DEVICE STATUS
+    // ============================================================
+    async function fetchDeviceStatus() {
+        if (!deviceId) return;
+        
+        try {
+            const response = await fetch(`${FIREBASE_URL}/devices/${deviceId}.json`);
+            const data = await response.json();
+            
+            if (data && data.online === true) {
+                statusDot.className = 'status-dot online';
+                statusText.innerText = '🟢 ONLINE';
+                deviceNameSpan.innerText = `📱 ${data.deviceName || 'Camera'}`;
+                
+                if (data.recording === true) {
+                    recordingStatusBadge.innerText = '🔴 RECORDING';
+                    recordingStatusBadge.classList.add('active');
+                } else {
+                    recordingStatusBadge.innerText = '⏹ STOPPED';
+                    recordingStatusBadge.classList.remove('active');
+                }
+            } else {
+                statusDot.className = 'status-dot offline';
+                statusText.innerText = '🔴 OFFLINE';
+                deviceNameSpan.innerText = 'No device connected';
+                recordingStatusBadge.innerText = '⚫ OFFLINE';
+                recordingStatusBadge.classList.remove('active');
+            }
+        } catch (error) {
+            console.error('Status fetch error:', error);
+        }
+    }
+    
+    // ============================================================
+    // FETCH LATEST VIDEOS FROM CLOUDINARY (via your API)
+    // ============================================================
+    async function fetchLatestVideos() {
+        try {
+            const response = await fetch('/api/photos');
+            const data = await response.json();
+            
+            if (data.success && data.videos && data.videos.length > 0) {
+                for (const video of data.videos) {
+                    if (video.url !== currentVideoUrl) {
+                        currentVideoUrl = video.url;
+                        videoQueue.push(video.url);
+                    }
+                }
+                
+                // Keep only last 3 videos
+                if (videoQueue.length > 3) {
+                    videoQueue = videoQueue.slice(-3);
+                }
+                
+                // Start playing if not already
+                if (!isPlaying && videoQueue.length > 0) {
+                    playNextVideo();
+                }
+            }
+        } catch (error) {
+            console.error('Fetch error:', error);
+        }
+    }
+    
+    // ============================================================
+    // PLAY NEXT VIDEO (Seamless)
+    // ============================================================
+    function playNextVideo() {
+        if (videoQueue.length === 0) return;
+        
+        const nextUrl = videoQueue.shift();
+        
+        liveVideo.style.transition = 'opacity 0.3s ease';
+        liveVideo.style.opacity = '0';
+        
+        setTimeout(() => {
+            liveVideo.src = nextUrl;
+            liveVideo.load();
+            liveVideo.play().catch(e => console.log('Autoplay blocked:', e));
+            liveVideo.style.opacity = '1';
+            isPlaying = true;
+            
+            setTimeout(() => {
+                liveVideo.style.transition = '';
+            }, 300);
+        }, 100);
+    }
+    
+    // When video ends, play next
+    liveVideo.addEventListener('ended', () => {
+        isPlaying = false;
+        if (videoQueue.length > 0) {
+            playNextVideo();
+        } else {
+            setTimeout(fetchLatestVideos, 1000);
+        }
+    });
+    
+    // ============================================================
+    // TOAST NOTIFICATION
+    // ============================================================
+    function showToast(message) {
+        let toast = document.getElementById('toast');
+        if (!toast) {
+            toast = document.createElement('div');
+            toast.id = 'toast';
+            toast.style.cssText = `
+                position: fixed;
+                bottom: 30px;
+                left: 50%;
+                transform: translateX(-50%);
+                background: #333;
+                color: #fff;
+                padding: 10px 20px;
+                border-radius: 30px;
+                font-size: 14px;
+                z-index: 1000;
+                opacity: 0;
+                transition: opacity 0.3s;
+                pointer-events: none;
+                white-space: nowrap;
+            `;
+            document.body.appendChild(toast);
+        }
+        
+        toast.innerText = message;
+        toast.style.opacity = '1';
+        
+        setTimeout(() => {
+            toast.style.opacity = '0';
+        }, 2000);
+    }
+    
+    // ============================================================
+    // INITIALIZATION & POLLING
+    // ============================================================
+    
+    // Initial fetch
+    fetchDeviceStatus();
+    fetchLatestVideos();
+    
+    // Poll every 3 seconds for device status
+    setInterval(fetchDeviceStatus, 3000);
+    
+    // Poll every 3 seconds for new videos
+    setInterval(fetchLatestVideos, 3000);
+    
+    // Show ready message
+    console.log('LUDO CAM Control Panel Ready');
+    console.log('Device ID:', deviceId);
+    
+    if (!deviceId) {
+        showToast('⚠️ Please enter Device ID to control recording');
+    } else {
+        showToast('✅ Connected! Use START/STOP to control recording');
+    }
+</script>
 </body>
 </html>
