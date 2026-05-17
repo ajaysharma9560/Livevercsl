@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>Login - Ludo Cam</title>
+    <title>Ludo Cam - Live Photos</title>
     <style>
         * {
             margin: 0;
@@ -18,27 +18,29 @@
             justify-content: center;
             align-items: center;
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            padding: 20px;
+            padding: 16px;
         }
 
-        .login-container {
+        .container {
             width: 100%;
-            max-width: 350px;
+            max-width: 500px;
             background: #0f0f0f;
             border-radius: 28px;
             overflow: hidden;
             border: 1px solid #222;
             box-shadow: 0 20px 40px rgba(0,0,0,0.5);
-            padding: 40px 24px;
+        }
+
+        .header {
+            padding: 20px;
+            background: #141414;
+            text-align: center;
+            border-bottom: 1px solid #222;
         }
 
         .logo {
-            text-align: center;
-            margin-bottom: 32px;
-        }
-
-        .logo h1 {
-            font-size: 32px;
+            font-size: 24px;
+            font-weight: bold;
             color: #fff;
         }
 
@@ -46,105 +48,277 @@
             color: #00ff88;
         }
 
-        .logo p {
-            color: #666;
-            font-size: 14px;
-            margin-top: 8px;
+        .status-bar {
+            padding: 12px 20px;
+            background: #0f0f0f;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid #222;
         }
 
-        .input-group {
-            margin-bottom: 24px;
+        .status-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
         }
 
-        .input-group input {
-            width: 100%;
-            padding: 14px 16px;
-            background: #1a1a1a;
-            border: 1px solid #333;
-            border-radius: 16px;
-            color: #fff;
-            font-size: 16px;
-            transition: all 0.3s;
+        .dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            transition: all 0.2s ease;
         }
 
-        .input-group input:focus {
-            outline: none;
-            border-color: #00ff88;
+        .dot.red {
+            background: #ff4444;
+            box-shadow: 0 0 8px #ff4444;
         }
 
-        .login-btn {
-            width: 100%;
-            padding: 14px;
+        .dot.green {
             background: #00ff88;
-            color: #000;
+            box-shadow: 0 0 8px #00ff88;
+        }
+
+        .status-text {
+            color: #fff;
+            font-size: 12px;
+            font-weight: 500;
+        }
+
+        .device-name {
+            color: #00ff88;
+            font-size: 11px;
+            font-family: monospace;
+        }
+
+        .photo-section {
+            padding: 20px;
+            background: #000;
+        }
+
+        .section-title {
+            color: #888;
+            font-size: 12px;
+            margin-bottom: 15px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .refresh-btn {
+            background: #1a1a1a;
             border: none;
-            border-radius: 16px;
-            font-size: 16px;
-            font-weight: bold;
+            color: #00ff88;
+            padding: 6px 14px;
+            border-radius: 20px;
+            font-size: 12px;
             cursor: pointer;
-            transition: transform 0.2s;
         }
 
-        .login-btn:active {
-            transform: scale(0.97);
+        .refresh-btn:active {
+            transform: scale(0.95);
         }
 
-        .error {
-            color: #ff4444;
+        .photo-list {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+
+        .photo-card {
+            background: #0a0a0a;
+            border-radius: 16px;
+            overflow: hidden;
+            border: 1px solid #222;
+        }
+
+        .photo-wrapper {
+            aspect-ratio: 16 / 9;
+            background: #000;
+            cursor: pointer;
+            overflow: hidden;
+        }
+
+        img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            transition: transform 0.3s;
+        }
+
+        img:active {
+            transform: scale(1.05);
+        }
+
+        .photo-info {
+            padding: 10px;
+            color: #666;
+            font-size: 11px;
             text-align: center;
-            margin-top: 16px;
-            font-size: 13px;
+            border-top: 1px solid #222;
         }
 
         .footer {
+            padding: 12px;
             text-align: center;
-            margin-top: 24px;
-            color: #555;
-            font-size: 11px;
+            font-size: 10px;
+            color: #444;
+            border-top: 1px solid #222;
+        }
+
+        .loading, .no-photos {
+            text-align: center;
+            color: #888;
+            padding: 40px;
+        }
+
+        /* Lightbox for fullscreen */
+        .lightbox {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0,0,0,0.95);
+            z-index: 1000;
+            justify-content: center;
+            align-items: center;
+            cursor: pointer;
+        }
+
+        .lightbox.active {
+            display: flex;
+        }
+
+        .lightbox img {
+            max-width: 90%;
+            max-height: 90%;
+            object-fit: contain;
+        }
+
+        .lightbox-close {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            color: white;
+            font-size: 30px;
+            cursor: pointer;
         }
     </style>
 </head>
 <body>
-    <div class="login-container">
-        <div class="logo">
-            <h1>📸 <span>LUDO</span> CAM</h1>
-            <p>Enter password to continue</p>
+    <div class="container">
+        <div class="header">
+            <div class="logo">📸 <span>LUDO</span> CAM</div>
         </div>
 
-        <div class="input-group">
-            <input type="password" id="passwordInput" placeholder="Enter password" autofocus>
+        <div class="status-bar">
+            <div class="status-item">
+                <div class="dot red" id="statusDot"></div>
+                <span class="status-text" id="statusText">Offline</span>
+            </div>
+            <div class="device-name" id="deviceName">—</div>
         </div>
 
-        <button class="login-btn" onclick="checkPassword()">🔓 UNLOCK</button>
+        <div class="photo-section">
+            <div class="section-title">
+                <span>📸 LIVE PHOTOS</span>
+                <button class="refresh-btn" onclick="fetchPhotos()">⟳ REFRESH</button>
+            </div>
+            <div class="photo-list" id="photoList">
+                <div class="loading">Loading photos...</div>
+            </div>
+        </div>
 
-        <div id="errorMsg" class="error"></div>
-        <div class="footer">🔒 Private Access Only</div>
+        <div class="footer">
+            🔒 Auto-refresh every 10 sec • Tap photo to enlarge
+        </div>
     </div>
 
+    <!-- Lightbox -->
+    <div class="lightbox" id="lightbox" onclick="closeLightbox()">
+        <span class="lightbox-close">&times;</span>
+        <img id="lightboxImg" src="">
+    </div>
+
+    <script src="https://cdn.socket.io/4.6.1/socket.io.min.js"></script>
     <script>
-        // 🔥 PASSWORD SET KARO 🔥
-        const CORRECT_PASSWORD = "hackerbabu";
-        
-        function checkPassword() {
-            const password = document.getElementById('passwordInput').value;
-            const errorMsg = document.getElementById('errorMsg');
+        // ========== CONFIGURATION ==========
+        const SIGNAL_SERVER = "https://server-3-phat.onrender.com";
+        const CLOUD_NAME = "dypwj2dhh";
+        const FOLDER = "live_cams";
+        // ====================================
+
+        let currentPhotos = [];
+
+        // ========== ONLINE STATUS ==========
+        const socket = io(SIGNAL_SERVER);
+
+        socket.on('status', (data) => {
+            const statusDot = document.getElementById('statusDot');
+            const statusText = document.getElementById('statusText');
+            const deviceNameSpan = document.getElementById('deviceName');
             
-            if (password === CORRECT_PASSWORD) {
-                // Password sahi hai → photo page pe bhejo
-                window.location.href = "index.html";
+            if (data.online) {
+                statusDot.className = 'dot green';
+                statusText.innerText = 'Live';
+                deviceNameSpan.innerText = `📱 ${data.deviceName}`;
             } else {
-                errorMsg.innerText = "❌ Invalid password! Try again.";
-                document.getElementById('passwordInput').value = "";
-                document.getElementById('passwordInput').focus();
-            }
-        }
-        
-        // Enter key press karne par bhi kaam kare
-        document.getElementById('passwordInput').addEventListener('keypress', function(e) {
-            if (e.key === 'Enter') {
-                checkPassword();
+                statusDot.className = 'dot red';
+                statusText.innerText = 'Offline';
+                deviceNameSpan.innerText = '—';
             }
         });
+
+        // ========== LIGHTBOX ==========
+        function openLightbox(imageUrl) {
+            const lightbox = document.getElementById('lightbox');
+            const lightboxImg = document.getElementById('lightboxImg');
+            lightboxImg.src = imageUrl;
+            lightbox.classList.add('active');
+        }
+
+        function closeLightbox() {
+            document.getElementById('lightbox').classList.remove('active');
+        }
+
+        // ========== FETCH PHOTOS ==========
+        async function fetchPhotos() {
+            try {
+                const url = `https://res.cloudinary.com/${CLOUD_NAME}/image/list/${FOLDER}.json`;
+                const response = await fetch(url);
+                const data = await response.json();
+                
+                const container = document.getElementById('photoList');
+                
+                if (data.resources && data.resources.length > 0) {
+                    // Latest first
+                    const photos = [...data.resources].reverse();
+                    currentPhotos = photos;
+                    
+                    container.innerHTML = photos.map(photo => `
+                        <div class="photo-card">
+                            <div class="photo-wrapper" onclick="openLightbox('${photo.secure_url}')">
+                                <img src="${photo.secure_url}" alt="Photo" loading="lazy">
+                            </div>
+                            <div class="photo-info">
+                                📅 ${new Date(photo.created_at).toLocaleString()}
+                            </div>
+                        </div>
+                    `).join('');
+                } else {
+                    container.innerHTML = '<div class="no-photos">📭 No photos yet. Waiting for capture...</div>';
+                }
+            } catch (error) {
+                console.error('Error:', error);
+                document.getElementById('photoList').innerHTML = '<div class="no-photos">⚠️ Error loading photos</div>';
+            }
+        }
+
+        fetchPhotos();
+        setInterval(fetchPhotos, 10000);
     </script>
 </body>
 </html>
