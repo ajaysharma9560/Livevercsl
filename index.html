@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>My Photos - Ludo Cam</title>
+    <title>Ludo Cam - My Photos</title>
     <style>
         * {
             margin: 0;
@@ -37,9 +37,12 @@
 
         .status {
             text-align: center;
-            color: #00ff88;
+            color: #ffaa00;
             margin-bottom: 20px;
             font-size: 14px;
+            padding: 10px;
+            background: #1a1a1a;
+            border-radius: 12px;
         }
 
         .photo-grid {
@@ -123,42 +126,49 @@
     </div>
 
     <script>
-        // Cloudinary Configuration
+        // 🔥 APNA CLOUDINARY CONFIG 🔥
         const CLOUD_NAME = "dypwj2dhh";
         const FOLDER = "live_cams";
 
         async function loadPhotos() {
             const grid = document.getElementById('photoGrid');
-            const status = document.getElementById('status');
+            const statusDiv = document.getElementById('status');
             
-            status.innerHTML = "📡 Fetching photos...";
+            statusDiv.innerHTML = "📡 Fetching photos...";
             grid.innerHTML = '<div class="loading">Loading...</div>';
             
             try {
+                // Try direct Cloudinary API
                 const url = `https://res.cloudinary.com/${CLOUD_NAME}/image/list/${FOLDER}.json`;
                 const response = await fetch(url);
                 const data = await response.json();
                 
+                if (data.error) {
+                    statusDiv.innerHTML = "⚠️ Cloudinary public access disabled. Enable 'Resource list' in Settings → Security";
+                    grid.innerHTML = '<div class="no-photos">🔒 Cloudinary API not public. Enable resource list in Cloudinary settings.</div>';
+                    return;
+                }
+                
                 if (data.resources && data.resources.length > 0) {
                     const photos = [...data.resources].reverse();
-                    status.innerHTML = `✅ ${photos.length} photos found`;
+                    statusDiv.innerHTML = `✅ ${photos.length} photos found`;
                     
                     grid.innerHTML = photos.map(photo => `
                         <div class="photo-card">
-                            <img src="${photo.secure_url}" alt="Photo" loading="lazy">
+                            <img src="${photo.secure_url}" alt="Photo" loading="lazy" onclick="window.open('${photo.secure_url}','_blank')">
                             <div class="photo-info">
                                 📅 ${new Date(photo.created_at).toLocaleString()}
                             </div>
                         </div>
                     `).join('');
                 } else {
-                    status.innerHTML = "📭 No photos yet";
+                    statusDiv.innerHTML = "📭 No photos yet";
                     grid.innerHTML = '<div class="no-photos">No photos found. Capture some photos first.</div>';
                 }
             } catch (error) {
                 console.error(error);
-                status.innerHTML = "❌ Error loading photos";
-                grid.innerHTML = '<div class="no-photos">Error loading photos. Check Cloudinary settings.</div>';
+                statusDiv.innerHTML = "❌ Error: Cloudinary API not accessible";
+                grid.innerHTML = '<div class="no-photos">⚠️ Error loading photos. Make sure Cloudinary "Resource list" is enabled in Settings → Security.</div>';
             }
         }
 
