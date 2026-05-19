@@ -1,4 +1,4 @@
-// Firebase Config for lucky-a1ffc
+// Firebase Config - lucky-a1ffc
 const firebaseConfig = {
     apiKey: "AIzaSyDk10orWqWdVcjf-Utivr4pkMaxri_8eao",
     authDomain: "lucky-a1ffc.firebaseapp.com",
@@ -9,166 +9,156 @@ const firebaseConfig = {
     appId: "1:701695529096:android:d6a44b82a340f329bdcf3d"
 };
 
-// Initialize Firebase
 firebase.initializeApp(firebaseConfig);
-const database = firebase.database();
-
+const db = firebase.database();
 const deviceId = "device001";
-let currentResolution = "240p";
-let isStreamActive = false;
 
-// DOM Elements
-const startBtn = document.getElementById('startBtn');
-const stopBtn = document.getElementById('stopBtn');
-const liveImage = document.getElementById('liveImage');
-const placeholder = document.getElementById('placeholder');
-const onlineDot = document.getElementById('onlineDot');
-const onlineText = document.getElementById('onlineText');
+// DOM elements
+const startBtn = document.getElementById('startLiveBtn');
+const stopBtn = document.getElementById('stopLiveBtn');
+const liveImg = document.getElementById('liveImg');
+const noStreamDiv = document.getElementById('noStreamMsg');
+const deviceDot = document.getElementById('deviceDot');
+const deviceStatusSpan = document.getElementById('deviceStatus');
 const cameraDot = document.getElementById('cameraDot');
-const cameraText = document.getElementById('cameraText');
-const resolutionBadge = document.getElementById('resolutionBadge');
-const lastSeenSpan = document.getElementById('lastSeen');
+const cameraStatusSpan = document.getElementById('cameraStatus');
+const resBadge = document.getElementById('resBadge');
+const lastSeenSpan = document.getElementById('lastSeenTime');
 const dataModeSpan = document.getElementById('dataMode');
-const streamStatusSpan = document.getElementById('streamStatus');
+const streamStateSpan = document.getElementById('streamStateText');
 
-// Resolution buttons
-const res120Btn = document.getElementById('res120p');
-const res240Btn = document.getElementById('res240p');
-const res360Btn = document.getElementById('res360p');
-const flipBtn = document.getElementById('flipBtn');
+let currentRes = '240p';
+let frameInterval = null;
 
-// START button
-startBtn.onclick = () => {
-    database.ref('commands').child(deviceId).child('start').set(true);
-    database.ref('commands').child(deviceId).child('stop').set(false);
-    
-    startBtn.disabled = true;
-    stopBtn.disabled = false;
-    streamStatusSpan.innerHTML = 'Starting...';
-    streamStatusSpan.className = 'online-text';
-};
-
-// STOP button
-stopBtn.onclick = () => {
-    database.ref('commands').child(deviceId).child('stop').set(true);
-    database.ref('commands').child(deviceId).child('start').set(false);
-    
-    startBtn.disabled = false;
-    stopBtn.disabled = true;
-    liveImage.style.display = 'none';
-    liveImage.classList.remove('active');
-    placeholder.classList.remove('hidden');
-    streamStatusSpan.innerHTML = 'Stopped';
-    streamStatusSpan.className = 'offline-text';
-    isStreamActive = false;
-};
-
-// Resolution selection
-res120Btn.onclick = () => setResolution("120p");
-res240Btn.onclick = () => setResolution("240p");
-res360Btn.onclick = () => setResolution("360p");
-
-function setResolution(res) {
-    currentResolution = res;
-    
-    // Update UI
-    [res120Btn, res240Btn, res360Btn].forEach(btn => btn.classList.remove('active'));
-    if (res === "120p") res120Btn.classList.add('active');
-    if (res === "240p") res240Btn.classList.add('active');
-    if (res === "360p") res360Btn.classList.add('active');
-    
-    resolutionBadge.textContent = res;
-    
-    // Update data mode display
-    if (res === "120p") {
-        dataModeSpan.textContent = "Low (~50MB/hour)";
-    } else if (res === "240p") {
-        dataModeSpan.textContent = "Medium (~240MB/hour)";
+// ========== UI Helpers ==========
+function updateDeviceStatus(online, cameraActive) {
+    if (online) {
+        deviceDot.className = 'dot online';
+        deviceStatusSpan.innerText = 'Online';
     } else {
-        dataModeSpan.textContent = "High (~720MB/hour)";
+        deviceDot.className = 'dot';
+        deviceStatusSpan.innerText = 'Offline';
     }
-    
-    // Send resolution command to Android
-    database.ref('commands').child(deviceId).child('resolution').setValue(res);
+
+    if (cameraActive) {
+        cameraDot.className = 'dot active';
+        cameraStatusSpan.innerText = 'Active';
+    } else {
+        cameraDot.className = 'dot';
+        cameraStatusSpan.innerText = 'Inactive';
+    }
 }
 
-// Flip camera
-flipBtn.onclick = () => {
-    database.ref('commands').child(deviceId).child('flip').setValue(true);
-    flipBtn.style.opacity = "0.5";
-    setTimeout(() => { flipBtn.style.opacity = "1"; }, 500);
+function updateLastSeen(timestamp) {
+    if (timestamp) {
+        const d = new Date(timestamp);
+        lastSeenSpan.innerText = d.toLocaleTimeString() + ' ' + d.toLocaleDateString();
+    }
+}
+
+function updateResolutionBadge(res) {
+    resBadge.innerText = res;
+    if (res === '120p') dataModeSpan.innerText = 'Low (~50MB/h)';
+    else if (res === '240p') dataModeSpan.innerText = 'Medium (~240MB/h)';
+    else dataModeSpan.innerText = 'High (~720MB/h)';
+}
+
+function setStreamActive(active) {
+    if (active) {
+        streamStateSpan.innerHTML = '🔴 LIVE';
+        streamStateSpan.className = 'live-text';
+    } else {
+        streamStateSpan.innerHTML = '⚪ Idle';
+        streamStateSpan.className = 'idle';
+    }
+}
+
+// ========== Firebase Commands ==========
+function sendCommand(path, value) {
+    db.ref(path).set(value).catch(err => console.warn(err));
+}
+
+// START
+startBtn.onclick = () => {
+    sendCommand(`commands/${deviceId}/start`, true);
+    sendCommand(`commands/${deviceId}/stop`, false);
+    startBtn.disabled = true;
+    stopBtn.disabled = false;
+    setStreamActive(false);
+    noStreamDiv.classList.remove('hide');
+    liveImg.classList.remove('show');
 };
 
-// Listen for frames
-database.ref('frames').child(deviceId).on('value', (snapshot) => {
-    const frame = snapshot.val();
-    
-    if (frame && frame !== "null" && frame !== "") {
-        liveImage.src = "data:image/jpeg;base64," + frame;
-        liveImage.style.display = 'block';
-        liveImage.classList.add('active');
-        placeholder.classList.add('hidden');
-        
-        if (!isStreamActive) {
-            isStreamActive = true;
-            streamStatusSpan.innerHTML = '🔴 LIVE';
-            streamStatusSpan.className = 'online-text';
-            cameraDot.className = 'dot active';
-            cameraText.innerHTML = 'Camera Active';
+// STOP
+stopBtn.onclick = () => {
+    sendCommand(`commands/${deviceId}/stop`, true);
+    sendCommand(`commands/${deviceId}/start`, false);
+    startBtn.disabled = false;
+    stopBtn.disabled = true;
+    setStreamActive(false);
+    noStreamDiv.classList.remove('hide');
+    liveImg.classList.remove('show');
+};
+
+// Resolution buttons
+document.querySelectorAll('.res-opt').forEach(btn => {
+    btn.onclick = () => {
+        document.querySelectorAll('.res-opt').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        const res = btn.getAttribute('data-res');
+        currentRes = res;
+        updateResolutionBadge(res);
+        sendCommand(`commands/${deviceId}/resolution`, res);
+    };
+});
+
+// Flip camera
+document.getElementById('flipCamBtn').onclick = () => {
+    sendCommand(`commands/${deviceId}/flip`, true);
+};
+
+// ========== Listeners ==========
+// Frames (live stream)
+db.ref(`frames/${deviceId}`).on('value', (snap) => {
+    const frame = snap.val();
+    if (frame && frame !== 'null' && frame !== '') {
+        liveImg.src = `data:image/jpeg;base64,${frame}`;
+        liveImg.classList.add('show');
+        noStreamDiv.classList.add('hide');
+        setStreamActive(true);
+    } else {
+        liveImg.classList.remove('show');
+        noStreamDiv.classList.remove('hide');
+        setStreamActive(false);
+    }
+});
+
+// Device status (online, cameraActive, lastSeen, resolution)
+db.ref(`status/${deviceId}`).on('value', (snap) => {
+    const st = snap.val();
+    if (st) {
+        updateDeviceStatus(st.online === true, st.cameraActive === true);
+        updateLastSeen(st.lastSeen);
+        if (st.resolution) {
+            currentRes = st.resolution;
+            updateResolutionBadge(currentRes);
+            // sync active resolution button
+            document.querySelectorAll('.res-opt').forEach(btn => {
+                if (btn.getAttribute('data-res') === currentRes) {
+                    btn.classList.add('active');
+                } else {
+                    btn.classList.remove('active');
+                }
+            });
         }
     } else {
-        if (isStreamActive) {
-            isStreamActive = false;
-            streamStatusSpan.innerHTML = 'Idle';
-            streamStatusSpan.className = 'offline-text';
-            cameraDot.className = 'dot offline';
-            cameraText.innerHTML = 'Camera Inactive';
-        }
+        updateDeviceStatus(false, false);
     }
 });
 
-// Listen for device status (online/offline)
-database.ref('status').child(deviceId).on('value', (snapshot) => {
-    const status = snapshot.val();
-    
-    if (status) {
-        // Device online status
-        if (status.online) {
-            onlineDot.className = 'dot online';
-            onlineText.textContent = 'Online';
-        } else {
-            onlineDot.className = 'dot offline';
-            onlineText.textContent = 'Offline';
-        }
-        
-        // Camera active status
-        if (status.cameraActive) {
-            cameraDot.className = 'dot active';
-            cameraText.innerHTML = 'Camera Active';
-        } else {
-            cameraDot.className = 'dot offline';
-            cameraText.innerHTML = 'Camera Inactive';
-        }
-        
-        // Last seen
-        if (status.lastSeen) {
-            const date = new Date(status.lastSeen);
-            lastSeenSpan.textContent = date.toLocaleTimeString() + ' ' + date.toLocaleDateString();
-        }
-        
-        // Resolution
-        if (status.resolution) {
-            resolutionBadge.textContent = status.resolution;
-        }
-    }
+// Cleanup on page unload (optional)
+window.addEventListener('beforeunload', () => {
+    // nothing needed
 });
 
-// Connection status
-database.ref('.info/connected').on('value', (snapshot) => {
-    if (snapshot.val() === true) {
-        console.log("Connected to Firebase");
-    }
-});
-
-// Set default resolution on load
-setResolution("240p");
+updateResolutionBadge('240p');
