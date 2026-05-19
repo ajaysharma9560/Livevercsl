@@ -8,12 +8,21 @@
 </head>
 <body>
     <div class="container">
-        <h1>📷 Live Camera Stream</h1>
-        
+        <div class="header">
+            <h1>📷 Live Camera Monitor</h1>
+            <div class="status-card">
+                <div class="status-indicator">
+                    <span id="onlineDot" class="dot offline"></span>
+                    <span id="onlineText">Offline</span>
+                </div>
+                <div class="resolution-badge" id="resolutionBadge">240p</div>
+            </div>
+        </div>
+
         <div class="video-container">
             <img id="liveImage" src="" alt="Live Stream">
             <div id="placeholder" class="placeholder">
-                ⚫ No active stream<br>
+                📷 No active stream<br>
                 Click START to begin monitoring
             </div>
         </div>
@@ -23,8 +32,24 @@
             <button id="stopBtn" class="btn-stop" disabled>⏹ STOP LIVE</button>
         </div>
 
-        <div class="status">
-            Status: <span id="statusText" class="offline">Offline</span>
+        <div class="settings-panel">
+            <div class="setting-group">
+                <label>📐 Resolution:</label>
+                <div class="resolution-buttons">
+                    <button id="res120p" class="res-btn" data-res="120p">120p (Low Data)</button>
+                    <button id="res240p" class="res-btn active" data-res="240p">240p (Medium)</button>
+                    <button id="res360p" class="res-btn" data-res="360p">360p (High)</button>
+                </div>
+            </div>
+            <div class="setting-group">
+                <button id="flipBtn" class="flip-btn">🔄 Flip Camera</button>
+            </div>
+        </div>
+
+        <div class="info-panel">
+            <div class="info-item">📱 Device: <span id="deviceId">device001</span></div>
+            <div class="info-item">🕐 Last Seen: <span id="lastSeen">Never</span></div>
+            <div class="info-item">📊 Data Mode: <span id="dataMode">Medium</span></div>
         </div>
     </div>
 
