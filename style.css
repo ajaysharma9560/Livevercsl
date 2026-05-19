@@ -38,16 +38,17 @@ h1 {
 
 .status-card {
     display: flex;
-    gap: 15px;
+    gap: 12px;
     align-items: center;
+    flex-wrap: wrap;
 }
 
-.status-indicator {
+.status-indicator, .camera-status {
     display: flex;
     align-items: center;
     gap: 8px;
     background: rgba(0,0,0,0.5);
-    padding: 8px 15px;
+    padding: 6px 12px;
     border-radius: 30px;
 }
 
@@ -68,14 +69,26 @@ h1 {
     box-shadow: 0 0 4px #ff0000;
 }
 
-.status-indicator span:last-child {
+.dot.active {
+    background: #00ff00;
+    box-shadow: 0 0 8px #00ff00;
+    animation: pulse 1.5s infinite;
+}
+
+@keyframes pulse {
+    0% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.5; transform: scale(1.2); }
+    100% { opacity: 1; transform: scale(1); }
+}
+
+.status-indicator span:last-child, .camera-status span:last-child {
     color: white;
-    font-size: 14px;
+    font-size: 12px;
 }
 
 .resolution-badge {
     background: #333;
-    padding: 8px 15px;
+    padding: 6px 15px;
     border-radius: 30px;
     color: #ffaa00;
     font-weight: bold;
@@ -222,6 +235,14 @@ button:disabled {
     color: #fff;
 }
 
+.offline-text {
+    color: #ff4444;
+}
+
+.online-text {
+    color: #00ff00;
+}
+
 @media (max-width: 600px) {
     .header {
         flex-direction: column;
@@ -241,56 +262,8 @@ button:disabled {
     h1 {
         font-size: 18px;
     }
-    }    display: flex;
-    justify-content: center;
-    align-items: center;
-    border: 2px solid #333;
+    
+    .status-card {
+        justify-content: center;
+    }
 }
-
-#liveImage {
-    width: 100%;
-    display: none;
-}
-
-#liveImage.active {
-    display: block;
-}
-
-.placeholder {
-    color: #666;
-    text-align: center;
-    padding: 50px;
-}
-
-.placeholder.hidden {
-    display: none;
-}
-
-.controls {
-    display: flex;
-    gap: 15px;
-    margin-top: 20px;
-    justify-content: center;
-}
-
-button {
-    padding: 12px 30px;
-    font-size: 16px;
-    font-weight: bold;
-    border: none;
-    border-radius: 30px;
-    cursor: pointer;
-}
-
-.btn-start {
-    background: #00ff00;
-    color: #000;
-}
-
-.btn-start:hover {
-    background: #00cc00;
-}
-
-.btn-stop {
-    background: #ff0000;
-    color
