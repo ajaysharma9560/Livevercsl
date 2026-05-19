@@ -1,8 +1,0 @@
-{
-  "name": "ludo-cam",
-  "version": "1.0.0",
-  "description": "Live camera photos viewer",
-  "dependencies": {
-    "cloudinary": "^1.41.0"
-  }
-}
