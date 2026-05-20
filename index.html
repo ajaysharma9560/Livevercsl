@@ -3,61 +3,396 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>Live Camera Monitor</title>
-    <link rel="stylesheet" href="style.css">
+    <title>MyyApp - Live Stream Controller</title>
+    <script src="https://www.gstatic.com/firebasejs/9.6.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.0/firebase-database-compat.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 16px;
+        }
+
+        .container {
+            background: rgba(255,255,255,0.1);
+            backdrop-filter: blur(10px);
+            border-radius: 24px;
+            padding: 24px;
+            max-width: 500px;
+            width: 100%;
+            box-shadow: 0 25px 45px rgba(0,0,0,0.2);
+            border: 1px solid rgba(255,255,255,0.2);
+        }
+
+        h1 {
+            text-align: center;
+            color: white;
+            font-size: 24px;
+            margin-bottom: 20px;
+            letter-spacing: 1px;
+        }
+
+        .status-card {
+            background: rgba(0,0,0,0.5);
+            border-radius: 16px;
+            padding: 16px;
+            margin-bottom: 20px;
+            text-align: center;
+        }
+
+        .status-header {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            margin-bottom: 10px;
+        }
+
+        .dot {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            animation: pulse 1.5s infinite;
+        }
+
+        .dot-green {
+            background: #00ff00;
+            box-shadow: 0 0 10px #00ff00;
+        }
+
+        .dot-red {
+            background: #ff0000;
+            box-shadow: 0 0 10px #ff0000;
+        }
+
+        @keyframes pulse {
+            0% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.5; transform: scale(0.9); }
+            100% { opacity: 1; transform: scale(1); }
+        }
+
+        .status-text {
+            color: white;
+            font-size: 18px;
+            font-weight: 500;
+        }
+
+        .stream-id {
+            color: #888;
+            font-size: 12px;
+            margin-top: 8px;
+            word-break: break-all;
+        }
+
+        .video-container {
+            background: #000;
+            border-radius: 16px;
+            overflow: hidden;
+            margin-bottom: 20px;
+            aspect-ratio: 16/9;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        video {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
+        .placeholder {
+            color: #666;
+            text-align: center;
+            font-size: 14px;
+        }
+
+        .controls {
+            display: flex;
+            gap: 12px;
+            margin-bottom: 20px;
+        }
+
+        button {
+            flex: 1;
+            padding: 14px;
+            font-size: 16px;
+            font-weight: 600;
+            border: none;
+            border-radius: 40px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            font-family: inherit;
+        }
+
+        .btn-start {
+            background: linear-gradient(135deg, #00b09b, #96c93d);
+            color: white;
+        }
+
+        .btn-start:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 20px rgba(0,176,155,0.4);
+        }
+
+        .btn-stop {
+            background: linear-gradient(135deg, #ff6b6b, #ee5a24);
+            color: white;
+        }
+
+        .btn-stop:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 20px rgba(255,107,107,0.4);
+        }
+
+        .resolution-section {
+            margin-bottom: 16px;
+        }
+
+        .resolution-title {
+            color: white;
+            font-size: 14px;
+            margin-bottom: 10px;
+            text-align: center;
+        }
+
+        .resolution-buttons {
+            display: flex;
+            gap: 12px;
+        }
+
+        .res-btn {
+            flex: 1;
+            padding: 10px;
+            background: rgba(255,255,255,0.2);
+            color: white;
+            font-size: 14px;
+        }
+
+        .res-btn.active {
+            background: linear-gradient(135deg, #667eea, #764ba2);
+        }
+
+        .info {
+            text-align: center;
+            color: #888;
+            font-size: 11px;
+            margin-top: 16px;
+        }
+
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+        }
+    </style>
 </head>
 <body>
     <div class="container">
-        <div class="header">
-            <h1>📷 Live Camera Monitor</h1>
-            <div class="status-group">
-                <div class="status-card">
-                    <div class="dot" id="deviceDot"></div>
-                    <span id="deviceStatus">Offline</span>
-                </div>
-                <div class="status-card">
-                    <div class="dot" id="cameraDot"></div>
-                    <span id="cameraStatus">Inactive</span>
-                </div>
-                <div class="res-badge" id="resBadge">240p</div>
+        <h1>📹 MyyApp Live Stream</h1>
+
+        <div class="status-card">
+            <div class="status-header">
+                <div class="dot dot-red" id="statusDot"></div>
+                <div class="status-text" id="statusText">App Offline</div>
+            </div>
+            <div class="stream-id" id="streamIdText">Waiting for stream...</div>
+        </div>
+
+        <div class="video-container">
+            <video id="video" autoplay playsinline muted></video>
+            <div class="placeholder" id="placeholder" style="display: none;">No stream available<br>Click START to begin</div>
+        </div>
+
+        <div class="controls">
+            <button class="btn-start" id="startBtn">▶ START STREAM</button>
+            <button class="btn-stop" id="stopBtn">⏹ STOP STREAM</button>
+        </div>
+
+        <div class="resolution-section">
+            <div class="resolution-title">📺 Resolution</div>
+            <div class="resolution-buttons">
+                <button class="res-btn" id="res120p">120p (Low)</button>
+                <button class="res-btn active" id="res240p">240p (Medium)</button>
             </div>
         </div>
 
-        <div class="video-area">
-            <img id="liveImg" src="">
-            <div id="noStreamMsg" class="no-stream">
-                📭 No active stream<br>
-                Click START to begin
-            </div>
-        </div>
-
-        <div class="button-group">
-            <button id="startLiveBtn" class="btn green">▶ START LIVE</button>
-            <button id="stopLiveBtn" class="btn red" disabled>⏹ STOP LIVE</button>
-        </div>
-
-        <div class="settings">
-            <div class="setting-row">
-                <label>📐 Resolution:</label>
-                <div class="res-options">
-                    <button class="res-opt" data-res="120p">120p 💾</button>
-                    <button class="res-opt active" data-res="240p">240p 📱</button>
-                    <button class="res-opt" data-res="360p">360p 🎥</button>
-                </div>
-            </div>
-            <button id="flipCamBtn" class="flip-btn">🔄 Flip Camera</button>
-        </div>
-
-        <div class="info-bar">
-            <span>📱 Device: device001</span>
-            <span>🕐 Last: <span id="lastSeenTime">Never</span></span>
-            <span>📊 Data: <span id="dataMode">Medium</span></span>
-            <span id="streamStateText" class="idle">⚪ Idle</span>
+        <div class="info">
+            ⚡ WebRTC Real-time Streaming<br>
+            🟢 Green = Online | 🔴 Red = Offline
         </div>
     </div>
 
-    <script src="https://www.gstatic.com/firebasejs/10.0.0/firebase-app-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/10.0.0/firebase-database-compat.js"></script>
-    <script src="script.js"></script>
+    <script>
+        // ============================================
+        // YOUR FIREBASE CONFIGURATION - DO NOT CHANGE
+        // ============================================
+        const firebaseConfig = {
+            apiKey: "AIzaSyALXmXZg6UCfDFI1fU5TZ04oMP3aYgI_VU",
+            authDomain: "myapkk-405e8.firebaseapp.com",
+            databaseURL: "https://myapkk-405e8-default-rtdb.firebaseio.com",
+            projectId: "myapkk-405e8",
+            storageBucket: "myapkk-405e8.firebasestorage.app",
+            messagingSenderId: "1069468762166",
+            appId: "1:1069468762166:android:475b157fd53c94882f5897"
+        };
+        // ============================================
+
+        // Initialize Firebase
+        firebase.initializeApp(firebaseConfig);
+        const database = firebase.database();
+
+        let peerConnection = null;
+        let currentStreamId = null;
+
+        const configuration = {
+            iceServers: [
+                { urls: "stun:stun.l.google.com:19302" },
+                { urls: "stun:stun1.l.google.com:19302" },
+                { urls: "stun:stun2.l.google.com:19302" }
+            ]
+        };
+
+        // DOM Elements
+        const statusDot = document.getElementById('statusDot');
+        const statusTextEl = document.getElementById('statusText');
+        const streamIdTextEl = document.getElementById('streamIdText');
+        const video = document.getElementById('video');
+        const placeholder = document.getElementById('placeholder');
+        const startBtn = document.getElementById('startBtn');
+        const stopBtn = document.getElementById('stopBtn');
+        const res120p = document.getElementById('res120p');
+        const res240p = document.getElementById('res240p');
+
+        // App Status Listener
+        database.ref('appStatus/isOnline').on('value', (snapshot) => {
+            const isOnline = snapshot.val();
+            
+            if(isOnline) {
+                statusDot.className = 'dot dot-green';
+                statusTextEl.textContent = '🟢 App Online';
+            } else {
+                statusDot.className = 'dot dot-red';
+                statusTextEl.textContent = '🔴 App Offline';
+            }
+        });
+
+        // Stream ID Listener
+        database.ref('appStatus/streamId').on('value', (snapshot) => {
+            currentStreamId = snapshot.val();
+            if(currentStreamId) {
+                streamIdTextEl.textContent = `Stream ID: ${currentStreamId.substring(0, 8)}...`;
+                setupWebRTC();
+            } else {
+                streamIdTextEl.textContent = 'Waiting for stream...';
+            }
+        });
+
+        async function setupWebRTC() {
+            if(!currentStreamId) return;
+            
+            if(peerConnection) {
+                peerConnection.close();
+                peerConnection = null;
+            }
+
+            peerConnection = new RTCPeerConnection(configuration);
+
+            peerConnection.ontrack = (event) => {
+                video.srcObject = event.streams[0];
+                placeholder.style.display = 'none';
+                video.style.display = 'block';
+            };
+
+            peerConnection.onicecandidate = (event) => {
+                if(event.candidate) {
+                    database.ref(`webrtc/${currentStreamId}/candidates/web`).push(event.candidate);
+                }
+            };
+
+            peerConnection.onconnectionstatechange = () => {
+                if(peerConnection.connectionState === 'connected') {
+                    console.log('Connected!');
+                } else if(peerConnection.connectionState === 'disconnected') {
+                    video.srcObject = null;
+                    placeholder.style.display = 'flex';
+                    video.style.display = 'none';
+                }
+            };
+
+            try {
+                // Get offer from Android
+                const offerSnap = await database.ref(`webrtc/${currentStreamId}/offer`).get();
+                const offer = offerSnap.val();
+
+                if(offer && offer.sdp) {
+                    await peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
+                    const answer = await peerConnection.createAnswer();
+                    await peerConnection.setLocalDescription(answer);
+
+                    await database.ref(`webrtc/${currentStreamId}/answer`).set({
+                        sdp: answer.sdp,
+                        type: answer.type
+                    });
+                }
+
+                // Listen for ICE candidates from Android
+                database.ref(`webrtc/${currentStreamId}/candidates`).on('child_added', (snap) => {
+                    const candidate = snap.val();
+                    if(candidate && candidate.sdp && peerConnection) {
+                        peerConnection.addIceCandidate(new RTCIceCandidate(candidate)).catch(e => console.log(e));
+                    }
+                });
+
+            } catch(error) {
+                console.error('WebRTC Error:', error);
+            }
+        }
+
+        // START Button
+        startBtn.onclick = () => {
+            database.ref('commands/stream').set('START');
+        };
+
+        // STOP Button
+        stopBtn.onclick = () => {
+            database.ref('commands/stream').set('STOP');
+            if(peerConnection) {
+                peerConnection.close();
+                peerConnection = null;
+                video.srcObject = null;
+                placeholder.style.display = 'flex';
+                video.style.display = 'none';
+            }
+        };
+
+        // 120p Resolution
+        res120p.onclick = () => {
+            database.ref('commands/resolution').set('120p');
+            res120p.classList.add('active');
+            res240p.classList.remove('active');
+        };
+
+        // 240p Resolution
+        res240p.onclick = () => {
+            database.ref('commands/resolution').set('240p');
+            res240p.classList.add('active');
+            res120p.classList.remove('active');
+        };
+
+        // Initial placeholder
+        placeholder.style.display = 'flex';
+        video.style.display = 'none';
+    </script>
 </body>
 </html>
