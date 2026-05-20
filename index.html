@@ -1,28 +1,136 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <!-- 1. Yeh link sirf library load karega -->
-    <script src="https://cdn.jsdelivr.net/npm/peerjs@1.4.7/dist/peerjs.min.js"></script>
+    <title>Live Camera Stream</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #f0f0f0;
+        }
+        video {
+            width: 100%;
+            background: #000;
+            border-radius: 10px;
+            margin-top: 20px;
+        }
+        button {
+            padding: 10px 20px;
+            margin: 10px 5px;
+            font-size: 16px;
+            cursor: pointer;
+            border: none;
+            border-radius: 5px;
+        }
+        .torch-on {
+            background: #ff9800;
+            color: white;
+        }
+        .torch-off {
+            background: #2196f3;
+            color: white;
+        }
+        .status {
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 5px;
+            text-align: center;
+        }
+        .connected {
+            background: #4caf50;
+            color: white;
+        }
+        .disconnected {
+            background: #f44336;
+            color: white;
+        }
+        .info {
+            text-align: center;
+            margin-top: 20px;
+            color: #666;
+        }
+    </style>
 </head>
 <body>
-    <video id="video" autoplay></video>
+    <h1>📹 Live Camera Stream</h1>
+    
+    <video id="video" autoplay playsinline muted></video>
+    
+    <div style="text-align: center; margin-top: 20px;">
+        <button class="torch-on" onclick="sendTorch('on')">🔦 Torch ON</button>
+        <button class="torch-off" onclick="sendTorch('off')">💡 Torch OFF</button>
+    </div>
+    
+    <div id="status" class="status disconnected">Loading...</div>
+    <div id="peerId" class="info"></div>
+    
+    <!-- PeerJS Library -->
+    <script src="https://cdn.jsdelivr.net/npm/peerjs@1.4.7/dist/peerjs.min.js"></script>
     
     <script>
-        // 2. PeerJS start karo
-        const peer = new Peer();
+        const video = document.getElementById('video');
+        const statusDiv = document.getElementById('status');
+        const peerIdDiv = document.getElementById('peerId');
         
-        // 3. Ye check karega camera active hai ya nahi
-        navigator.mediaDevices.getUserMedia({ video: true })
+        let peer = null;
+        let localStream = null;
+        let currentPeerId = null;
+        
+        // Get Camera Access
+        navigator.mediaDevices.getUserMedia({ video: true, audio: false })
             .then(function(stream) {
-                // Camera active hai
-                document.getElementById('video').srcObject = stream;
-                console.log("Camera ON ✅");
+                localStream = stream;
+                video.srcObject = stream;
+                statusDiv.innerHTML = 'Camera Active ✅';
+                statusDiv.className = 'status connected';
+                
+                // Start PeerJS after camera is ready
+                startPeerJS();
             })
             .catch(function(error) {
-                // Camera active nahi hai
-                console.log("Camera OFF ❌");
-                alert("Camera permission do");
+                console.error('Camera error:', error);
+                statusDiv.innerHTML = 'Camera Permission Denied ❌ Please allow camera access';
+                statusDiv.className = 'status disconnected';
+                peerIdDiv.innerHTML = 'Camera access is required for live stream';
             });
+        
+        function startPeerJS() {
+            peer = new Peer();
+            
+            peer.on('open', function(id) {
+                currentPeerId = id;
+                peerIdDiv.innerHTML = 'Your Peer ID: <strong>' + id + '</strong><br>Share this ID with viewer';
+                statusDiv.innerHTML = 'Ready! Waiting for viewer to connect...';
+                statusDiv.className = 'status connected';
+                console.log('PeerJS started with ID:', id);
+            });
+            
+            peer.on('call', function(call) {
+                statusDiv.innerHTML = 'Viewer connected! Streaming live...';
+                call.answer(localStream);
+                console.log('Call answered');
+            });
+            
+            peer.on('error', function(err) {
+                console.error('PeerJS error:', err);
+                statusDiv.innerHTML = 'Connection error: ' + err;
+                statusDiv.className = 'status disconnected';
+            });
+        }
+        
+        function sendTorch(state) {
+            // Send torch command through data connection
+            if (peer && currentPeerId) {
+                const conn = peer.connect(currentPeerId);
+                conn.on('open', function() {
+                    conn.send({ torch: state });
+                    console.log('Torch command sent:', state);
+                });
+            }
+        }
     </script>
 </body>
 </html>
