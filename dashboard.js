@@ -9,15 +9,13 @@ const firebaseConfig = {
     appId: "1:931792860891:android:602d1099f876f4688d7efe"
 };
 
-// Initialize Firebase
 firebase.initializeApp(firebaseConfig);
 const database = firebase.database();
 
-// Global variables
 let currentDeviceId = localStorage.getItem('cctv_device_id') || '';
 let socket = null;
+let frameCount = 0;
 
-// ============ Socket.IO Connection ============
 const RENDER_SERVER_URL = 'https://server-3-phat.onrender.com';
 
 function connectToStream() {
@@ -25,81 +23,75 @@ function connectToStream() {
         socket.disconnect();
     }
     
-    console.log('🔄 Connecting to render server...');
+    addLog('🔄 Connecting to Render...');
     
+    // Use polling first, then upgrade to websocket
     socket = io(RENDER_SERVER_URL, {
-        transports: ['websocket'],
+        transports: ['polling', 'websocket'],
         reconnection: true,
         reconnectionAttempts: 10,
         reconnectionDelay: 1000
     });
     
     socket.on('connect', () => {
-        console.log('✅ Connected to stream server');
-        addLog('✅ Connected to stream server');
+        addLog('✅ Connected to Render');
         socket.emit('register_viewer');
+        addLog('👁️ Viewer registered');
     });
     
     socket.on('frame', (data) => {
-        console.log('📸 Frame received, size:', data.byteLength);
+        frameCount++;
+        addLog(`📸 Frame #${frameCount}: ${data.byteLength || data.length} bytes`);
+        
+        // Convert binary to image
         const blob = new Blob([data], { type: 'image/jpeg' });
-        const url = URL.createObjectURL(blob);
-        const img = document.getElementById('liveFrame');
-        if (img) {
-            img.src = url;
-            document.getElementById('streamStatus').innerHTML = '🟢 LIVE STREAM (15 FPS)';
+        const imageUrl = URL.createObjectURL(blob);
+        
+        const imgElement = document.getElementById('liveFrame');
+        if (imgElement) {
+            imgElement.src = imageUrl;
+            document.getElementById('streamStatus').innerHTML = `🟢 LIVE (${frameCount} frames received)`;
             document.getElementById('streamStatus').style.color = '#4CAF50';
         }
-        setTimeout(() => URL.revokeObjectURL(url), 100);
+        
+        setTimeout(() => URL.revokeObjectURL(imageUrl), 100);
     });
     
     socket.on('disconnect', () => {
-        console.log('⚠️ Disconnected from stream server');
-        addLog('⚠️ Disconnected from stream server');
-        document.getElementById('streamStatus').innerHTML = '⚫ Stream disconnected';
-        document.getElementById('streamStatus').style.color = '#f44336';
+        addLog('⚠️ Disconnected from Render');
+        document.getElementById('streamStatus').innerHTML = '⚫ Disconnected';
     });
     
     socket.on('connect_error', (err) => {
-        console.log('❌ Connection error:', err.message);
         addLog('❌ Connection error: ' + err.message);
     });
 }
 
-// ============ Send Command ============
 function sendCommand(command) {
     if (!currentDeviceId) {
-        alert('Please enter and save Device ID first!');
+        alert('Enter Device ID first!');
         return;
     }
     
-    addLog(`📤 Sending command: ${command}`);
+    addLog(`📤 Sending: ${command}`);
     
     database.ref(`camera/${currentDeviceId}/command`).set(command)
-        .then(() => {
-            addLog(`✅ Command "${command}" sent`);
-        })
-        .catch((error) => {
-            addLog(`❌ Error: ${error.message}`);
-        });
+        .then(() => addLog(`✅ ${command} sent`))
+        .catch((error) => addLog(`❌ Error: ${error.message}`));
 }
 
-// ============ Listen to Device Status ============
 function listenToDeviceStatus() {
     if (!currentDeviceId) return;
     
-    const statusRef = database.ref(`camera/${currentDeviceId}`);
-    
-    statusRef.on('value', (snapshot) => {
+    database.ref(`camera/${currentDeviceId}`).on('value', (snapshot) => {
         const data = snapshot.val();
-        console.log('📊 Status update:', data);
         
         if (!data) {
-            updateUI('offline', null);
+            updateUI('offline');
             return;
         }
         
-        updateUI(data.status || 'offline', data);
+        updateUI(data.status || 'offline');
         
         if (data.currentResolution) {
             document.getElementById('resolutionDisplay').innerText = data.currentResolution;
@@ -114,7 +106,7 @@ function listenToDeviceStatus() {
     });
 }
 
-function updateUI(status, data) {
+function updateUI(status) {
     const dot = document.getElementById('statusDot');
     const text = document.getElementById('statusText');
     const startBtn = document.getElementById('startBtn');
@@ -125,44 +117,30 @@ function updateUI(status, data) {
     switch(status) {
         case 'online':
             dot.classList.add('online');
-            text.innerHTML = '🟢 ONLINE - Streaming Active';
+            text.innerHTML = '🟢 ONLINE - Streaming';
             startBtn.disabled = true;
             stopBtn.disabled = false;
-            addLog('📹 Device is ONLINE and streaming');
             break;
         case 'ready':
             dot.classList.add('ready');
             text.innerHTML = '🟠 READY - Camera ready';
             startBtn.disabled = false;
             stopBtn.disabled = true;
-            addLog('✅ Device is READY');
             break;
         case 'offline':
             dot.classList.add('offline');
             text.innerHTML = '🔴 OFFLINE';
             startBtn.disabled = false;
             stopBtn.disabled = true;
-            addLog('⚫ Device is OFFLINE');
-            break;
-        case 'permission_denied':
-            dot.classList.add('offline');
-            text.innerHTML = '⚠️ PERMISSION DENIED';
-            startBtn.disabled = true;
-            stopBtn.disabled = true;
-            addLog('❌ Camera permission denied on device');
             break;
         default:
             dot.classList.add('offline');
             text.innerHTML = '⚫ UNKNOWN';
-            addLog('⚠️ Unknown device status');
     }
 }
 
-// ============ Device ID Management ============
 function saveDeviceId() {
-    const deviceIdInput = document.getElementById('deviceId');
-    const newDeviceId = deviceIdInput.value.trim();
-    
+    const newDeviceId = document.getElementById('deviceId').value.trim();
     if (!newDeviceId) {
         alert('Enter Device ID');
         return;
@@ -171,7 +149,6 @@ function saveDeviceId() {
     currentDeviceId = newDeviceId;
     localStorage.setItem('cctv_device_id', currentDeviceId);
     document.getElementById('deviceIdDisplay').innerText = currentDeviceId;
-    
     addLog(`📱 Device ID saved: ${currentDeviceId}`);
     listenToDeviceStatus();
 }
@@ -184,7 +161,6 @@ function loadSavedDeviceId() {
     }
 }
 
-// ============ Log Function ============
 function addLog(message) {
     const logContainer = document.getElementById('logContainer');
     if (!logContainer) return;
@@ -195,16 +171,25 @@ function addLog(message) {
     logEntry.innerHTML = `[${timestamp}] ${message}`;
     logContainer.insertBefore(logEntry, logContainer.firstChild);
     
-    while (logContainer.children.length > 20) {
+    while (logContainer.children.length > 30) {
         logContainer.removeChild(logContainer.lastChild);
     }
 }
 
-// ============ Initialize ============
+// Update FPS counter every second
+setInterval(() => {
+    if (frameCount > 0) {
+        const fpsElement = document.getElementById('fpsCounter');
+        if (fpsElement) {
+            fpsElement.innerHTML = `${frameCount} FPS`;
+        }
+        frameCount = 0;
+    }
+}, 1000);
+
 document.addEventListener('DOMContentLoaded', () => {
-    console.log('🚀 Dashboard loading...');
     connectToStream();
     loadSavedDeviceId();
-    addLog('🚀 Dashboard initialized');
-    addLog(`🎥 Render server: ${RENDER_SERVER_URL}`);
+    addLog('🚀 Dashboard ready');
+    addLog(`🎥 Render: ${RENDER_SERVER_URL}`);
 });
