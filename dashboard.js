@@ -1,8 +1,8 @@
-// ============ Firebase Config (Aapki JSON se) ============
+// ============ Firebase Config ============
 const firebaseConfig = {
     apiKey: "AIzaSyCcstwitNGxv5osXZ9AQ0a0PDn7j-MTv-0",
     authDomain: "hiddencam-62e2d.firebaseapp.com",
-    databaseURL: "https://hiddencam-62e2d-default-rtdb.firebaseio.com",  // Yeh add karna hoga!
+    databaseURL: "https://hiddencam-62e2d-default-rtdb.firebaseio.com",
     projectId: "hiddencam-62e2d",
     storageBucket: "hiddencam-62e2d.firebasestorage.app",
     messagingSenderId: "931792860891",
@@ -16,9 +16,8 @@ const database = firebase.database();
 // Global variables
 let currentDeviceId = localStorage.getItem('cctv_device_id') || '';
 let socket = null;
-let reconnectInterval = null;
 
-// ============ Socket.IO Connection (Render Server) ============
+// ============ Socket.IO Connection ============
 const RENDER_SERVER_URL = 'https://server-3-phat.onrender.com';
 
 function connectToStream() {
@@ -26,36 +25,48 @@ function connectToStream() {
         socket.disconnect();
     }
     
+    console.log('🔄 Connecting to render server...');
+    
     socket = io(RENDER_SERVER_URL, {
         transports: ['websocket'],
-        reconnection: true
+        reconnection: true,
+        reconnectionAttempts: 10,
+        reconnectionDelay: 1000
     });
     
     socket.on('connect', () => {
+        console.log('✅ Connected to stream server');
         addLog('✅ Connected to stream server');
         socket.emit('register_viewer');
     });
     
     socket.on('frame', (data) => {
+        console.log('📸 Frame received, size:', data.byteLength);
         const blob = new Blob([data], { type: 'image/jpeg' });
         const url = URL.createObjectURL(blob);
         const img = document.getElementById('liveFrame');
-        img.src = url;
-        document.getElementById('streamStatus').innerHTML = '🟢 LIVE STREAM (15 FPS)';
+        if (img) {
+            img.src = url;
+            document.getElementById('streamStatus').innerHTML = '🟢 LIVE STREAM (15 FPS)';
+            document.getElementById('streamStatus').style.color = '#4CAF50';
+        }
         setTimeout(() => URL.revokeObjectURL(url), 100);
     });
     
     socket.on('disconnect', () => {
+        console.log('⚠️ Disconnected from stream server');
         addLog('⚠️ Disconnected from stream server');
         document.getElementById('streamStatus').innerHTML = '⚫ Stream disconnected';
+        document.getElementById('streamStatus').style.color = '#f44336';
     });
     
     socket.on('connect_error', (err) => {
-        addLog('❌ Stream server error: ' + err.message);
+        console.log('❌ Connection error:', err.message);
+        addLog('❌ Connection error: ' + err.message);
     });
 }
 
-// ============ Send Command to Android via Firebase ============
+// ============ Send Command ============
 function sendCommand(command) {
     if (!currentDeviceId) {
         alert('Please enter and save Device ID first!');
@@ -64,24 +75,16 @@ function sendCommand(command) {
     
     addLog(`📤 Sending command: ${command}`);
     
-    // Send command to Firebase
     database.ref(`camera/${currentDeviceId}/command`).set(command)
         .then(() => {
-            addLog(`✅ Command "${command}" sent successfully`);
+            addLog(`✅ Command "${command}" sent`);
         })
         .catch((error) => {
-            addLog(`❌ Error sending command: ${error.message}`);
+            addLog(`❌ Error: ${error.message}`);
         });
-    
-    // Special handling for resolution commands
-    if (command === 'resolution_120p') {
-        document.getElementById('resolutionDisplay').innerText = '120p';
-    } else if (command === 'resolution_240p') {
-        document.getElementById('resolutionDisplay').innerText = '240p';
-    }
 }
 
-// ============ Listen to Android App Status ============
+// ============ Listen to Device Status ============
 function listenToDeviceStatus() {
     if (!currentDeviceId) return;
     
@@ -89,28 +92,24 @@ function listenToDeviceStatus() {
     
     statusRef.on('value', (snapshot) => {
         const data = snapshot.val();
+        console.log('📊 Status update:', data);
+        
         if (!data) {
             updateUI('offline', null);
             return;
         }
         
-        // Update UI based on status
         updateUI(data.status || 'offline', data);
         
-        // Update last seen
-        if (data.lastSeen) {
-            const lastSeen = new Date(data.lastSeen);
-            document.getElementById('lastSeen').innerText = lastSeen.toLocaleTimeString();
-        }
-        
-        // Update resolution
         if (data.currentResolution) {
             document.getElementById('resolutionDisplay').innerText = data.currentResolution;
         }
-        
-        // Update stream URL
         if (data.streamUrl) {
             document.getElementById('streamUrlDisplay').innerText = data.streamUrl;
+        }
+        if (data.lastSeen) {
+            const lastSeen = new Date(data.lastSeen);
+            document.getElementById('lastSeen').innerText = lastSeen.toLocaleTimeString();
         }
     });
 }
@@ -121,7 +120,6 @@ function updateUI(status, data) {
     const startBtn = document.getElementById('startBtn');
     const stopBtn = document.getElementById('stopBtn');
     
-    // Remove all classes first
     dot.className = 'status-dot';
     
     switch(status) {
@@ -130,30 +128,33 @@ function updateUI(status, data) {
             text.innerHTML = '🟢 ONLINE - Streaming Active';
             startBtn.disabled = true;
             stopBtn.disabled = false;
+            addLog('📹 Device is ONLINE and streaming');
             break;
         case 'ready':
             dot.classList.add('ready');
-            text.innerHTML = '🟠 READY - Camera ready, waiting for START';
+            text.innerHTML = '🟠 READY - Camera ready';
             startBtn.disabled = false;
             stopBtn.disabled = true;
+            addLog('✅ Device is READY');
             break;
         case 'offline':
             dot.classList.add('offline');
-            text.innerHTML = '🔴 OFFLINE - Camera off';
+            text.innerHTML = '🔴 OFFLINE';
             startBtn.disabled = false;
             stopBtn.disabled = true;
+            addLog('⚫ Device is OFFLINE');
             break;
         case 'permission_denied':
             dot.classList.add('offline');
-            text.innerHTML = '⚠️ PERMISSION DENIED - Grant camera permission on phone';
+            text.innerHTML = '⚠️ PERMISSION DENIED';
             startBtn.disabled = true;
             stopBtn.disabled = true;
+            addLog('❌ Camera permission denied on device');
             break;
         default:
             dot.classList.add('offline');
-            text.innerHTML = '⚫ UNKNOWN - Device not responding';
-            startBtn.disabled = false;
-            stopBtn.disabled = true;
+            text.innerHTML = '⚫ UNKNOWN';
+            addLog('⚠️ Unknown device status');
     }
 }
 
@@ -163,7 +164,7 @@ function saveDeviceId() {
     const newDeviceId = deviceIdInput.value.trim();
     
     if (!newDeviceId) {
-        alert('Please enter a valid Device ID');
+        alert('Enter Device ID');
         return;
     }
     
@@ -172,8 +173,6 @@ function saveDeviceId() {
     document.getElementById('deviceIdDisplay').innerText = currentDeviceId;
     
     addLog(`📱 Device ID saved: ${currentDeviceId}`);
-    
-    // Re-listen to status
     listenToDeviceStatus();
 }
 
@@ -185,33 +184,27 @@ function loadSavedDeviceId() {
     }
 }
 
-// ============ Add Log Entry ============
+// ============ Log Function ============
 function addLog(message) {
     const logContainer = document.getElementById('logContainer');
+    if (!logContainer) return;
+    
     const logEntry = document.createElement('div');
     logEntry.className = 'log-entry';
     const timestamp = new Date().toLocaleTimeString();
     logEntry.innerHTML = `[${timestamp}] ${message}`;
     logContainer.insertBefore(logEntry, logContainer.firstChild);
     
-    // Keep only last 20 logs
     while (logContainer.children.length > 20) {
         logContainer.removeChild(logContainer.lastChild);
     }
 }
 
-// ============ Keep Alive ============
-setInterval(() => {
-    if (currentDeviceId) {
-        database.ref(`camera/${currentDeviceId}/ping`).set(Date.now());
-    }
-}, 30000);  // Every 30 seconds
-
 // ============ Initialize ============
 document.addEventListener('DOMContentLoaded', () => {
+    console.log('🚀 Dashboard loading...');
     connectToStream();
     loadSavedDeviceId();
     addLog('🚀 Dashboard initialized');
-    addLog(`📡 Firebase connected to project: hiddencam-62e2d`);
     addLog(`🎥 Render server: ${RENDER_SERVER_URL}`);
 });
