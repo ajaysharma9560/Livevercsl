@@ -1,0 +1,199 @@
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+    color: white;
+    min-height: 100vh;
+    padding: 20px;
+}
+
+.container {
+    max-width: 800px;
+    margin: 0 auto;
+}
+
+h1 {
+    text-align: center;
+    margin-bottom: 30px;
+    color: #4CAF50;
+}
+
+/* Device Section */
+.device-section {
+    background: rgba(255,255,255,0.1);
+    padding: 20px;
+    border-radius: 12px;
+    margin-bottom: 20px;
+}
+
+.device-section label {
+    display: block;
+    margin-bottom: 8px;
+    font-weight: bold;
+}
+
+.device-section input {
+    width: 70%;
+    padding: 10px;
+    border: none;
+    border-radius: 6px;
+    background: #2a2a4a;
+    color: white;
+    margin-right: 10px;
+}
+
+.save-btn {
+    padding: 10px 20px;
+    background: #2196F3;
+    border: none;
+    border-radius: 6px;
+    color: white;
+    cursor: pointer;
+}
+
+/* Status Card */
+.status-card {
+    background: rgba(255,255,255,0.1);
+    padding: 20px;
+    border-radius: 12px;
+    margin-bottom: 20px;
+}
+
+.status-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 24px;
+    font-weight: bold;
+    margin-bottom: 15px;
+}
+
+.status-dot {
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    display: inline-block;
+}
+
+.status-dot.online { background: #4CAF50; box-shadow: 0 0 10px #4CAF50; }
+.status-dot.offline { background: #f44336; }
+.status-dot.ready { background: #FF9800; box-shadow: 0 0 10px #FF9800; }
+.status-dot.permission_denied { background: #f44336; }
+
+.status-info p {
+    margin: 8px 0;
+    font-size: 14px;
+    color: #ccc;
+}
+
+/* Buttons */
+.controls {
+    display: flex;
+    gap: 15px;
+    margin-bottom: 20px;
+}
+
+.btn {
+    flex: 1;
+    padding: 15px;
+    font-size: 18px;
+    font-weight: bold;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: transform 0.2s;
+}
+
+.btn:hover {
+    transform: scale(1.02);
+}
+
+.start-btn {
+    background: #4CAF50;
+    color: white;
+}
+
+.stop-btn {
+    background: #f44336;
+    color: white;
+}
+
+/* Resolution Section */
+.resolution-section {
+    background: rgba(255,255,255,0.1);
+    padding: 15px;
+    border-radius: 12px;
+    margin-bottom: 20px;
+}
+
+.resolution-section h3 {
+    margin-bottom: 10px;
+}
+
+.res-btn {
+    padding: 8px 16px;
+    margin: 5px;
+    background: #2196F3;
+    border: none;
+    border-radius: 6px;
+    color: white;
+    cursor: pointer;
+}
+
+/* Preview Section */
+.preview-section {
+    background: rgba(0,0,0,0.5);
+    padding: 20px;
+    border-radius: 12px;
+    text-align: center;
+    margin-bottom: 20px;
+}
+
+.preview-section h3 {
+    margin-bottom: 15px;
+}
+
+#liveFrame {
+    max-width: 100%;
+    border: 3px solid #4CAF50;
+    border-radius: 8px;
+    background: #000;
+}
+
+#streamStatus {
+    margin-top: 10px;
+    font-size: 14px;
+}
+
+/* Log Section */
+.log-section {
+    background: rgba(0,0,0,0.5);
+    padding: 15px;
+    border-radius: 12px;
+    max-height: 200px;
+    overflow-y: auto;
+}
+
+.log-section h3 {
+    margin-bottom: 10px;
+}
+
+.log-entry {
+    padding: 5px;
+    margin: 5px 0;
+    font-size: 12px;
+    font-family: monospace;
+    border-left: 3px solid #4CAF50;
+    background: rgba(255,255,255,0.05);
+}
+
+/* Disabled state */
+button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
