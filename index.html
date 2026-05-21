@@ -1,136 +1,70 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <title>Live Camera Stream</title>
+    <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <style>
-        body {
-            font-family: Arial, sans-serif;
-            max-width: 800px;
-            margin: 0 auto;
-            padding: 20px;
-            background: #f0f0f0;
-        }
-        video {
-            width: 100%;
-            background: #000;
-            border-radius: 10px;
-            margin-top: 20px;
-        }
-        button {
-            padding: 10px 20px;
-            margin: 10px 5px;
-            font-size: 16px;
-            cursor: pointer;
-            border: none;
-            border-radius: 5px;
-        }
-        .torch-on {
-            background: #ff9800;
-            color: white;
-        }
-        .torch-off {
-            background: #2196f3;
-            color: white;
-        }
-        .status {
-            padding: 10px;
-            margin: 10px 0;
-            border-radius: 5px;
-            text-align: center;
-        }
-        .connected {
-            background: #4caf50;
-            color: white;
-        }
-        .disconnected {
-            background: #f44336;
-            color: white;
-        }
-        .info {
-            text-align: center;
-            margin-top: 20px;
-            color: #666;
-        }
-    </style>
+    <title>CCTV Control Dashboard</title>
+    <link rel="stylesheet" href="style.css">
 </head>
 <body>
-    <h1>📹 Live Camera Stream</h1>
-    
-    <video id="video" autoplay playsinline muted></video>
-    
-    <div style="text-align: center; margin-top: 20px;">
-        <button class="torch-on" onclick="sendTorch('on')">🔦 Torch ON</button>
-        <button class="torch-off" onclick="sendTorch('off')">💡 Torch OFF</button>
+    <div class="container">
+        <h1>📹 CCTV Camera Control</h1>
+        
+        <!-- Device ID Input -->
+        <div class="device-section">
+            <label>Device ID (Phone Android ID)</label>
+            <input type="text" id="deviceId" placeholder="Enter your device ID" />
+            <button onclick="saveDeviceId()" class="save-btn">Save Device</button>
+        </div>
+        
+        <!-- Status Card -->
+        <div class="status-card">
+            <div class="status-header">
+                <span class="status-dot" id="statusDot"></span>
+                <span id="statusText">Offline</span>
+            </div>
+            <div class="status-info">
+                <p>📱 Device: <span id="deviceIdDisplay">Not set</span></p>
+                <p>🎥 Resolution: <span id="resolutionDisplay">-</span></p>
+                <p>🔗 Stream URL: <span id="streamUrlDisplay">-</span></p>
+                <p>⏱ Last Seen: <span id="lastSeen">-</span></p>
+            </div>
+        </div>
+        
+        <!-- Control Buttons -->
+        <div class="controls">
+            <button id="startBtn" class="btn start-btn" onclick="sendCommand('start')">
+                ▶ START STREAM
+            </button>
+            <button id="stopBtn" class="btn stop-btn" onclick="sendCommand('stop')">
+                ⏹ STOP STREAM
+            </button>
+        </div>
+        
+        <!-- Resolution Controls -->
+        <div class="resolution-section">
+            <h3>Resolution Settings</h3>
+            <button class="res-btn" onclick="sendCommand('resolution_120p')">120p (160x120)</button>
+            <button class="res-btn" onclick="sendCommand('resolution_240p')">240p (320x240)</button>
+        </div>
+        
+        <!-- Live Preview -->
+        <div class="preview-section">
+            <h3>Live Preview</h3>
+            <img id="liveFrame" width="640" height="480" />
+            <p id="streamStatus">⚫ Stream not active</p>
+        </div>
+        
+        <!-- Command Log -->
+        <div class="log-section">
+            <h3>Command Log</h3>
+            <div id="logContainer"></div>
+        </div>
     </div>
     
-    <div id="status" class="status disconnected">Loading...</div>
-    <div id="peerId" class="info"></div>
-    
-    <!-- PeerJS Library -->
-    <script src="https://cdn.jsdelivr.net/npm/peerjs@1.4.7/dist/peerjs.min.js"></script>
-    
-    <script>
-        const video = document.getElementById('video');
-        const statusDiv = document.getElementById('status');
-        const peerIdDiv = document.getElementById('peerId');
-        
-        let peer = null;
-        let localStream = null;
-        let currentPeerId = null;
-        
-        // Get Camera Access
-        navigator.mediaDevices.getUserMedia({ video: true, audio: false })
-            .then(function(stream) {
-                localStream = stream;
-                video.srcObject = stream;
-                statusDiv.innerHTML = 'Camera Active ✅';
-                statusDiv.className = 'status connected';
-                
-                // Start PeerJS after camera is ready
-                startPeerJS();
-            })
-            .catch(function(error) {
-                console.error('Camera error:', error);
-                statusDiv.innerHTML = 'Camera Permission Denied ❌ Please allow camera access';
-                statusDiv.className = 'status disconnected';
-                peerIdDiv.innerHTML = 'Camera access is required for live stream';
-            });
-        
-        function startPeerJS() {
-            peer = new Peer();
-            
-            peer.on('open', function(id) {
-                currentPeerId = id;
-                peerIdDiv.innerHTML = 'Your Peer ID: <strong>' + id + '</strong><br>Share this ID with viewer';
-                statusDiv.innerHTML = 'Ready! Waiting for viewer to connect...';
-                statusDiv.className = 'status connected';
-                console.log('PeerJS started with ID:', id);
-            });
-            
-            peer.on('call', function(call) {
-                statusDiv.innerHTML = 'Viewer connected! Streaming live...';
-                call.answer(localStream);
-                console.log('Call answered');
-            });
-            
-            peer.on('error', function(err) {
-                console.error('PeerJS error:', err);
-                statusDiv.innerHTML = 'Connection error: ' + err;
-                statusDiv.className = 'status disconnected';
-            });
-        }
-        
-        function sendTorch(state) {
-            // Send torch command through data connection
-            if (peer && currentPeerId) {
-                const conn = peer.connect(currentPeerId);
-                conn.on('open', function() {
-                    conn.send({ torch: state });
-                    console.log('Torch command sent:', state);
-                });
-            }
-        }
-    </script>
+    <script src="https://cdn.socket.io/4.6.1/socket.io.min.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-database-compat.js"></script>
+    <script src="dashboard.js"></script>
 </body>
 </html>
