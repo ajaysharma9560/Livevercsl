@@ -6,29 +6,31 @@
 </head>
 <body>
     <h1>Live CCTV Stream</h1>
-    <img src="https://server-3-phat.onrender.com/stream" 
-         style="width:100%; max-width:800px; border:2px solid green;">
+    <img id="stream" width="100%" style="max-width:800px; border:2px solid green;">
     
-    <p>Status: <span id="status">Loading...</span></p>
+    <p>Status: <span id="status">Connecting...</span></p>
     
     <script>
-        const img = document.querySelector('img');
-        const status = document.getElementById('status');
+        const img = document.getElementById('stream');
+        const statusSpan = document.getElementById('status');
+        
+        // Direct MJPEG stream
+        img.src = 'https://server-3-phat.onrender.com/stream';
         
         img.onload = () => {
-            status.innerHTML = '🟢 LIVE';
-            status.style.color = 'green';
+            statusSpan.innerHTML = '🟢 LIVE';
+            statusSpan.style.color = 'green';
         };
         
         img.onerror = () => {
-            status.innerHTML = '🔴 OFFLINE - Make sure phone app is running';
-            status.style.color = 'red';
+            statusSpan.innerHTML = '🔴 OFFLINE - Start phone app';
+            statusSpan.style.color = 'red';
         };
         
-        // Refresh image every second
+        // Refresh timestamp every second
         setInterval(() => {
-            if (img.complete) {
-                status.innerHTML = '🟢 LIVE (' + new Date().toLocaleTimeString() + ')';
+            if (img.complete && img.naturalWidth > 0) {
+                statusSpan.innerHTML = '🟢 LIVE - ' + new Date().toLocaleTimeString();
             }
         }, 1000);
     </script>
