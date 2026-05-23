@@ -1,17 +1,9 @@
 {
-    "name": "cctv-dashboard",
+    "name": "cctv-viewer",
     "version": 2,
     "builds": [
         {
-            "src": "*.html",
-            "use": "@vercel/static"
-        },
-        {
-            "src": "*.js",
-            "use": "@vercel/static"
-        },
-        {
-            "src": "*.css",
+            "src": "index.html",
             "use": "@vercel/static"
         }
     ]
