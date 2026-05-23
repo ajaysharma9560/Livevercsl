@@ -3,68 +3,127 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>CCTV Control Dashboard</title>
-    <link rel="stylesheet" href="style.css">
+    <title>Live CCTV Stream</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            color: white;
+            text-align: center;
+            padding: 20px;
+            min-height: 100vh;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+        }
+        h1 {
+            color: #4CAF50;
+            margin-bottom: 20px;
+        }
+        .stream-box {
+            background: #000;
+            border-radius: 10px;
+            padding: 10px;
+            border: 2px solid #4CAF50;
+        }
+        img {
+            max-width: 100%;
+            border-radius: 5px;
+        }
+        .status {
+            margin-top: 15px;
+            padding: 10px;
+            background: #0f3460;
+            border-radius: 5px;
+            font-size: 14px;
+        }
+        .online {
+            color: #4CAF50;
+            font-weight: bold;
+        }
+        .controls {
+            margin-top: 20px;
+        }
+        button {
+            background: #4CAF50;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            margin: 5px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+        button.stop {
+            background: #f44336;
+        }
+        button.refresh {
+            background: #2196F3;
+        }
+        .footer {
+            margin-top: 30px;
+            font-size: 12px;
+            color: #888;
+        }
+    </style>
 </head>
 <body>
     <div class="container">
-        <h1>📹 CCTV Camera Control</h1>
+        <h1>📹 Live CCTV Stream</h1>
         
-        <!-- Device ID Input -->
-        <div class="device-section">
-            <label>Device ID (Phone Android ID)</label>
-            <input type="text" id="deviceId" placeholder="Enter your device ID" />
-            <button onclick="saveDeviceId()" class="save-btn">Save Device</button>
+        <div class="stream-box">
+            <img id="liveFrame" src="" alt="Stream loading...">
         </div>
         
-        <!-- Status Card -->
-        <div class="status-card">
-            <div class="status-header">
-                <span class="status-dot" id="statusDot"></span>
-                <span id="statusText">Offline</span>
-            </div>
-            <div class="status-info">
-                <p>📱 Device: <span id="deviceIdDisplay">Not set</span></p>
-                <p>🎥 Resolution: <span id="resolutionDisplay">-</span></p>
-                <p>🔗 Stream URL: <span id="streamUrlDisplay">-</span></p>
-                <p>⏱ Last Seen: <span id="lastSeen">-</span></p>
-            </div>
+        <div class="status" id="status">
+            🔴 Connecting to stream...
         </div>
         
-        <!-- Control Buttons -->
         <div class="controls">
-            <button id="startBtn" class="btn start-btn" onclick="sendCommand('start')">
-                ▶ START STREAM
-            </button>
-            <button id="stopBtn" class="btn stop-btn" onclick="sendCommand('stop')">
-                ⏹ STOP STREAM
-            </button>
+            <button onclick="refreshStream()" class="refresh">🔄 Refresh</button>
         </div>
         
-        <!-- Resolution Controls -->
-        <div class="resolution-section">
-            <h3>Resolution Settings</h3>
-            <button class="res-btn" onclick="sendCommand('resolution_120p')">120p (160x120)</button>
-            <button class="res-btn" onclick="sendCommand('resolution_240p')">240p (320x240)</button>
-        </div>
-        
-        <!-- Live Preview -->
-        <div class="preview-section">
-            <h3>Live Preview</h3>
-            <img id="liveFrame" width="640" height="480" />
-            <p id="streamStatus">⚫ Stream not active</p>
-        </div>
-        
-        <!-- Command Log -->
-        <div class="log-section">
-            <h3>Command Log</h3>
-            <div id="logContainer"></div>
+        <div class="footer">
+            <p>Server: server-3-phat.onrender.com</p>
+            <p>Last update: <span id="timestamp">-</span></p>
         </div>
     </div>
-    
-    <script src="https://cdn.socket.io/4.6.1/socket.io.min.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-app-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-database-compat.js"></script>
-    <script src="dashboard.js"></script>
+
+    <script>
+        const img = document.getElementById('liveFrame');
+        const statusDiv = document.getElementById('status');
+        const timestampSpan = document.getElementById('timestamp');
+        
+        // MJPEG stream URL
+        const STREAM_URL = 'https://server-3-phat.onrender.com/stream';
+        
+        // Set image source to MJPEG stream
+        img.src = STREAM_URL;
+        
+        // Update status when image loads
+        img.onload = function() {
+            statusDiv.innerHTML = '🟢 LIVE STREAM - Connected';
+            statusDiv.style.background = '#0a2a1a';
+            timestampSpan.textContent = new Date().toLocaleTimeString();
+        };
+        
+        img.onerror = function() {
+            statusDiv.innerHTML = '🔴 OFFLINE - Stream not available. Make sure phone app is running.';
+            statusDiv.style.background = '#2a0a0a';
+        };
+        
+        function refreshStream() {
+            statusDiv.innerHTML = '🔄 Refreshing...';
+            img.src = STREAM_URL + '?t=' + Date.now();
+        }
+        
+        // Refresh every 30 seconds to keep connection alive
+        setInterval(() => {
+            if (img.complete) {
+                timestampSpan.textContent = new Date().toLocaleTimeString();
+            }
+        }, 1000);
+    </script>
 </body>
 </html>
