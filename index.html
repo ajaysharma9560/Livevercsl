@@ -1,38 +1,220 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <title>Live Stream</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Live Camera Stream</title>
+    <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            background: linear-gradient(135deg, #000000, #1a1a2e);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-family: system-ui, -apple-system, sans-serif;
+        }
+        
+        .container {
+            text-align: center;
+            padding: 20px;
+            width: 100%;
+            max-width: 500px;
+        }
+        
+        .stream-box {
+            background: rgba(0,0,0,0.5);
+            border-radius: 24px;
+            padding: 20px;
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255,255,255,0.2);
+        }
+        
+        h1 {
+            color: white;
+            font-size: 24px;
+            margin-bottom: 20px;
+        }
+        
+        .video-container {
+            background: #000;
+            border-radius: 16px;
+            overflow: hidden;
+            aspect-ratio: 16/9;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-bottom: 20px;
+        }
+        
+        #streamImage {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+        
+        .status-bar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px;
+            background: rgba(255,255,255,0.1);
+            border-radius: 12px;
+            margin-bottom: 20px;
+        }
+        
+        .status {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .status-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            animation: pulse 2s infinite;
+        }
+        
+        .online { background: #4ade80; box-shadow: 0 0 8px #4ade80; }
+        .offline { background: #f87171; }
+        
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.5; }
+            100% { opacity: 1; }
+        }
+        
+        .info {
+            color: white;
+            font-size: 14px;
+        }
+        
+        .fps-counter {
+            background: rgba(0,0,0,0.7);
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-family: monospace;
+            font-size: 14px;
+            color: #4ade80;
+        }
+        
+        .device-id {
+            background: rgba(0,0,0,0.7);
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 11px;
+            font-family: monospace;
+        }
+        
+        .connecting {
+            color: #94a3b8;
+            text-align: center;
+            padding: 40px;
+        }
+    </style>
 </head>
 <body>
-    <h1>Live CCTV Stream</h1>
-    <img id="stream" width="100%" style="max-width:800px; border:2px solid green;">
-    
-    <p>Status: <span id="status">Connecting...</span></p>
-    
+    <div class="container">
+        <div class="stream-box">
+            <h1>📹 Live Camera Feed</h1>
+            
+            <div class="status-bar">
+                <div class="status">
+                    <span class="status-dot offline" id="statusDot"></span>
+                    <span class="info" id="statusText">Offline</span>
+                </div>
+                <div class="fps-counter" id="fpsCounter">FPS: 0</div>
+                <div class="device-id" id="deviceId">No Device</div>
+            </div>
+            
+            <div class="video-container">
+                <img id="streamImage" src="" alt="Camera Stream">
+            </div>
+            
+            <div class="info" id="infoText" style="font-size: 12px; opacity: 0.7;">
+                Waiting for stream...
+            </div>
+        </div>
+    </div>
+
     <script>
-        const img = document.getElementById('stream');
-        const statusSpan = document.getElementById('status');
+        // 🔴 TERA REPLIT LINK - YAHAN DALDO
+        const SERVER_URL = "https://05fce22d-281f-419d-b4a7-6786f4296fda-00-3vqtfyjawc9vc.pike.replit.dev";
         
-        // Direct MJPEG stream
-        img.src = 'https://server-3-phat.onrender.com/stream';
+        const socket = io(SERVER_URL, {
+            transports: ['websocket', 'polling'],
+            reconnection: true,
+            reconnectionAttempts: Infinity,
+            reconnectionDelay: 1000
+        });
         
-        img.onload = () => {
-            statusSpan.innerHTML = '🟢 LIVE';
-            statusSpan.style.color = 'green';
-        };
+        const streamImage = document.getElementById('streamImage');
+        const statusDot = document.getElementById('statusDot');
+        const statusText = document.getElementById('statusText');
+        const fpsCounter = document.getElementById('fpsCounter');
+        const deviceIdSpan = document.getElementById('deviceId');
+        const infoText = document.getElementById('infoText');
         
-        img.onerror = () => {
-            statusSpan.innerHTML = '🔴 OFFLINE - Start phone app';
-            statusSpan.style.color = 'red';
-        };
+        let frameCount = 0;
+        let lastFpsUpdate = Date.now();
         
-        // Refresh timestamp every second
-        setInterval(() => {
-            if (img.complete && img.naturalWidth > 0) {
-                statusSpan.innerHTML = '🟢 LIVE - ' + new Date().toLocaleTimeString();
+        function updateFPS() {
+            const now = Date.now();
+            if (now - lastFpsUpdate >= 1000) {
+                fpsCounter.textContent = `FPS: ${frameCount}`;
+                frameCount = 0;
+                lastFpsUpdate = now;
             }
-        }, 1000);
+            requestAnimationFrame(updateFPS);
+        }
+        updateFPS();
+        
+        // Receive frame from server
+        socket.on('streamFrame', (data) => {
+            if (data && data.frame) {
+                streamImage.src = data.frame;
+                frameCount++;
+                
+                statusDot.className = 'status-dot online';
+                statusText.textContent = 'Live';
+                statusText.style.color = '#4ade80';
+                
+                if (data.deviceId) {
+                    deviceIdSpan.textContent = data.deviceId.substring(0, 12) + '...';
+                    infoText.textContent = `Device: ${data.deviceId} | Streaming Live`;
+                }
+            }
+        });
+        
+        socket.on('connect', () => {
+            console.log('Connected to server');
+            statusText.textContent = 'Connected';
+            statusDot.className = 'status-dot online';
+            statusText.style.color = '#4ade80';
+            infoText.textContent = 'Connected to server. Waiting for stream...';
+        });
+        
+        socket.on('disconnect', () => {
+            statusDot.className = 'status-dot offline';
+            statusText.textContent = 'Disconnected';
+            statusText.style.color = '#f87171';
+            infoText.textContent = 'Disconnected from server. Reconnecting...';
+            deviceIdSpan.textContent = 'No Device';
+        });
+        
+        socket.on('connect_error', (error) => {
+            console.error('Connection error:', error);
+            statusText.textContent = 'Connection Error';
+            statusText.style.color = '#f87171';
+            infoText.textContent = 'Connection error. Check server.';
+        });
     </script>
 </body>
 </html>
