@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
     <title>Live Camera Stream</title>
     <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
     <style>
@@ -107,18 +107,26 @@
             color: #22c55e;
         }
         
+        .resolution-badge {
+            background: #3b82f6;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 11px;
+            color: white;
+        }
+        
         .info-text {
             color: #94a3b8;
             font-size: 12px;
             margin-top: 15px;
         }
         
-        .device-id {
-            font-family: monospace;
-            font-size: 11px;
-            background: rgba(0,0,0,0.5);
-            padding: 4px 8px;
-            border-radius: 8px;
+        .offline-text {
+            color: #ef4444;
+        }
+        
+        .online-text {
+            color: #22c55e;
         }
     </style>
 </head>
@@ -133,6 +141,7 @@
                     <span id="statusText" style="color: white;">Offline</span>
                 </div>
                 <div class="fps-counter" id="fpsCounter">FPS: 0</div>
+                <div class="resolution-badge">Binary Stream</div>
             </div>
             
             <div class="video-container">
@@ -140,14 +149,14 @@
             </div>
             
             <div class="info-text" id="infoText">
-                Waiting for camera stream...
+                ⚠️ Waiting for camera stream...
             </div>
         </div>
     </div>
 
     <script>
-        // 🔴 TERA REPLIT URL - YAHAN DALDO
-        const SERVER_URL = "https://8d6e01c7-21b8-48c8-92dd-8d495a1d8fab-00-29vkvkb42sei4.sisko.replit.dev";
+        // 🔴🔴🔴 APNA REPLIT URL YAHAN DALDO 🔴🔴🔴
+        const SERVER_URL = "https://27fe0cdd-71ea-4ae0-bcd3-0a9226d37a7d-00-30samq096boh.sisko.replit.dev";
         
         const socket = io(SERVER_URL, {
             transports: ['websocket', 'polling'],
@@ -176,16 +185,22 @@
         }
         updateFPS();
         
-        // Receive frame from server
-        socket.on('streamFrame', (data) => {
-            if (data && data.frame) {
-                streamImage.src = data.frame;
+        // 🔴 BINARY FRAME RECEIVE - Live stream dikhegi
+        socket.on('frame', (data) => {
+            if (data) {
+                // Binary data ko image me convert karo
+                const blob = new Blob([data], { type: 'image/jpeg' });
+                const url = URL.createObjectURL(blob);
+                streamImage.src = url;
+                URL.revokeObjectURL(url); // Memory free karo
+                
                 frameCount++;
                 
                 statusDot.className = 'status-dot online';
                 statusText.textContent = 'Live';
                 statusText.style.color = '#22c55e';
-                infoText.textContent = '✅ Stream is live';
+                infoText.innerHTML = '✅ Live stream is active';
+                infoText.className = 'info-text online-text';
             }
         });
         
@@ -193,20 +208,23 @@
             console.log('Connected to server');
             statusText.textContent = 'Connected';
             statusDot.className = 'status-dot offline';
-            infoText.textContent = 'Connected, waiting for stream...';
+            infoText.innerHTML = '⏳ Connected, waiting for stream...';
+            infoText.className = 'info-text';
         });
         
         socket.on('disconnect', () => {
             statusDot.className = 'status-dot offline';
             statusText.textContent = 'Offline';
             statusText.style.color = '#ef4444';
-            infoText.textContent = 'Disconnected from server. Reconnecting...';
+            infoText.innerHTML = '⚠️ Disconnected from server. Reconnecting...';
+            infoText.className = 'info-text offline-text';
         });
         
         socket.on('connect_error', (error) => {
             console.error('Connection error:', error);
             statusText.textContent = 'Connection Error';
-            infoText.textContent = 'Cannot connect to server. Check if Replit is running.';
+            infoText.innerHTML = '❌ Cannot connect to server. Check if Replit is running.';
+            infoText.className = 'info-text offline-text';
         });
     </script>
 </body>
