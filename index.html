@@ -2,8 +2,8 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>Live Camera Stream + Control</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Live Camera Stream</title>
     <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
     <style>
         * {
@@ -13,28 +13,23 @@
         }
         
         body {
-            background: linear-gradient(135deg, #0f0c29, #302b63, #24243e);
+            background: linear-gradient(135deg, #000000, #1a1a2e);
             min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
             font-family: system-ui, -apple-system, sans-serif;
             padding: 20px;
         }
         
         .container {
+            text-align: center;
+            width: 100%;
             max-width: 500px;
-            margin: 0 auto;
         }
         
-        .stream-box {
-            background: rgba(0,0,0,0.5);
-            border-radius: 24px;
-            padding: 20px;
-            backdrop-filter: blur(10px);
-            border: 1px solid rgba(255,255,255,0.2);
-            margin-bottom: 20px;
-        }
-        
-        .controls {
-            background: rgba(0,0,0,0.5);
+        .stream-card {
+            background: rgba(0,0,0,0.6);
             border-radius: 24px;
             padding: 20px;
             backdrop-filter: blur(10px);
@@ -45,7 +40,6 @@
             color: white;
             font-size: 24px;
             margin-bottom: 20px;
-            text-align: center;
         }
         
         .video-container {
@@ -57,6 +51,7 @@
             align-items: center;
             justify-content: center;
             margin-bottom: 20px;
+            border: 1px solid #333;
         }
         
         #streamImage {
@@ -69,10 +64,10 @@
             display: flex;
             justify-content: space-between;
             align-items: center;
-            padding: 12px;
+            padding: 12px 16px;
             background: rgba(255,255,255,0.1);
             border-radius: 12px;
-            margin-bottom: 20px;
+            margin-bottom: 15px;
         }
         
         .status {
@@ -85,118 +80,87 @@
             width: 10px;
             height: 10px;
             border-radius: 50%;
-            animation: pulse 2s infinite;
+            animation: pulse 1.5s infinite;
         }
         
-        .online { background: #4ade80; box-shadow: 0 0 8px #4ade80; }
-        .offline { background: #f87171; }
+        .status-dot.online {
+            background: #22c55e;
+            box-shadow: 0 0 8px #22c55e;
+        }
+        
+        .status-dot.offline {
+            background: #ef4444;
+        }
         
         @keyframes pulse {
-            0% { opacity: 1; }
-            50% { opacity: 0.5; }
-            100% { opacity: 1; }
+            0% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.5; transform: scale(0.8); }
+            100% { opacity: 1; transform: scale(1); }
         }
         
-        button {
-            background: #6366f1;
-            color: white;
-            border: none;
-            padding: 14px 28px;
-            margin: 8px;
-            border-radius: 12px;
-            font-size: 16px;
-            font-weight: 600;
-            cursor: pointer;
-            transition: transform 0.2s;
-        }
-        
-        button:hover { transform: scale(1.02); }
-        .stop-btn { background: #ef4444; }
-        
-        select {
-            background: #1f2937;
-            color: white;
-            border: none;
-            padding: 14px;
-            border-radius: 12px;
-            margin: 8px;
+        .fps-counter {
+            background: rgba(0,0,0,0.7);
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-family: monospace;
             font-size: 14px;
+            color: #22c55e;
         }
         
-        .device-info {
-            background: rgba(255,255,255,0.1);
-            padding: 10px;
-            border-radius: 12px;
-            margin-top: 15px;
-            font-size: 12px;
-            text-align: center;
+        .info-text {
             color: #94a3b8;
+            font-size: 12px;
+            margin-top: 15px;
         }
         
-        .button-group {
-            display: flex;
-            flex-wrap: wrap;
-            justify-content: center;
-            gap: 10px;
-            margin-top: 15px;
+        .device-id {
+            font-family: monospace;
+            font-size: 11px;
+            background: rgba(0,0,0,0.5);
+            padding: 4px 8px;
+            border-radius: 8px;
         }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>📹 Camera Control + Stream</h1>
-        
-        <div class="stream-box">
+        <div class="stream-card">
+            <h1>📹 Live Camera Feed</h1>
+            
             <div class="status-bar">
                 <div class="status">
-                    <span class="status-dot offline" id="statusDot"></span>
-                    <span class="info" id="statusText">Offline</span>
+                    <div class="status-dot offline" id="statusDot"></div>
+                    <span id="statusText" style="color: white;">Offline</span>
                 </div>
-                <div class="fps-counter" id="fpsCounter" style="background:rgba(0,0,0,0.7); padding:4px 12px; border-radius:20px;">FPS: 0</div>
+                <div class="fps-counter" id="fpsCounter">FPS: 0</div>
             </div>
             
             <div class="video-container">
                 <img id="streamImage" src="" alt="Camera Stream">
             </div>
             
-            <div class="device-info" id="deviceInfo">
-                No device connected
-            </div>
-        </div>
-        
-        <div class="controls">
-            <div class="button-group">
-                <button id="startBtn">▶ START STREAM</button>
-                <button id="stopBtn" class="stop-btn">⏹ STOP STREAM</button>
-            </div>
-            <div class="button-group">
-                <select id="resolutionSelect">
-                    <option value="120p">120p (160x120) - 30fps</option>
-                    <option value="240p" selected>240p (426x240) - 15fps</option>
-                </select>
+            <div class="info-text" id="infoText">
+                Waiting for camera stream...
             </div>
         </div>
     </div>
 
     <script>
-        // 🔴 TERA REPLIT LINK
-        const SERVER_URL = "https://05fce22d-281f-419d-b4a7-6786f4296fda-00-3vqtfyjawc9vc.pike.replit.dev";
-        
-        let currentDeviceId = null;
+        // 🔴 TERA REPLIT URL - YAHAN DALDO
+        const SERVER_URL = "https://8d6e01c7-21b8-48c8-92dd-8d495a1d8fab-00-29vkvkb42sei4.sisko.replit.dev";
         
         const socket = io(SERVER_URL, {
             transports: ['websocket', 'polling'],
-            reconnection: true
+            reconnection: true,
+            reconnectionAttempts: Infinity,
+            reconnectionDelay: 1000
         });
         
         const streamImage = document.getElementById('streamImage');
         const statusDot = document.getElementById('statusDot');
         const statusText = document.getElementById('statusText');
         const fpsCounter = document.getElementById('fpsCounter');
-        const deviceInfo = document.getElementById('deviceInfo');
-        const startBtn = document.getElementById('startBtn');
-        const stopBtn = document.getElementById('stopBtn');
-        const resolutionSelect = document.getElementById('resolutionSelect');
+        const infoText = document.getElementById('infoText');
         
         let frameCount = 0;
         let lastFpsUpdate = Date.now();
@@ -212,70 +176,38 @@
         }
         updateFPS();
         
-        // Get devices list
-        socket.on('deviceList', (devices) => {
-            if (devices && devices.length > 0) {
-                currentDeviceId = devices[0].id;
-                deviceInfo.innerHTML = `📱 Device: ${currentDeviceId.substring(0, 20)}... | Status: ${devices[0].status} | Resolution: ${devices[0].resolution}`;
-            } else {
-                deviceInfo.innerHTML = '⚠️ No device connected. Install APK first.';
-                currentDeviceId = null;
-            }
-        });
-        
-        // Receive frame
+        // Receive frame from server
         socket.on('streamFrame', (data) => {
             if (data && data.frame) {
                 streamImage.src = data.frame;
                 frameCount++;
+                
                 statusDot.className = 'status-dot online';
                 statusText.textContent = 'Live';
-                statusText.style.color = '#4ade80';
+                statusText.style.color = '#22c55e';
+                infoText.textContent = '✅ Stream is live';
             }
         });
         
         socket.on('connect', () => {
-            console.log('Connected');
+            console.log('Connected to server');
             statusText.textContent = 'Connected';
+            statusDot.className = 'status-dot offline';
+            infoText.textContent = 'Connected, waiting for stream...';
         });
         
         socket.on('disconnect', () => {
             statusDot.className = 'status-dot offline';
             statusText.textContent = 'Offline';
-            statusText.style.color = '#f87171';
+            statusText.style.color = '#ef4444';
+            infoText.textContent = 'Disconnected from server. Reconnecting...';
         });
         
-        // START button
-        startBtn.onclick = () => {
-            if (currentDeviceId) {
-                socket.emit('command', { deviceId: currentDeviceId, command: 'start' });
-                deviceInfo.innerHTML = `📱 Sending START to device...`;
-            } else {
-                deviceInfo.innerHTML = '⚠️ No device connected!';
-            }
-        };
-        
-        // STOP button
-        stopBtn.onclick = () => {
-            if (currentDeviceId) {
-                socket.emit('command', { deviceId: currentDeviceId, command: 'stop' });
-                deviceInfo.innerHTML = `📱 Sending STOP to device...`;
-            }
-        };
-        
-        // Resolution change
-        resolutionSelect.onchange = () => {
-            if (currentDeviceId) {
-                const resolution = resolutionSelect.value;
-                socket.emit('command', { deviceId: currentDeviceId, command: 'resolution', value: resolution });
-                deviceInfo.innerHTML = `📱 Changing resolution to ${resolution}...`;
-            }
-        };
-        
-        // Request device list every 3 seconds
-        setInterval(() => {
-            socket.emit('getDevices');
-        }, 3000);
+        socket.on('connect_error', (error) => {
+            console.error('Connection error:', error);
+            statusText.textContent = 'Connection Error';
+            infoText.textContent = 'Cannot connect to server. Check if Replit is running.';
+        });
     </script>
 </body>
 </html>
