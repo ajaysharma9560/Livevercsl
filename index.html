@@ -97,6 +97,15 @@
             100% { opacity: 1; transform: scale(1); }
         }
         
+        .fps-counter {
+            background: rgba(0,0,0,0.7);
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-family: monospace;
+            font-size: 14px;
+            color: #22c55e;
+        }
+        
         .info-text {
             color: #94a3b8;
             font-size: 12px;
@@ -117,6 +126,18 @@
         .refresh-btn:hover {
             background: #2563eb;
         }
+        
+        .control-link {
+            display: inline-block;
+            margin-top: 15px;
+            color: #3b82f6;
+            text-decoration: none;
+            font-size: 14px;
+        }
+        
+        .control-link:hover {
+            text-decoration: underline;
+        }
     </style>
 </head>
 <body>
@@ -129,6 +150,7 @@
                     <div class="status-dot offline" id="statusDot"></div>
                     <span id="statusText" style="color: white;">Offline</span>
                 </div>
+                <div class="fps-counter" id="fpsCounter">FPS: 0</div>
             </div>
             
             <div class="video-container">
@@ -140,46 +162,71 @@
             </div>
             
             <button class="refresh-btn" onclick="refreshStream()">🔄 Refresh Stream</button>
+            <br>
+            <a href="https://419912f0-d172-48ee-9a90-39cb4382d3a8-00-1cn1xz6d2vo8g.sisko.replit.dev/" target="_blank" class="control-link">🎮 Open Control Panel</a>
         </div>
     </div>
 
     <script>
-        // 🔴🔴🔴 APNA REPLIT URL (MJPEG STREAM) 🔴🔴🔴
-        const MJPEG_URL = "https://1f7951ea-1cb7-48c7-88ca-44b7f32d2f24-00-2yjkp4q6lswx5.sisko.replit.dev/mjpeg";
+        // 🔴🔴🔴 MJPEG STREAM URL 🔴🔴🔴
+        const STREAM_URL = "https://419912f0-d172-48ee-9a90-39cb4382d3a8-00-1cn1xz6d2vo8g.sisko.replit.dev/stream";
         
         const streamImage = document.getElementById('streamImage');
         const statusDot = document.getElementById('statusDot');
         const statusText = document.getElementById('statusText');
+        const fpsCounter = document.getElementById('fpsCounter');
         const infoText = document.getElementById('infoText');
         
+        let frameCount = 0;
+        let lastFpsUpdate = Date.now();
         let reconnectAttempts = 0;
         let imageLoadTimeout = null;
         
+        // Update FPS counter
+        function updateFPS() {
+            const now = Date.now();
+            if (now - lastFpsUpdate >= 1000) {
+                fpsCounter.textContent = `FPS: ${frameCount}`;
+                frameCount = 0;
+                lastFpsUpdate = now;
+            }
+            requestAnimationFrame(updateFPS);
+        }
+        updateFPS();
+        
+        // Refresh stream
         function refreshStream() {
-            // Add timestamp to force refresh
-            const urlWithTimestamp = MJPEG_URL + '?t=' + new Date().getTime();
+            const urlWithTimestamp = STREAM_URL + '?t=' + new Date().getTime();
             streamImage.src = urlWithTimestamp;
+            
             statusDot.className = 'status-dot online';
-            statusText.textContent = 'Live';
-            statusText.style.color = '#22c55e';
-            infoText.innerHTML = '✅ Stream is active';
+            statusText.textContent = 'Connecting...';
+            statusText.style.color = '#eab308';
+            infoText.innerHTML = '🔄 Connecting to stream...';
             
             // Clear timeout if exists
             if (imageLoadTimeout) clearTimeout(imageLoadTimeout);
             
-            // Check if image loaded
+            // Check if image loaded within timeout
             imageLoadTimeout = setTimeout(() => {
                 if (!streamImage.complete || streamImage.naturalWidth === 0) {
                     statusDot.className = 'status-dot offline';
                     statusText.textContent = 'Offline';
                     statusText.style.color = '#ef4444';
-                    infoText.innerHTML = '⚠️ Stream not available. Make sure camera is ON.';
+                    infoText.innerHTML = '⚠️ Stream not available. Make sure camera is ON and START button is pressed.';
+                    reconnectAttempts++;
+                    
+                    if (reconnectAttempts < 3) {
+                        infoText.innerHTML += ' Retrying...';
+                        setTimeout(refreshStream, 3000);
+                    }
                 }
             }, 5000);
         }
         
         // Image load success
         streamImage.onload = () => {
+            frameCount++;
             statusDot.className = 'status-dot online';
             statusText.textContent = 'Live';
             statusText.style.color = '#22c55e';
@@ -194,6 +241,7 @@
             statusText.textContent = 'Offline';
             statusText.style.color = '#ef4444';
             infoText.innerHTML = '⚠️ Cannot connect to stream. Check if server is running.';
+            if (imageLoadTimeout) clearTimeout(imageLoadTimeout);
         };
         
         // Initial load
