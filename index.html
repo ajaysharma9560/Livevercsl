@@ -3,8 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>Binary Live Stream</title>
-    <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+    <title>Live Camera Stream</title>
     <style>
         * {
             margin: 0;
@@ -18,7 +17,7 @@
             display: flex;
             justify-content: center;
             align-items: center;
-            font-family: system-ui, sans-serif;
+            font-family: system-ui, -apple-system, sans-serif;
             padding: 20px;
         }
         
@@ -54,7 +53,7 @@
             border: 1px solid #333;
         }
         
-        canvas {
+        #streamImage {
             width: 100%;
             height: 100%;
             object-fit: cover;
@@ -98,140 +97,114 @@
             100% { opacity: 1; transform: scale(1); }
         }
         
-        .fps-counter {
-            background: rgba(0,0,0,0.7);
-            padding: 4px 12px;
-            border-radius: 20px;
-            font-family: monospace;
-            font-size: 14px;
-            color: #22c55e;
-        }
-        
         .info-text {
             color: #94a3b8;
             font-size: 12px;
             margin-top: 15px;
+        }
+        
+        .refresh-btn {
+            background: #3b82f6;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 8px;
+            margin-top: 10px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+        
+        .refresh-btn:hover {
+            background: #2563eb;
         }
     </style>
 </head>
 <body>
     <div class="container">
         <div class="stream-card">
-            <h1>📹 Binary Live Stream</h1>
+            <h1>📹 Live Camera Stream</h1>
             
             <div class="status-bar">
                 <div class="status">
                     <div class="status-dot offline" id="statusDot"></div>
                     <span id="statusText" style="color: white;">Offline</span>
                 </div>
-                <div class="fps-counter" id="fpsCounter">FPS: 0</div>
             </div>
             
             <div class="video-container">
-                <canvas id="streamCanvas" width="640" height="480"></canvas>
+                <img id="streamImage" src="" alt="Camera Stream">
             </div>
             
             <div class="info-text" id="infoText">
-                ⚠️ Waiting for binary stream...
+                ⚠️ Waiting for camera stream...
             </div>
+            
+            <button class="refresh-btn" onclick="refreshStream()">🔄 Refresh Stream</button>
         </div>
     </div>
 
     <script>
-        // 🔴 APNA REPLIT URL
-        const SERVER_URL = "https://27fe0cdd-71ea-4ae0-bcd3-0a9226d37a7d-00-30samq096boh.sisko.replit.dev";
+        // 🔴🔴🔴 APNA REPLIT URL (MJPEG STREAM) 🔴🔴🔴
+        const MJPEG_URL = "https://1f7951ea-1cb7-48c7-88ca-44b7f32d2f24-00-2yjkp4q6lswx5.sisko.replit.dev/mjpeg";
         
-        const socket = io(SERVER_URL, {
-            transports: ['websocket', 'polling'],
-            reconnection: true
-        });
-        
-        const canvas = document.getElementById('streamCanvas');
-        const ctx = canvas.getContext('2d');
+        const streamImage = document.getElementById('streamImage');
         const statusDot = document.getElementById('statusDot');
         const statusText = document.getElementById('statusText');
-        const fpsCounter = document.getElementById('fpsCounter');
         const infoText = document.getElementById('infoText');
         
-        let frameCount = 0;
-        let lastFpsUpdate = Date.now();
+        let reconnectAttempts = 0;
+        let imageLoadTimeout = null;
         
-        function updateFPS() {
-            const now = Date.now();
-            if (now - lastFpsUpdate >= 1000) {
-                fpsCounter.textContent = `FPS: ${frameCount}`;
-                frameCount = 0;
-                lastFpsUpdate = now;
-            }
-            requestAnimationFrame(updateFPS);
+        function refreshStream() {
+            // Add timestamp to force refresh
+            const urlWithTimestamp = MJPEG_URL + '?t=' + new Date().getTime();
+            streamImage.src = urlWithTimestamp;
+            statusDot.className = 'status-dot online';
+            statusText.textContent = 'Live';
+            statusText.style.color = '#22c55e';
+            infoText.innerHTML = '✅ Stream is active';
+            
+            // Clear timeout if exists
+            if (imageLoadTimeout) clearTimeout(imageLoadTimeout);
+            
+            // Check if image loaded
+            imageLoadTimeout = setTimeout(() => {
+                if (!streamImage.complete || streamImage.naturalWidth === 0) {
+                    statusDot.className = 'status-dot offline';
+                    statusText.textContent = 'Offline';
+                    statusText.style.color = '#ef4444';
+                    infoText.innerHTML = '⚠️ Stream not available. Make sure camera is ON.';
+                }
+            }, 5000);
         }
-        updateFPS();
         
-        // 🔴 BINARY FRAME RECEIVE - Canvas pe draw hoga
-        socket.on('frame', (data) => {
-            if (data) {
-                // Binary data se image create karo
-                const blob = new Blob([data], { type: 'image/jpeg' });
-                const url = URL.createObjectURL(blob);
-                
-                const img = new Image();
-                img.onload = () => {
-                    // Canvas pe image draw karo
-                    canvas.width = img.width;
-                    canvas.height = img.height;
-                    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-                    URL.revokeObjectURL(url);
-                    
-                    frameCount++;
-                    
-                    statusDot.className = 'status-dot online';
-                    statusText.textContent = 'Live';
-                    statusText.style.color = '#22c55e';
-                    infoText.innerHTML = '✅ Binary live stream is active';
-                };
-                img.onerror = () => {
-                    console.log('Image load error');
-                };
-                img.src = url;
-            }
-        });
+        // Image load success
+        streamImage.onload = () => {
+            statusDot.className = 'status-dot online';
+            statusText.textContent = 'Live';
+            statusText.style.color = '#22c55e';
+            infoText.innerHTML = '✅ Live stream is active';
+            reconnectAttempts = 0;
+            if (imageLoadTimeout) clearTimeout(imageLoadTimeout);
+        };
         
-        // Fallback for streamFrame event
-        socket.on('streamFrame', (data) => {
-            if (data && data.frame) {
-                const img = new Image();
-                img.onload = () => {
-                    canvas.width = img.width;
-                    canvas.height = img.height;
-                    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-                    frameCount++;
-                    
-                    statusDot.className = 'status-dot online';
-                    statusText.textContent = 'Live';
-                    infoText.innerHTML = '✅ Live stream is active';
-                };
-                img.src = data.frame;
-            }
-        });
-        
-        socket.on('connect', () => {
-            console.log('Connected to server');
-            statusText.textContent = 'Connected';
-            infoText.innerHTML = '⏳ Connected, waiting for binary stream...';
-        });
-        
-        socket.on('disconnect', () => {
+        // Image load error
+        streamImage.onerror = () => {
             statusDot.className = 'status-dot offline';
             statusText.textContent = 'Offline';
             statusText.style.color = '#ef4444';
-            infoText.innerHTML = '⚠️ Disconnected from server';
-        });
+            infoText.innerHTML = '⚠️ Cannot connect to stream. Check if server is running.';
+        };
         
-        socket.on('connect_error', (error) => {
-            console.error('Connection error:', error);
-            statusText.textContent = 'Connection Error';
-            infoText.innerHTML = '❌ Cannot connect to server';
-        });
+        // Initial load
+        refreshStream();
+        
+        // Auto refresh every 30 seconds (keep alive)
+        setInterval(() => {
+            if (streamImage.src) {
+                refreshStream();
+            }
+        }, 30000);
     </script>
 </body>
 </html>
