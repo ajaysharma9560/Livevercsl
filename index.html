@@ -1,106 +1,91 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>Video Preview Dashboard</title>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Camera Controller</title>
+
+<script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-database-compat.js"></script>
 
 <style>
-body{
-    margin:0;
-    background:#0b0b0b;
-    font-family:system-ui;
-    display:flex;
-    justify-content:center;
-    align-items:center;
-    min-height:100vh;
-    color:white;
-}
+/* ===== YOUR UI (UNCHANGED) ===== */
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: linear-gradient(135deg, #000000, #1a1a2e); font-family: system-ui; padding: 20px; }
+.container { max-width: 500px; margin: 0 auto; }
+.header { text-align: center; margin-bottom: 30px; }
+.header h1 { color: white; font-size: 28px; }
+.header p { color: #888; font-size: 14px; }
 
-.player{
-    width:420px;
-    background:#000;
-    border-radius:20px;
-    overflow:hidden;
-    box-shadow:0 20px 50px rgba(0,0,0,0.6);
-}
+.status-card { background: rgba(0,0,0,0.5); border-radius: 20px; padding: 20px; text-align: center; margin-bottom: 20px; backdrop-filter: blur(10px); }
+.status-dot { width: 12px; height: 12px; border-radius: 50%; display: inline-block; margin-right: 8px; }
+.online { background: #22c55e; box-shadow: 0 0 8px #22c55e; animation: pulse 1.5s infinite; }
+.offline { background: #ef4444; }
+@keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.5; } }
 
-.video{
-    height:230px;
-    background:#111;
-    position:relative;
-    display:flex;
-    justify-content:center;
-    align-items:center;
-}
+.stream-card { background: rgba(0,0,0,0.6); border-radius: 20px; padding: 20px; backdrop-filter: blur(10px); margin-bottom: 20px; }
+.video-container { background: #000; border-radius: 16px; overflow: hidden; aspect-ratio: 16/9; border: 2px solid #333; margin-bottom: 15px; }
+#streamImage { width: 100%; height: 100%; object-fit: cover; }
 
-.ready{
-    position:absolute;
-    padding:8px 20px;
-    border-radius:30px;
-    background:rgba(0,0,0,0.7);
-    border:1px solid rgba(255,255,255,0.2);
-    font-weight:600;
-}
+.control-card { background: rgba(0,0,0,0.5); border-radius: 20px; padding: 20px; margin-bottom: 20px; }
+.button-group { display: flex; gap: 15px; justify-content: center; flex-wrap: wrap; }
+button { padding: 12px 24px; border: none; border-radius: 40px; cursor: pointer; font-weight: bold; }
+.btn-start { background: #22c55e; color: white; }
+.btn-stop { background: #ef4444; color: white; }
+.btn-flip { background: #3b82f6; color: white; }
 
-.status{
-    position:absolute;
-    top:10px;
-    right:10px;
-    font-size:13px;
-    padding:5px 10px;
-    border-radius:20px;
-    background:#222;
-}
-
-.controls{
-    padding:15px;
-    display:flex;
-    justify-content:space-between;
-    align-items:center;
-    background:#0f0f0f;
-}
-
-.id{
-    font-family:monospace;
-    font-size:13px;
-    opacity:0.8;
-}
-
-.buttons button{
-    background:#1d1d1d;
-    border:none;
-    color:white;
-    padding:8px 12px;
-    border-radius:10px;
-    margin-left:5px;
-    cursor:pointer;
-}
+.quality-card { background: rgba(0,0,0,0.5); border-radius: 20px; padding: 15px; margin-bottom: 20px; }
+.quality-buttons { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
+.quality-btn { background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); padding: 8px 20px; border-radius: 30px; color: white; cursor: pointer; }
+.quality-btn.active { background: #22c55e; }
 </style>
 </head>
 
 <body>
 
-<div class="player">
+<div class="container">
 
-    <div class="video">
-        <div class="ready">● READY</div>
-        <div class="status" id="status">Loading...</div>
-    </div>
+<div class="header">
+<h1>📷 Camera Controller</h1>
+<p>Firebase Control | Live Stream</p>
+</div>
 
-    <div class="controls">
-        <div class="id">📁 afa18305</div>
+<!-- STATUS -->
+<div class="status-card">
+<span class="status-dot offline" id="statusDot"></span>
+<span id="deviceStatus">Device Offline</span>
+<br>
+<small id="deviceId">No Device</small>
+</div>
 
-        <div class="buttons">
-            <button>BACK</button>
-            <button>▶</button>
-            <button>⋮</button>
-        </div>
-    </div>
+<!-- STREAM -->
+<div class="stream-card">
+<div class="video-container">
+<img id="streamImage">
+</div>
+</div>
+
+<!-- QUALITY -->
+<div class="quality-card">
+<div class="quality-buttons">
+<button class="quality-btn" data-q="140p">140p</button>
+<button class="quality-btn active" data-q="240p">240p</button>
+<button class="quality-btn" data-q="360p">360p</button>
+</div>
+</div>
+
+<!-- CONTROLS -->
+<div class="control-card">
+<div class="button-group">
+<button class="btn-start" id="start">START</button>
+<button class="btn-stop" id="stop">STOP</button>
+<button class="btn-flip" id="flip">FLIP</button>
+</div>
+</div>
 
 </div>
 
-<script type="module" src="app.js"></script>
+<script src="app.js"></script>
 
 </body>
 </html>
