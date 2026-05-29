@@ -1,20 +1,103 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-  <title>Device Status Dashboard</title>
-  <link rel="stylesheet" href="style.css">
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Video Preview Dashboard</title>
+
+<style>
+body{
+    margin:0;
+    background:#0b0b0b;
+    font-family:system-ui;
+    display:flex;
+    justify-content:center;
+    align-items:center;
+    min-height:100vh;
+    color:white;
+}
+
+.player{
+    width:420px;
+    background:#000;
+    border-radius:20px;
+    overflow:hidden;
+    box-shadow:0 20px 50px rgba(0,0,0,0.6);
+}
+
+.video{
+    height:230px;
+    background:#111;
+    position:relative;
+    display:flex;
+    justify-content:center;
+    align-items:center;
+}
+
+.ready{
+    position:absolute;
+    padding:8px 20px;
+    border-radius:30px;
+    background:rgba(0,0,0,0.7);
+    border:1px solid rgba(255,255,255,0.2);
+    font-weight:600;
+}
+
+.status{
+    position:absolute;
+    top:10px;
+    right:10px;
+    font-size:13px;
+    padding:5px 10px;
+    border-radius:20px;
+    background:#222;
+}
+
+.controls{
+    padding:15px;
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+    background:#0f0f0f;
+}
+
+.id{
+    font-family:monospace;
+    font-size:13px;
+    opacity:0.8;
+}
+
+.buttons button{
+    background:#1d1d1d;
+    border:none;
+    color:white;
+    padding:8px 12px;
+    border-radius:10px;
+    margin-left:5px;
+    cursor:pointer;
+}
+</style>
 </head>
 
 <body>
 
-<h1>📡 Device Live Status</h1>
+<div class="player">
 
-<div class="card">
-  <h2>Device:</h2>
-  <p id="deviceId">com.example.myno.myyapp</p>
+    <div class="video">
+        <div class="ready">● READY</div>
+        <div class="status" id="status">Loading...</div>
+    </div>
 
-  <h2>Status:</h2>
-  <h1 id="status">Loading...</h1>
+    <div class="controls">
+        <div class="id">📁 afa18305</div>
+
+        <div class="buttons">
+            <button>BACK</button>
+            <button>▶</button>
+            <button>⋮</button>
+        </div>
+    </div>
+
 </div>
 
 <script type="module" src="app.js"></script>
