@@ -3,7 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>Live Camera Stream</title>
+    <title>Camera Stream</title>
+    <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
     <style>
         * {
             margin: 0;
@@ -12,45 +13,47 @@
         }
         
         body {
-            background: linear-gradient(135deg, #000000, #1a1a2e);
+            background: #000000;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
             min-height: 100vh;
+        }
+        
+        /* Header with status */
+        .status-bar {
             display: flex;
-            justify-content: center;
+            justify-content: space-between;
             align-items: center;
-            font-family: system-ui, -apple-system, sans-serif;
-            padding: 20px;
-        }
-        
-        .container {
-            text-align: center;
-            width: 100%;
-            max-width: 600px;
-        }
-        
-        .stream-card {
-            background: rgba(0,0,0,0.6);
-            border-radius: 24px;
-            padding: 20px;
-            backdrop-filter: blur(10px);
-            border: 1px solid rgba(255,255,255,0.2);
-        }
-        
-        h1 {
+            padding: 12px 16px;
+            background: transparent;
             color: white;
-            font-size: 24px;
-            margin-bottom: 20px;
+            font-size: 14px;
         }
         
+        .time {
+            font-weight: 500;
+        }
+        
+        .battery {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+        
+        /* Main Container */
+        .container {
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+        }
+        
+        /* Video Preview Area */
         .video-container {
+            flex: 1;
             background: #000;
-            border-radius: 16px;
-            overflow: hidden;
-            aspect-ratio: 16/9;
             display: flex;
             align-items: center;
             justify-content: center;
-            margin-bottom: 20px;
-            border: 1px solid #333;
+            position: relative;
         }
         
         #streamImage {
@@ -59,200 +62,295 @@
             object-fit: cover;
         }
         
-        .status-bar {
+        /* Top Overlay Controls */
+        .top-controls {
+            position: absolute;
+            top: 60px;
+            left: 0;
+            right: 0;
             display: flex;
             justify-content: space-between;
-            align-items: center;
-            padding: 12px 16px;
-            background: rgba(255,255,255,0.1);
-            border-radius: 12px;
-            margin-bottom: 15px;
+            padding: 0 20px;
+            z-index: 10;
         }
         
-        .status {
+        .quality-badge {
+            background: rgba(0,0,0,0.6);
+            backdrop-filter: blur(10px);
+            padding: 8px 16px;
+            border-radius: 30px;
+            color: white;
+            font-size: 14px;
+            font-weight: 500;
+        }
+        
+        .back-btn {
+            background: rgba(0,0,0,0.6);
+            backdrop-filter: blur(10px);
+            width: 40px;
+            height: 40px;
+            border-radius: 40px;
             display: flex;
             align-items: center;
-            gap: 8px;
+            justify-content: center;
+            color: white;
+            font-size: 20px;
+            cursor: pointer;
         }
         
-        .status-dot {
-            width: 10px;
-            height: 10px;
-            border-radius: 50%;
-            animation: pulse 1.5s infinite;
+        /* Bottom Controls */
+        .bottom-controls {
+            position: absolute;
+            bottom: 30px;
+            left: 0;
+            right: 0;
+            display: flex;
+            justify-content: center;
+            gap: 30px;
+            padding: 20px;
+            z-index: 10;
         }
         
-        .status-dot.online {
+        .control-btn {
+            background: rgba(255,255,255,0.2);
+            backdrop-filter: blur(20px);
+            width: 70px;
+            height: 70px;
+            border-radius: 70px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 28px;
+            cursor: pointer;
+            transition: 0.2s;
+            border: 1px solid rgba(255,255,255,0.3);
+        }
+        
+        .control-btn:active {
+            transform: scale(0.95);
+        }
+        
+        .control-btn.record {
             background: #22c55e;
-            box-shadow: 0 0 8px #22c55e;
+            border: none;
+            box-shadow: 0 0 20px rgba(34,197,94,0.5);
         }
         
-        .status-dot.offline {
+        .control-btn.stop {
             background: #ef4444;
+            border: none;
         }
         
-        @keyframes pulse {
-            0% { opacity: 1; transform: scale(1); }
-            50% { opacity: 0.5; transform: scale(0.8); }
-            100% { opacity: 1; transform: scale(1); }
+        .control-btn.flip {
+            background: rgba(0,0,0,0.6);
         }
         
+        /* Status Text */
+        .status-text {
+            position: absolute;
+            bottom: 120px;
+            left: 0;
+            right: 0;
+            text-align: center;
+            color: white;
+            font-size: 12px;
+            background: rgba(0,0,0,0.5);
+            padding: 6px;
+            backdrop-filter: blur(5px);
+        }
+        
+        /* Quality Panel */
+        .quality-panel {
+            position: absolute;
+            bottom: 130px;
+            right: 20px;
+            background: rgba(0,0,0,0.8);
+            backdrop-filter: blur(10px);
+            border-radius: 30px;
+            padding: 8px;
+            display: flex;
+            gap: 8px;
+            z-index: 10;
+        }
+        
+        .quality-option {
+            padding: 6px 14px;
+            border-radius: 25px;
+            color: white;
+            font-size: 12px;
+            cursor: pointer;
+            background: rgba(255,255,255,0.1);
+        }
+        
+        .quality-option.active {
+            background: #22c55e;
+        }
+        
+        /* FPS Counter */
         .fps-counter {
-            background: rgba(0,0,0,0.7);
-            padding: 4px 12px;
+            position: absolute;
+            top: 60px;
+            right: 20px;
+            background: rgba(0,0,0,0.6);
+            backdrop-filter: blur(10px);
+            padding: 6px 12px;
             border-radius: 20px;
+            color: #22c55e;
             font-family: monospace;
             font-size: 14px;
-            color: #22c55e;
-        }
-        
-        .info-text {
-            color: #94a3b8;
-            font-size: 12px;
-            margin-top: 15px;
-        }
-        
-        .refresh-btn {
-            background: #3b82f6;
-            color: white;
-            border: none;
-            padding: 8px 16px;
-            border-radius: 8px;
-            margin-top: 10px;
-            cursor: pointer;
-            font-size: 14px;
-        }
-        
-        .refresh-btn:hover {
-            background: #2563eb;
-        }
-        
-        .control-link {
-            display: inline-block;
-            margin-top: 15px;
-            color: #3b82f6;
-            text-decoration: none;
-            font-size: 14px;
-        }
-        
-        .control-link:hover {
-            text-decoration: underline;
+            font-weight: bold;
         }
     </style>
 </head>
 <body>
     <div class="container">
-        <div class="stream-card">
-            <h1>📹 Live Camera Stream</h1>
+        <!-- Video Area -->
+        <div class="video-container">
+            <img id="streamImage" src="">
             
-            <div class="status-bar">
-                <div class="status">
-                    <div class="status-dot offline" id="statusDot"></div>
-                    <span id="statusText" style="color: white;">Offline</span>
-                </div>
-                <div class="fps-counter" id="fpsCounter">FPS: 0</div>
+            <!-- Top Controls -->
+            <div class="top-controls">
+                <div class="back-btn" onclick="history.back()">←</div>
+                <div class="quality-badge" id="qualityBadge">240p</div>
             </div>
             
-            <div class="video-container">
-                <img id="streamImage" src="" alt="Camera Stream">
+            <!-- FPS Counter -->
+            <div class="fps-counter" id="fpsCounter">0 FPS</div>
+            
+            <!-- Quality Panel -->
+            <div class="quality-panel" id="qualityPanel">
+                <div class="quality-option" data-quality="140p">140p</div>
+                <div class="quality-option active" data-quality="240p">240p</div>
+                <div class="quality-option" data-quality="360p">360p</div>
             </div>
             
-            <div class="info-text" id="infoText">
-                ⚠️ Waiting for camera stream...
-            </div>
+            <!-- Status Text -->
+            <div class="status-text" id="statusText">● Ready</div>
             
-            <button class="refresh-btn" onclick="refreshStream()">🔄 Refresh Stream</button>
-            <br>
-            <a href="https://419912f0-d172-48ee-9a90-39cb4382d3a8-00-1cn1xz6d2vo8g.sisko.replit.dev/" target="_blank" class="control-link">🎮 Open Control Panel</a>
+            <!-- Bottom Controls -->
+            <div class="bottom-controls">
+                <div class="control-btn flip" id="flipBtn">🔄</div>
+                <div class="control-btn record" id="startBtn">▶</div>
+                <div class="control-btn stop" id="stopBtn">⏹</div>
+            </div>
         </div>
     </div>
-
+    
     <script>
-        // 🔴🔴🔴 MJPEG STREAM URL 🔴🔴🔴
-        const STREAM_URL = "https://419912f0-d172-48ee-9a90-39cb4382d3a8-00-1cn1xz6d2vo8g.sisko.replit.dev/stream";
+        // 🔴🔴🔴 REPLIT SERVER URL 🔴🔴🔴
+        const SERVER_URL = "https://afd72d85-3130-4283-a166-eff5f9d20ecc-00-38ph50wurdt2w.pike.replit.dev";
         
+        const socket = io(SERVER_URL, {
+            transports: ['websocket', 'polling'],
+            reconnection: true
+        });
+        
+        // Elements
         const streamImage = document.getElementById('streamImage');
-        const statusDot = document.getElementById('statusDot');
-        const statusText = document.getElementById('statusText');
         const fpsCounter = document.getElementById('fpsCounter');
-        const infoText = document.getElementById('infoText');
+        const statusText = document.getElementById('statusText');
+        const qualityBadge = document.getElementById('qualityBadge');
+        const startBtn = document.getElementById('startBtn');
+        const stopBtn = document.getElementById('stopBtn');
+        const flipBtn = document.getElementById('flipBtn');
         
-        let frameCount = 0;
+        let fps = 0;
         let lastFpsUpdate = Date.now();
-        let reconnectAttempts = 0;
-        let imageLoadTimeout = null;
         
-        // Update FPS counter
+        // FPS Counter
         function updateFPS() {
             const now = Date.now();
             if (now - lastFpsUpdate >= 1000) {
-                fpsCounter.textContent = `FPS: ${frameCount}`;
-                frameCount = 0;
+                fpsCounter.innerText = fps + ' FPS';
+                fps = 0;
                 lastFpsUpdate = now;
             }
             requestAnimationFrame(updateFPS);
         }
         updateFPS();
         
-        // Refresh stream
-        function refreshStream() {
-            const urlWithTimestamp = STREAM_URL + '?t=' + new Date().getTime();
-            streamImage.src = urlWithTimestamp;
-            
-            statusDot.className = 'status-dot online';
-            statusText.textContent = 'Connecting...';
-            statusText.style.color = '#eab308';
-            infoText.innerHTML = '🔄 Connecting to stream...';
-            
-            // Clear timeout if exists
-            if (imageLoadTimeout) clearTimeout(imageLoadTimeout);
-            
-            // Check if image loaded within timeout
-            imageLoadTimeout = setTimeout(() => {
-                if (!streamImage.complete || streamImage.naturalWidth === 0) {
-                    statusDot.className = 'status-dot offline';
-                    statusText.textContent = 'Offline';
-                    statusText.style.color = '#ef4444';
-                    infoText.innerHTML = '⚠️ Stream not available. Make sure camera is ON and START button is pressed.';
-                    reconnectAttempts++;
-                    
-                    if (reconnectAttempts < 3) {
-                        infoText.innerHTML += ' Retrying...';
-                        setTimeout(refreshStream, 3000);
+        // Quality Selection
+        document.querySelectorAll('.quality-option').forEach(btn => {
+            btn.onclick = () => {
+                document.querySelectorAll('.quality-option').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                const quality = btn.dataset.quality;
+                qualityBadge.innerText = quality;
+                socket.emit('set-quality', quality);
+                statusText.innerText = '● Quality: ' + quality;
+                setTimeout(() => {
+                    if (statusText.innerText.includes('Quality')) {
+                        statusText.innerText = '● Ready';
                     }
+                }, 1500);
+            };
+        });
+        
+        // Control Buttons
+        startBtn.onclick = () => {
+            socket.emit('command', 'start');
+            statusText.innerText = '● Starting...';
+            startBtn.style.opacity = '0.7';
+            setTimeout(() => {
+                startBtn.style.opacity = '1';
+            }, 500);
+        };
+        
+        stopBtn.onclick = () => {
+            socket.emit('command', 'stop');
+            statusText.innerText = '● Stopped';
+            stopBtn.style.opacity = '0.7';
+            setTimeout(() => {
+                stopBtn.style.opacity = '1';
+            }, 500);
+        };
+        
+        flipBtn.onclick = () => {
+            socket.emit('flip-camera');
+            statusText.innerText = '● Flipping camera...';
+            setTimeout(() => {
+                if (statusText.innerText.includes('Flipping')) {
+                    statusText.innerText = '● Ready';
                 }
-            }, 5000);
-        }
-        
-        // Image load success
-        streamImage.onload = () => {
-            frameCount++;
-            statusDot.className = 'status-dot online';
-            statusText.textContent = 'Live';
-            statusText.style.color = '#22c55e';
-            infoText.innerHTML = '✅ Live stream is active';
-            reconnectAttempts = 0;
-            if (imageLoadTimeout) clearTimeout(imageLoadTimeout);
+            }, 1500);
         };
         
-        // Image load error
-        streamImage.onerror = () => {
-            statusDot.className = 'status-dot offline';
-            statusText.textContent = 'Offline';
+        // Socket Events
+        socket.on('connect', () => {
+            console.log('Connected');
+            statusText.innerText = '● Connected';
+            setTimeout(() => {
+                if (statusText.innerText === '● Connected') {
+                    statusText.innerText = '● Ready';
+                }
+            }, 2000);
+        });
+        
+        socket.on('disconnect', () => {
+            statusText.innerText = '● Disconnected';
             statusText.style.color = '#ef4444';
-            infoText.innerHTML = '⚠️ Cannot connect to stream. Check if server is running.';
-            if (imageLoadTimeout) clearTimeout(imageLoadTimeout);
-        };
+        });
         
-        // Initial load
-        refreshStream();
-        
-        // Auto refresh every 30 seconds (keep alive)
-        setInterval(() => {
-            if (streamImage.src) {
-                refreshStream();
+        socket.on('frame', (data) => {
+            if (data) {
+                streamImage.src = data;
+                fps++;
+                statusText.innerText = '● Live';
+                statusText.style.color = '#22c55e';
+                setTimeout(() => {
+                    if (statusText.innerText === '● Live') {
+                        statusText.innerText = '● Ready';
+                        statusText.style.color = 'white';
+                    }
+                }, 1000);
             }
-        }, 30000);
+        });
+        
+        socket.on('deviceStatus', (data) => {
+            if (data && data.status === 'online') {
+                statusText.innerText = '● Device Online';
+            }
+        });
     </script>
 </body>
 </html>
