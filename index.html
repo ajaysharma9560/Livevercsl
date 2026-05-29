@@ -7,27 +7,23 @@
 
 <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-app.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-database.js"></script>
-<script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
 
 <style>
-/* ===== SAME YOUR UI ===== */
-* { margin:0; padding:0; box-sizing:border-box; }
-
 body {
-    background: linear-gradient(135deg, #000000, #1a1a2e);
-    font-family: system-ui;
-    min-height:100vh;
+    margin:0;
     padding:20px;
+    font-family: system-ui;
+    background: linear-gradient(135deg,#000,#1a1a2e);
+    color:white;
 }
 
-.container { max-width:500px; margin:auto; }
-
-.status-card {
-    background: rgba(0,0,0,0.5);
-    border-radius: 20px;
-    padding: 20px;
-    text-align: center;
-    margin-bottom: 20px;
+.card {
+    max-width:500px;
+    margin:auto;
+    padding:20px;
+    background:rgba(0,0,0,0.5);
+    border-radius:20px;
+    text-align:center;
 }
 
 .status-dot {
@@ -43,28 +39,28 @@ body {
 .offline { background:#ef4444 !important; }
 
 .device-id {
-    color:#888;
-    font-size:11px;
+    font-size:12px;
+    color:#aaa;
+    margin-top:8px;
 }
 </style>
 </head>
 
 <body>
 
-<div class="container">
+<div class="card">
+    <h2>Device Status</h2>
 
-    <div class="status-card">
-        <div>
-            <span id="statusDot" class="status-dot offline"></span>
-            <span id="deviceStatus">Device Offline</span>
-        </div>
-        <div class="device-id" id="deviceId">No device</div>
+    <div>
+        <span id="statusDot" class="status-dot offline"></span>
+        <span id="deviceStatus">Checking...</span>
     </div>
 
+    <div class="device-id" id="deviceIdText">No device</div>
 </div>
 
 <script>
-// 🔴 FIREBASE INIT
+// Firebase config
 const firebaseConfig = {
     apiKey: "AIzaSyBchF49wpLnVsppEbqU2jK1dScAEmHlrtk",
     authDomain: "loyalapp-6dde2.firebaseapp.com",
@@ -78,15 +74,16 @@ const database = firebase.database();
 // 🔴 MUST MATCH ANDROID EXACTLY
 const deviceId = "droid_fixed_001";
 
-// 🔥 FIXED LISTENER (NO Object.values BUG)
+// 🔥 FIXED LISTENER (NO BUG)
 database.ref('devices/' + deviceId).on('value', (snapshot) => {
 
     const device = snapshot.val();
-    console.log("DEVICE DATA:", device);
+
+    console.log("LIVE DATA:", device);
 
     const dot = document.getElementById("statusDot");
     const text = document.getElementById("deviceStatus");
-    const idText = document.getElementById("deviceId");
+    const idText = document.getElementById("deviceIdText");
 
     if (device && device.status === "online") {
         dot.className = "status-dot online";
