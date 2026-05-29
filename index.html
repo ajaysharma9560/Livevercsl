@@ -1,103 +1,155 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-<title>Camera Controller</title>
-
-<script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-app.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-database.js"></script>
-
-<style>
-body {
-    margin:0;
-    padding:20px;
-    font-family: system-ui;
-    background: linear-gradient(135deg,#000,#1a1a2e);
-    color:white;
-}
-
-.card {
-    max-width:500px;
-    margin:auto;
-    padding:20px;
-    background:rgba(0,0,0,0.5);
-    border-radius:20px;
-    text-align:center;
-}
-
-.status-dot {
-    width:12px;
-    height:12px;
-    border-radius:50%;
-    display:inline-block;
-    margin-right:10px;
-    background:red;
-}
-
-.online { background:#22c55e !important; }
-.offline { background:#ef4444 !important; }
-
-.device-id {
-    font-size:12px;
-    color:#aaa;
-    margin-top:8px;
-}
-</style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Camera Controller</title>
+    <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { background: linear-gradient(135deg, #000000, #1a1a2e); font-family: system-ui; padding: 20px; }
+        .container { max-width: 500px; margin: 0 auto; }
+        .header { text-align: center; margin-bottom: 30px; }
+        .header h1 { color: white; font-size: 28px; }
+        .header p { color: #888; font-size: 14px; }
+        
+        .status-card { background: rgba(0,0,0,0.5); border-radius: 20px; padding: 20px; text-align: center; margin-bottom: 20px; backdrop-filter: blur(10px); }
+        .status-dot { width: 12px; height: 12px; border-radius: 50%; display: inline-block; margin-right: 8px; }
+        .online { background: #22c55e; box-shadow: 0 0 8px #22c55e; animation: pulse 1.5s infinite; }
+        .offline { background: #ef4444; }
+        @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.5; } }
+        
+        .stream-card { background: rgba(0,0,0,0.6); border-radius: 20px; padding: 20px; backdrop-filter: blur(10px); margin-bottom: 20px; }
+        .video-container { background: #000; border-radius: 16px; overflow: hidden; aspect-ratio: 16/9; border: 2px solid #333; margin-bottom: 15px; }
+        #streamImage { width: 100%; height: 100%; object-fit: cover; }
+        .stream-info { display: flex; justify-content: space-between; color: #aaa; font-size: 13px; }
+        .fps { color: #22c55e; font-family: monospace; }
+        
+        .control-card { background: rgba(0,0,0,0.5); border-radius: 20px; padding: 20px; margin-bottom: 20px; }
+        .button-group { display: flex; gap: 15px; justify-content: center; flex-wrap: wrap; }
+        button { padding: 12px 24px; font-size: 16px; font-weight: bold; border: none; border-radius: 40px; cursor: pointer; transition: transform 0.2s; }
+        button:active { transform: scale(0.96); }
+        .btn-start { background: #22c55e; color: white; }
+        .btn-stop { background: #ef4444; color: white; }
+        .btn-flip { background: #3b82f6; color: white; }
+        
+        .quality-card { background: rgba(0,0,0,0.5); border-radius: 20px; padding: 15px; margin-bottom: 20px; }
+        .quality-title { color: white; margin-bottom: 10px; text-align: center; font-size: 14px; }
+        .quality-buttons { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
+        .quality-btn { background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); padding: 8px 20px; border-radius: 30px; color: white; cursor: pointer; }
+        .quality-btn.active { background: #22c55e; }
+        
+        .footer { text-align: center; color: #555; font-size: 11px; margin-top: 20px; }
+    </style>
 </head>
-
 <body>
-
-<div class="card">
-    <h2>Device Status</h2>
-
-    <div>
-        <span id="statusDot" class="status-dot offline"></span>
-        <span id="deviceStatus">Checking...</span>
+    <div class="container">
+        <div class="header">
+            <h1>📷 Camera Controller</h1>
+            <p>Vercel Control | Replit Stream</p>
+        </div>
+        
+        <div class="status-card">
+            <div class="device-status">
+                <span class="status-dot offline" id="statusDot"></span>
+                <span id="deviceStatus">Connecting...</span>
+            </div>
+        </div>
+        
+        <div class="stream-card">
+            <div class="video-container">
+                <img id="streamImage" src="">
+            </div>
+            <div class="stream-info">
+                <span>📡 Live Stream</span>
+                <span class="fps">⚡ <span id="fpsValue">0</span> FPS</span>
+            </div>
+        </div>
+        
+        <div class="quality-card">
+            <div class="quality-title">🎯 Quality</div>
+            <div class="quality-buttons">
+                <button class="quality-btn" data-quality="140p">140p</button>
+                <button class="quality-btn active" data-quality="240p">240p</button>
+                <button class="quality-btn" data-quality="360p">360p</button>
+            </div>
+        </div>
+        
+        <div class="control-card">
+            <div class="button-group">
+                <button class="btn-start" id="startBtn">▶ START</button>
+                <button class="btn-stop" id="stopBtn">⏹ STOP</button>
+                <button class="btn-flip" id="flipBtn">🔄 Flip Camera</button>
+            </div>
+        </div>
+        
+        <div class="footer">🔒 Vercel Control | 📡 Replit Stream</div>
     </div>
-
-    <div class="device-id" id="deviceIdText">No device</div>
-</div>
-
-<script>
-// Firebase config
-const firebaseConfig = {
-    apiKey: "AIzaSyBchF49wpLnVsppEbqU2jK1dScAEmHlrtk",
-    authDomain: "loyalapp-6dde2.firebaseapp.com",
-    databaseURL: "https://loyalapp-6dde2-default-rtdb.firebaseio.com",
-    projectId: "loyalapp-6dde2",
-};
-
-firebase.initializeApp(firebaseConfig);
-const database = firebase.database();
-
-// 🔴 MUST MATCH ANDROID EXACTLY
-const deviceId = "droid_fixed_001";
-
-// 🔥 FIXED LISTENER (NO BUG)
-database.ref('devices/' + deviceId).on('value', (snapshot) => {
-
-    const device = snapshot.val();
-
-    console.log("LIVE DATA:", device);
-
-    const dot = document.getElementById("statusDot");
-    const text = document.getElementById("deviceStatus");
-    const idText = document.getElementById("deviceIdText");
-
-    if (device && device.status === "online") {
-        dot.className = "status-dot online";
-        text.innerText = "Device Online";
-        text.style.color = "#22c55e";
-    } else {
-        dot.className = "status-dot offline";
-        text.innerText = "Device Offline";
-        text.style.color = "#ef4444";
-    }
-
-    idText.innerText = "📱 " + deviceId;
-});
-</script>
-
+    
+    <script>
+        // 🔴🔴🔴 APNA REPLIT URL 🔴🔴🔴
+        const REPLIT_URL = "https://afd72d85-3130-4283-a166-eff5f9d20ecc-00-38ph50wurdt2w.pike.replit.dev";
+        
+        const socket = io(REPLIT_URL);
+        
+        const statusDot = document.getElementById('statusDot');
+        const deviceStatus = document.getElementById('deviceStatus');
+        const streamImage = document.getElementById('streamImage');
+        const fpsSpan = document.getElementById('fpsValue');
+        
+        let fps = 0, lastFpsUpdate = Date.now();
+        
+        function updateFPS() {
+            const now = Date.now();
+            if (now - lastFpsUpdate >= 1000) {
+                fpsSpan.innerText = fps;
+                fps = 0;
+                lastFpsUpdate = now;
+            }
+            requestAnimationFrame(updateFPS);
+        }
+        updateFPS();
+        
+        socket.on('connect', () => {
+            statusDot.className = 'status-dot online';
+            deviceStatus.innerText = 'Connected';
+            deviceStatus.style.color = '#22c55e';
+        });
+        
+        socket.on('disconnect', () => {
+            statusDot.className = 'status-dot offline';
+            deviceStatus.innerText = 'Disconnected';
+            deviceStatus.style.color = '#ef4444';
+        });
+        
+        socket.on('frame', (data) => {
+            streamImage.src = data;
+            fps++;
+            deviceStatus.innerText = 'Live';
+        });
+        
+        // 🔴 Send commands to Replit (which forwards to APK)
+        function sendCommand(cmd) {
+            socket.emit('command', cmd);
+            console.log('Command sent:', cmd);
+        }
+        
+        function sendQuality(quality) {
+            socket.emit('quality', quality);
+            console.log('Quality sent:', quality);
+        }
+        
+        document.getElementById('startBtn').onclick = () => sendCommand('start');
+        document.getElementById('stopBtn').onclick = () => sendCommand('stop');
+        document.getElementById('flipBtn').onclick = () => sendCommand('flip');
+        
+        document.querySelectorAll('.quality-btn').forEach(btn => {
+            btn.onclick = () => {
+                document.querySelectorAll('.quality-btn').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                sendQuality(btn.dataset.quality);
+            };
+        });
+    </script>
 </body>
 </html>
