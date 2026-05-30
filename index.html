@@ -89,6 +89,7 @@
             background: #000;
             position: relative;
             min-height: 0;
+            padding: 16px;
         }
 
         .stream-wrapper {
@@ -108,7 +109,7 @@
             display: block;
             width: 100%;
             height: auto;
-            max-height: 70vh;
+            max-height: 65vh;
             object-fit: contain;
             background: #000;
         }
@@ -126,6 +127,19 @@
             color: #00ff88;
             font-family: monospace;
             letter-spacing: 1px;
+        }
+
+        .timer-tag {
+            position: absolute;
+            bottom: 12px;
+            right: 12px;
+            background: rgba(0,0,0,0.7);
+            backdrop-filter: blur(8px);
+            padding: 6px 14px;
+            border-radius: 30px;
+            font-size: 12px;
+            font-family: monospace;
+            color: #ffffff;
         }
 
         /* ========== DEVICE SELECTOR ========== */
@@ -251,18 +265,6 @@
             letter-spacing: 1px;
         }
 
-        /* ========== LOADING ========== */
-        .loading-placeholder {
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            gap: 12px;
-            aspect-ratio: 4 / 3;
-            background: #0a0a0a;
-            color: #555;
-        }
-
         /* ========== RESPONSIVE ========== */
         @media (max-width: 480px) {
             .ctrl-btn {
@@ -281,7 +283,7 @@
 
     <!-- HEADER -->
     <div class="header">
-        <button class="back-btn" onclick="goBack()">
+        <button class="back-btn" onclick="history.back()">
             ← <span>BACK</span>
         </button>
         <div class="status-badge">
@@ -293,8 +295,9 @@
     <!-- STREAM AREA -->
     <div class="stream-container">
         <div class="stream-wrapper">
-            <img id="streamImage" class="stream-image" src="">
+            <img id="streamImage" class="stream-image" src="" alt="Live Stream">
             <div class="quality-tag" id="qualityTag">360p</div>
+            <div class="timer-tag" id="timerTag">00:00</div>
         </div>
     </div>
 
@@ -328,10 +331,8 @@
     </div>
 
     <script>
-        // ============================================
-        // 🔴 APNA BACKEND URL (REPLIT) YAHAN DALO 🔴
-        // ============================================
-        const BACKEND_URL = "https://82306eb9-62b1-4fe6-b0a3-387ab54422bf-00-1rxob9p4mcemw.sisko.replit.dev";
+        // 🔴 YAHAN APKA NAYA REPLIT LINK 🔴
+        const BACKEND_URL = "https://273b1af1-2049-43a5-9cfb-be277623fa7e-00-38risrcg5k69w.pike.replit.dev";
         
         // ============================================
         // VARIABLES
@@ -339,6 +340,39 @@
         let currentDeviceId = null;
         let streamInterval = null;
         let currentQuality = "360p";
+        let streamStartTime = null;
+        let timerInterval = null;
+        
+        // ============================================
+        // TIMER UPDATE
+        // ============================================
+        function updateTimer() {
+            if (!streamStartTime) {
+                document.getElementById('timerTag').innerText = '00:00';
+                return;
+            }
+            const elapsed = Math.floor((Date.now() - streamStartTime) / 1000);
+            const mins = Math.floor(elapsed / 60);
+            const secs = elapsed % 60;
+            document.getElementById('timerTag').innerText = 
+                `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+        }
+        
+        function startTimer() {
+            if (timerInterval) clearInterval(timerInterval);
+            streamStartTime = Date.now();
+            updateTimer();
+            timerInterval = setInterval(updateTimer, 1000);
+        }
+        
+        function stopTimer() {
+            if (timerInterval) {
+                clearInterval(timerInterval);
+                timerInterval = null;
+            }
+            streamStartTime = null;
+            document.getElementById('timerTag').innerText = '00:00';
+        }
         
         // ============================================
         // LOAD DEVICES LIST
@@ -359,10 +393,6 @@
                     
                     if (oldValue && data.devices.find(d => d.device_id === oldValue)) {
                         select.value = oldValue;
-                    } else if (select.value !== currentDeviceId) {
-                        if (currentDeviceId && data.devices.find(d => d.device_id === currentDeviceId)) {
-                            select.value = currentDeviceId;
-                        }
                     }
                     
                     document.getElementById('connectionStatus').innerHTML = 'READY';
@@ -390,6 +420,7 @@
                 clearInterval(streamInterval);
                 streamInterval = null;
             }
+            stopTimer();
             
             if (currentDeviceId) {
                 startStreaming();
@@ -416,6 +447,7 @@
             
             updateFrame();
             streamInterval = setInterval(updateFrame, 100);
+            startTimer();
         }
         
         // ============================================
@@ -470,13 +502,6 @@
             } catch (e) {
                 console.error('Quality error:', e);
             }
-        }
-        
-        // ============================================
-        // BACK BUTTON (Virtual back)
-        // ============================================
-        function goBack() {
-            console.log('Back pressed');
         }
         
         // ============================================
