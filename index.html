@@ -9,13 +9,12 @@
             margin: 0;
             padding: 0;
             box-sizing: border-box;
-            user-select: none;
             -webkit-tap-highlight-color: transparent;
         }
 
         body {
-            background: #000000;
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            background: #000;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
             height: 100vh;
             display: flex;
             flex-direction: column;
@@ -28,8 +27,9 @@
             justify-content: space-between;
             align-items: center;
             padding: 16px 20px;
-            background: rgba(0,0,0,0.8);
+            background: rgba(0,0,0,0.9);
             border-bottom: 0.5px solid rgba(255,255,255,0.1);
+            z-index: 10;
         }
 
         .back-btn {
@@ -38,7 +38,6 @@
             color: #00ff88;
             font-size: 24px;
             cursor: pointer;
-            padding: 8px;
             display: flex;
             align-items: center;
             gap: 6px;
@@ -63,7 +62,6 @@
             height: 10px;
             border-radius: 50%;
             background: #00ff88;
-            box-shadow: 0 0 8px #00ff88;
             animation: pulse 1.5s infinite;
         }
 
@@ -79,81 +77,31 @@
             100% { opacity: 1; transform: scale(1); }
         }
 
-        /* ========== STREAM CONTAINER ========== */
-        .stream-container {
+        /* ========== IFRAME CONTAINER ========== */
+        .iframe-container {
             flex: 1;
-            display: flex;
-            flex-direction: column;
-            justify-content: center;
-            align-items: center;
-            background: #000;
             position: relative;
+            background: #000;
             min-height: 0;
-            padding: 16px;
         }
 
-        .stream-wrapper {
+        iframe {
             width: 100%;
-            max-width: 400px;
-            margin: 0 auto;
-            position: relative;
-            border-radius: 20px;
-            overflow: hidden;
-            background: #000;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-        }
-
-        .stream-image {
-            display: block;
-            width: 100%;
-            height: auto;
-            max-height: 65vh;
-            object-fit: contain;
+            height: 100%;
+            border: none;
             background: #000;
         }
 
-        .quality-tag {
-            position: absolute;
-            top: 12px;
-            right: 12px;
-            background: rgba(0,0,0,0.7);
-            backdrop-filter: blur(8px);
-            padding: 6px 14px;
-            border-radius: 30px;
-            font-size: 12px;
-            font-weight: bold;
-            color: #00ff88;
-            font-family: monospace;
-            letter-spacing: 1px;
-        }
-
-        .timer-tag {
-            position: absolute;
-            bottom: 12px;
-            right: 12px;
-            background: rgba(0,0,0,0.7);
-            backdrop-filter: blur(8px);
-            padding: 6px 14px;
-            border-radius: 30px;
-            font-size: 12px;
-            font-family: monospace;
-            color: #ffffff;
-        }
-
-        /* ========== DEVICE SELECTOR ========== */
-        .device-section {
+        /* ========== DEVICE BAR ========== */
+        .device-bar {
             padding: 12px 20px;
             background: #0a0a0a;
-            border-bottom: 0.5px solid rgba(255,255,255,0.1);
-        }
-
-        .device-selector {
+            border-top: 0.5px solid rgba(255,255,255,0.1);
             display: flex;
-            align-items: center;
             gap: 12px;
+            align-items: center;
             flex-wrap: wrap;
+            z-index: 10;
         }
 
         .device-label {
@@ -162,11 +110,11 @@
             font-weight: 500;
         }
 
-        select {
+        .device-select {
             flex: 1;
             background: #1a1a1a;
             border: 1px solid #333;
-            padding: 12px 16px;
+            padding: 10px 16px;
             border-radius: 12px;
             color: white;
             font-size: 14px;
@@ -174,45 +122,50 @@
             outline: none;
         }
 
-        /* ========== CONTROL BUTTONS ========== */
-        .controls {
-            padding: 20px;
-            background: #0a0a0a;
+        .refresh-btn {
+            background: #333;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 12px;
+            color: white;
+            cursor: pointer;
+            font-size: 14px;
         }
 
-        .row {
+        .refresh-btn:active {
+            transform: scale(0.95);
+        }
+
+        /* ========== CONTROL BUTTONS ========== */
+        .controls {
+            padding: 12px 20px;
+            background: #0a0a0a;
+            border-top: 0.5px solid rgba(255,255,255,0.1);
             display: flex;
-            justify-content: center;
-            gap: 16px;
-            margin-bottom: 20px;
+            gap: 12px;
             flex-wrap: wrap;
+            justify-content: center;
         }
 
         .ctrl-btn {
             background: #1a1a1a;
             border: none;
-            padding: 14px 28px;
+            padding: 10px 24px;
             border-radius: 40px;
             color: white;
-            font-size: 16px;
+            font-size: 14px;
             font-weight: 600;
             cursor: pointer;
-            transition: all 0.2s ease;
-            display: inline-flex;
-            align-items: center;
-            gap: 8px;
-            min-width: 100px;
-            justify-content: center;
+            transition: all 0.2s;
         }
 
         .ctrl-btn:active {
-            transform: scale(0.96);
+            transform: scale(0.95);
         }
 
         .start-btn {
             background: #00ff88;
             color: #000;
-            box-shadow: 0 0 12px rgba(0,255,136,0.3);
         }
 
         .stop-btn {
@@ -227,20 +180,17 @@
 
         .quality-group {
             display: flex;
-            gap: 12px;
-            justify-content: center;
-            flex-wrap: wrap;
+            gap: 8px;
+            margin-left: auto;
         }
 
         .quality-btn {
             background: #1a1a1a;
             border: 1px solid #333;
-            padding: 10px 20px;
+            padding: 8px 16px;
             border-radius: 30px;
-            font-size: 14px;
-            font-weight: 500;
+            font-size: 12px;
             cursor: pointer;
-            transition: all 0.2s;
             color: #ccc;
         }
 
@@ -250,30 +200,17 @@
             border-color: #00ff88;
         }
 
-        /* ========== READY BANNER ========== */
-        .ready-banner {
-            text-align: center;
-            padding: 12px;
-            background: rgba(0,255,136,0.05);
-            border-top: 0.5px solid rgba(0,255,136,0.2);
-        }
-
-        .ready-text {
-            color: #00ff88;
-            font-size: 13px;
-            font-weight: 500;
-            letter-spacing: 1px;
-        }
-
-        /* ========== RESPONSIVE ========== */
-        @media (max-width: 480px) {
-            .ctrl-btn {
-                padding: 12px 20px;
-                font-size: 14px;
-                min-width: 80px;
+        @media (max-width: 600px) {
+            .controls {
+                flex-wrap: wrap;
             }
-            .quality-btn {
-                padding: 8px 16px;
+            .quality-group {
+                margin-left: 0;
+                width: 100%;
+                justify-content: center;
+            }
+            .ctrl-btn {
+                padding: 8px 18px;
                 font-size: 12px;
             }
         }
@@ -292,90 +229,41 @@
         </div>
     </div>
 
-    <!-- STREAM AREA -->
-    <div class="stream-container">
-        <div class="stream-wrapper">
-            <img id="streamImage" class="stream-image" src="" alt="Live Stream">
-            <div class="quality-tag" id="qualityTag">360p</div>
-            <div class="timer-tag" id="timerTag">00:00</div>
-        </div>
+    <!-- IFRAME - SMOOTH STREAM FROM BACKEND -->
+    <div class="iframe-container">
+        <iframe id="streamFrame" src=""></iframe>
     </div>
 
-    <!-- DEVICE SELECTOR -->
-    <div class="device-section">
-        <div class="device-selector">
-            <span class="device-label">📱 DEVICE</span>
-            <select id="deviceSelect" onchange="onDeviceChange()">
-                <option value="">-- Select Device --</option>
-            </select>
-        </div>
+    <!-- DEVICE SELECTOR BAR -->
+    <div class="device-bar">
+        <span class="device-label">📱 DEVICE</span>
+        <select id="deviceSelect" class="device-select" onchange="onDeviceChange()">
+            <option value="">-- Select Device --</option>
+        </select>
+        <button class="refresh-btn" onclick="loadDevices()">⟳ REFRESH</button>
     </div>
 
-    <!-- CONTROLS -->
+    <!-- CONTROL BUTTONS -->
     <div class="controls">
-        <div class="row">
-            <button class="ctrl-btn start-btn" onclick="sendCommand('start')">▶ START</button>
-            <button class="ctrl-btn stop-btn" onclick="sendCommand('stop')">⏹ STOP</button>
-            <button class="ctrl-btn flip-btn" onclick="sendCommand('flip')">🔄 FLIP</button>
+        <button class="ctrl-btn start-btn" onclick="sendCommand('start')">▶ START</button>
+        <button class="ctrl-btn stop-btn" onclick="sendCommand('stop')">⏹ STOP</button>
+        <button class="ctrl-btn flip-btn" onclick="sendCommand('flip')">🔄 FLIP</button>
+        <div class="quality-group">
+            <button class="quality-btn" data-quality="140p" onclick="sendQuality('140p')">140p</button>
+            <button class="quality-btn" data-quality="240p" onclick="sendQuality('240p')">240p</button>
+            <button class="quality-btn active" data-quality="360p" onclick="sendQuality('360p')">360p</button>
         </div>
-        <div class="quality-group" id="qualityGroup">
-            <button class="quality-btn" data-quality="140p" onclick="sendQuality('140p')">🌫 140p</button>
-            <button class="quality-btn" data-quality="240p" onclick="sendQuality('240p')">📱 240p</button>
-            <button class="quality-btn active" data-quality="360p" onclick="sendQuality('360p')">📷 360p</button>
-        </div>
-    </div>
-
-    <!-- READY BANNER -->
-    <div class="ready-banner">
-        <div class="ready-text">● LIVE ● STREAMING</div>
     </div>
 
     <script>
-        // 🔴 YAHAN APKA NAYA REPLIT LINK 🔴
-        const BACKEND_URL = "https://273b1af1-2049-43a5-9cfb-be277623fa7e-00-38risrcg5k69w.pike.replit.dev";
+        // 🔴 YAHAN APKA NAYA BACKEND LINK 🔴
+        const BACKEND_URL = "https://9b8560e5-5a97-41f0-a014-0067b4080063-00-2mw8e8pmpxhkb.pike.replit.dev";
         
-        // ============================================
-        // VARIABLES
-        // ============================================
         let currentDeviceId = null;
-        let streamInterval = null;
         let currentQuality = "360p";
-        let streamStartTime = null;
-        let timerInterval = null;
         
         // ============================================
-        // TIMER UPDATE
-        // ============================================
-        function updateTimer() {
-            if (!streamStartTime) {
-                document.getElementById('timerTag').innerText = '00:00';
-                return;
-            }
-            const elapsed = Math.floor((Date.now() - streamStartTime) / 1000);
-            const mins = Math.floor(elapsed / 60);
-            const secs = elapsed % 60;
-            document.getElementById('timerTag').innerText = 
-                `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
-        }
-        
-        function startTimer() {
-            if (timerInterval) clearInterval(timerInterval);
-            streamStartTime = Date.now();
-            updateTimer();
-            timerInterval = setInterval(updateTimer, 1000);
-        }
-        
-        function stopTimer() {
-            if (timerInterval) {
-                clearInterval(timerInterval);
-                timerInterval = null;
-            }
-            streamStartTime = null;
-            document.getElementById('timerTag').innerText = '00:00';
-        }
-        
-        // ============================================
-        // LOAD DEVICES LIST
+        // LOAD ALL CONNECTED DEVICES
         // ============================================
         async function loadDevices() {
             try {
@@ -393,9 +281,12 @@
                     
                     if (oldValue && data.devices.find(d => d.device_id === oldValue)) {
                         select.value = oldValue;
+                        if (oldValue === currentDeviceId) {
+                            updateIframe();
+                        }
                     }
                     
-                    document.getElementById('connectionStatus').innerHTML = 'READY';
+                    document.getElementById('connectionStatus').innerHTML = 'ONLINE';
                     document.getElementById('connectionStatus').style.color = '#00ff88';
                 } else {
                     select.innerHTML = '<option value="">-- No Devices --</option>';
@@ -410,48 +301,32 @@
         }
         
         // ============================================
-        // DEVICE CHANGE
+        // DEVICE CHANGE - UPDATE IFRAME
         // ============================================
         function onDeviceChange() {
             const select = document.getElementById('deviceSelect');
             currentDeviceId = select.value;
             
-            if (streamInterval) {
-                clearInterval(streamInterval);
-                streamInterval = null;
-            }
-            stopTimer();
-            
             if (currentDeviceId) {
-                startStreaming();
-                document.getElementById('connectionStatus').innerHTML = 'CONNECTED';
+                updateIframe();
+                document.getElementById('connectionStatus').innerHTML = 'STREAMING';
                 document.getElementById('connectionStatus').style.color = '#00ff88';
             } else {
-                document.getElementById('streamImage').src = '';
+                document.getElementById('streamFrame').src = '';
                 document.getElementById('connectionStatus').innerHTML = 'READY';
             }
         }
         
-        // ============================================
-        // START STREAMING (MJPEG)
-        // ============================================
-        function startStreaming() {
-            if (streamInterval) clearInterval(streamInterval);
-            
-            const img = document.getElementById('streamImage');
-            const updateFrame = () => {
-                if (currentDeviceId) {
-                    img.src = `${BACKEND_URL}/api/frame.jpg?device_id=${currentDeviceId}&t=${Date.now()}`;
-                }
-            };
-            
-            updateFrame();
-            streamInterval = setInterval(updateFrame, 100);
-            startTimer();
+        // Update iframe with smooth stream
+        function updateIframe() {
+            if (currentDeviceId) {
+                const frameUrl = `${BACKEND_URL}/live?device_id=${currentDeviceId}`;
+                document.getElementById('streamFrame').src = frameUrl;
+            }
         }
         
         // ============================================
-        // SEND COMMAND
+        // SEND COMMAND TO APK
         // ============================================
         async function sendCommand(cmd) {
             if (!currentDeviceId) {
@@ -464,19 +339,25 @@
                 const result = await response.json();
                 
                 if (result.success) {
-                    console.log(`✅ Command ${cmd} sent`);
+                    console.log(`✅ Command ${cmd} sent to ${currentDeviceId}`);
                     document.getElementById('connectionStatus').innerHTML = cmd.toUpperCase();
                     setTimeout(() => {
-                        document.getElementById('connectionStatus').innerHTML = 'CONNECTED';
+                        if (currentDeviceId) {
+                            document.getElementById('connectionStatus').innerHTML = 'STREAMING';
+                        }
                     }, 1000);
+                } else {
+                    console.error('Command failed:', result.error);
+                    alert('Command failed: ' + (result.error || 'Unknown error'));
                 }
             } catch (e) {
                 console.error('Command error:', e);
+                alert('Error sending command: ' + e.message);
             }
         }
         
         // ============================================
-        // SEND QUALITY
+        // SEND QUALITY TO APK
         // ============================================
         async function sendQuality(quality) {
             if (!currentDeviceId) {
@@ -485,9 +366,8 @@
             }
             
             currentQuality = quality;
-            document.getElementById('qualityTag').innerHTML = quality;
             
-            // Update active class on buttons
+            // Update active button style
             document.querySelectorAll('.quality-btn').forEach(btn => {
                 if (btn.getAttribute('data-quality') === quality) {
                     btn.classList.add('active');
@@ -497,23 +377,22 @@
             });
             
             try {
-                await fetch(`${BACKEND_URL}/api/quality?quality=${quality}&device_id=${currentDeviceId}`);
-                console.log(`✅ Quality ${quality} sent`);
+                const response = await fetch(`${BACKEND_URL}/api/quality?quality=${quality}&device_id=${currentDeviceId}`);
+                const result = await response.json();
+                
+                if (result.success) {
+                    console.log(`✅ Quality ${quality} sent to ${currentDeviceId}`);
+                }
             } catch (e) {
                 console.error('Quality error:', e);
             }
         }
         
         // ============================================
-        // AUTO REFRESH DEVICES
+        // AUTO REFRESH DEVICES EVERY 5 SECONDS
         // ============================================
         loadDevices();
         setInterval(loadDevices, 5000);
-        
-        // ============================================
-        // INITIAL QUALITY TAG
-        // ============================================
-        document.getElementById('qualityTag').innerHTML = '360p';
     </script>
 </body>
 </html>
