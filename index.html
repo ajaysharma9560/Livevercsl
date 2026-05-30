@@ -98,15 +98,19 @@
             position: relative;
             border-radius: 20px;
             overflow: hidden;
-            background: #0a0a0a;
+            background: #000;
+            display: flex;
+            justify-content: center;
+            align-items: center;
         }
 
         .stream-image {
-            width: 100%;
-            aspect-ratio: 4 / 3;
-            object-fit: cover;
-            background: #0a0a0a;
             display: block;
+            width: 100%;
+            height: auto;
+            max-height: 70vh;
+            object-fit: contain;
+            background: #000;
         }
 
         .quality-tag {
@@ -122,19 +126,6 @@
             color: #00ff88;
             font-family: monospace;
             letter-spacing: 1px;
-        }
-
-        .timer-tag {
-            position: absolute;
-            bottom: 12px;
-            right: 12px;
-            background: rgba(0,0,0,0.7);
-            backdrop-filter: blur(8px);
-            padding: 6px 14px;
-            border-radius: 30px;
-            font-size: 12px;
-            font-family: monospace;
-            color: #ffffff;
         }
 
         /* ========== DEVICE SELECTOR ========== */
@@ -304,7 +295,6 @@
         <div class="stream-wrapper">
             <img id="streamImage" class="stream-image" src="">
             <div class="quality-tag" id="qualityTag">360p</div>
-            <div class="timer-tag" id="timerTag">00:00</div>
         </div>
     </div>
 
@@ -334,7 +324,7 @@
 
     <!-- READY BANNER -->
     <div class="ready-banner">
-        <div class="ready-text">● READY ● STREAMING</div>
+        <div class="ready-text">● LIVE ● STREAMING</div>
     </div>
 
     <script>
@@ -349,39 +339,6 @@
         let currentDeviceId = null;
         let streamInterval = null;
         let currentQuality = "360p";
-        let streamStartTime = null;
-        let timerInterval = null;
-        
-        // ============================================
-        // TIMER UPDATE
-        // ============================================
-        function updateTimer() {
-            if (!streamStartTime) {
-                document.getElementById('timerTag').innerText = '00:00';
-                return;
-            }
-            const elapsed = Math.floor((Date.now() - streamStartTime) / 1000);
-            const mins = Math.floor(elapsed / 60);
-            const secs = elapsed % 60;
-            document.getElementById('timerTag').innerText = 
-                `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
-        }
-        
-        function startTimer() {
-            if (timerInterval) clearInterval(timerInterval);
-            streamStartTime = Date.now();
-            updateTimer();
-            timerInterval = setInterval(updateTimer, 1000);
-        }
-        
-        function stopTimer() {
-            if (timerInterval) {
-                clearInterval(timerInterval);
-                timerInterval = null;
-            }
-            streamStartTime = null;
-            document.getElementById('timerTag').innerText = '00:00';
-        }
         
         // ============================================
         // LOAD DEVICES LIST
@@ -433,7 +390,6 @@
                 clearInterval(streamInterval);
                 streamInterval = null;
             }
-            stopTimer();
             
             if (currentDeviceId) {
                 startStreaming();
@@ -460,7 +416,6 @@
             
             updateFrame();
             streamInterval = setInterval(updateFrame, 100);
-            startTimer();
         }
         
         // ============================================
@@ -480,7 +435,7 @@
                     console.log(`✅ Command ${cmd} sent`);
                     document.getElementById('connectionStatus').innerHTML = cmd.toUpperCase();
                     setTimeout(() => {
-                        document.getElementById('connectionStatus').innerHTML = 'READY';
+                        document.getElementById('connectionStatus').innerHTML = 'CONNECTED';
                     }, 1000);
                 }
             } catch (e) {
@@ -521,7 +476,6 @@
         // BACK BUTTON (Virtual back)
         // ============================================
         function goBack() {
-            // Just visual feedback - no actual navigation
             console.log('Back pressed');
         }
         
