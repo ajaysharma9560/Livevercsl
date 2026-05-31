@@ -4,95 +4,32 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Camera Controller</title>
+<script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
 
 <style>
-* { margin: 0; padding: 0; box-sizing: border-box; }
-body { background: #0f172a; color: white; font-family: system-ui; padding: 20px; }
-
-.container { max-width: 500px; margin: auto; }
-
-.header { text-align: center; margin-bottom: 16px; }
-
-.status-card {
-  background: #1e293b;
-  padding: 14px;
-  border-radius: 14px;
-  text-align: center;
-  margin-bottom: 14px;
-}
-
-.status-dot {
-  width: 10px; height: 10px;
-  border-radius: 50%;
-  display: inline-block;
-  margin-right: 6px;
-}
-
-.online { background: #22c55e; }
-.offline { background: #ef4444; }
+body { background:#0f172a; color:white; font-family:system-ui; padding:20px; }
+.container { max-width:500px; margin:auto; }
 
 .video {
-  width: 100%;
-  aspect-ratio: 16/9;
-  background: black;
-  border-radius: 14px;
-  overflow: hidden;
-  margin-bottom: 14px;
-  border: 2px solid #22c55e;
+  width:100%;
+  aspect-ratio:16/9;
+  background:black;
+  border-radius:16px;
+  overflow:hidden;
+  margin-bottom:15px;
+  border:2px solid #22c55e;
 }
 
 .video img {
-  width: 100%;
-  height: 100%;
-  object-fit: contain;
+  width:100%;
+  height:100%;
+  object-fit:contain;
 }
 
-.stats {
-  display: flex;
-  gap: 10px;
-  margin-bottom: 14px;
-}
-
-.stat {
-  flex: 1;
-  background: #1e293b;
-  padding: 10px;
-  border-radius: 12px;
-  text-align: center;
-}
-
-.stat-value {
-  font-size: 18px;
-  color: #22c55e;
-  font-weight: bold;
-}
-
-.buttons {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-bottom: 14px;
-}
-
-.btn {
-  flex: 1;
-  padding: 10px;
-  border-radius: 30px;
-  border: none;
-  color: white;
-  cursor: pointer;
-}
-
-.start { background: #22c55e; }
-.stop { background: #ef4444; }
-.flip { background: #3b82f6; }
-
-.quality-btn {
-  background: #1e293b;
-}
-
-.quality-btn.active {
-  background: #22c55e;
+.status {
+  text-align:center;
+  margin-bottom:10px;
+  color:#22c55e;
 }
 </style>
 
@@ -102,113 +39,35 @@ body { background: #0f172a; color: white; font-family: system-ui; padding: 20px;
 
 <div class="container">
 
-  <div class="header">
-    <h2>📷 Camera Controller</h2>
-  </div>
+  <h2 style="text-align:center;">📷 Live Camera</h2>
 
-  <div class="status-card">
-    <span class="status-dot offline" id="statusDot"></span>
-    <span id="statusText">Connecting...</span>
-    <div id="deviceName" style="font-size:12px;margin-top:5px;">No device</div>
-  </div>
+  <div class="status" id="status">Connecting...</div>
 
-  <!-- MJPEG STREAM -->
+  <!-- ✅ YOUR STREAM LINK ADDED HERE -->
   <div class="video">
-    <img id="streamImg" src="https://YOUR-BACKEND/stream">
+    <img id="streamImg" src="https://0c2c3946-ed81-426e-b5d0-2938f8a721f8-00-2xrleh1hnov2d.pike.replit.dev/stream">
   </div>
 
-  <div class="stats">
-    <div class="stat">
-      <div class="stat-value" id="fps">0</div>
-      <div>FPS</div>
-    </div>
-    <div class="stat">
-      <div class="stat-value" id="res">-</div>
-      <div>Res</div>
-    </div>
-    <div class="stat">
-      <div class="stat-value" id="q">-</div>
-      <div>Quality</div>
-    </div>
-  </div>
-
-  <!-- QUALITY -->
-  <div class="buttons">
-    <button class="btn quality-btn" onclick="setQ('120p',160,120)">120p</button>
-    <button class="btn quality-btn" onclick="setQ('240p',320,240)">240p</button>
-    <button class="btn quality-btn" onclick="setQ('360p',480,360)">360p</button>
-    <button class="btn quality-btn" onclick="setQ('480p',640,480)">480p</button>
-  </div>
-
-  <!-- CONTROLS -->
-  <div class="buttons">
-    <button class="btn start" onclick="send('start')">START</button>
-    <button class="btn stop" onclick="send('stop')">STOP</button>
-    <button class="btn flip" onclick="send('flip')">FLIP</button>
-  </div>
+  <button onclick="reloadStream()" style="padding:10px;width:100%;border:none;border-radius:20px;background:#22c55e;color:white;">
+    🔄 Reload Stream
+  </button>
 
 </div>
 
 <script>
-const REPLIT_URL = "https://YOUR-REPLIT-URL";
-
-let fps = 0;
-let last = Date.now();
-
-function updateFPS(){
-  let now = Date.now();
-  if(now - last >= 1000){
-    document.getElementById("fps").innerText = fps;
-    fps = 0;
-    last = now;
-  }
-  requestAnimationFrame(updateFPS);
-}
-updateFPS();
-
-// SOCKET (for commands + status)
-const socket = io(REPLIT_URL);
+const socket = io("https://0c2c3946-ed81-426e-b5d0-2938f8a721f8-00-2xrleh1hnov2d.pike.replit.dev");
 
 socket.on("connect", () => {
-  document.getElementById("statusDot").className = "status-dot online";
-  document.getElementById("statusText").innerText = "Live";
+  document.getElementById("status").innerText = "🟢 Live Connected";
 });
 
 socket.on("disconnect", () => {
-  document.getElementById("statusDot").className = "status-dot offline";
-  document.getElementById("statusText").innerText = "Offline";
+  document.getElementById("status").innerText = "🔴 Disconnected";
 });
 
-socket.on("device_list_update", (d)=>{
-  if(d?.length){
-    document.getElementById("deviceName").innerText = d[0].name;
-  }
-});
-
-socket.on("resolution_update",(d)=>{
-  document.getElementById("res").innerText = d.width+"x"+d.height;
-  document.getElementById("q").innerText = d.quality;
-});
-
-socket.on("frame",(data)=>{
-  // optional fallback if socket frames still used
-  document.getElementById("streamImg").src = data;
-  fps++;
-});
-
-// COMMAND
-function send(cmd){
-  fetch(REPLIT_URL+"/command",{
-    method:"POST",
-    headers:{ "Content-Type":"application/json" },
-    body:JSON.stringify({command:cmd})
-  });
-}
-
-// QUALITY
-function setQ(q,w,h){
-  document.getElementById("q").innerText = q;
-  send("quality",{quality:q,width:w,height:h});
+function reloadStream(){
+  const img = document.getElementById("streamImg");
+  img.src = "https://0c2c3946-ed81-426e-b5d0-2938f8a721f8-00-2xrleh1hnov2d.pike.replit.dev/stream?"+Date.now();
 }
 </script>
 
