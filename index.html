@@ -8,7 +8,16 @@
 
 <style>
 body { background:#0f172a; color:white; font-family:system-ui; padding:20px; }
+
 .container { max-width:500px; margin:auto; }
+
+h2 { text-align:center; }
+
+.status {
+  text-align:center;
+  margin-bottom:10px;
+  color:#22c55e;
+}
 
 .video {
   width:100%;
@@ -26,10 +35,32 @@ body { background:#0f172a; color:white; font-family:system-ui; padding:20px; }
   object-fit:contain;
 }
 
-.status {
-  text-align:center;
-  margin-bottom:10px;
-  color:#22c55e;
+/* BUTTONS */
+.btn {
+  width:100%;
+  padding:12px;
+  margin:6px 0;
+  border:none;
+  border-radius:30px;
+  font-weight:bold;
+  cursor:pointer;
+}
+
+.start { background:#22c55e; color:white; }
+.stop { background:#ef4444; color:white; }
+.flip { background:#3b82f6; color:white; }
+.capture { background:#f59e0b; color:white; }
+.flash { background:#a855f7; color:white; }
+.zoom { background:#14b8a6; color:white; }
+.reload { background:#64748b; color:white; }
+
+.row {
+  display:flex;
+  gap:8px;
+}
+
+.row .btn {
+  flex:1;
 }
 </style>
 
@@ -39,24 +70,46 @@ body { background:#0f172a; color:white; font-family:system-ui; padding:20px; }
 
 <div class="container">
 
-  <h2 style="text-align:center;">📷 Live Camera</h2>
+<h2>📷 Camera Controller</h2>
 
-  <div class="status" id="status">Connecting...</div>
+<div class="status" id="status">Connecting...</div>
 
-  <!-- ✅ YOUR STREAM LINK ADDED HERE -->
-  <div class="video">
-    <img id="streamImg" src="https://0c2c3946-ed81-426e-b5d0-2938f8a721f8-00-2xrleh1hnov2d.pike.replit.dev/stream">
-  </div>
+<!-- STREAM -->
+<div class="video">
+  <img id="streamImg" src="https://0c2c3946-ed81-426e-b5d0-2938f8a721f8-00-2xrleh1hnov2d.pike.replit.dev/stream">
+</div>
 
-  <button onclick="reloadStream()" style="padding:10px;width:100%;border:none;border-radius:20px;background:#22c55e;color:white;">
-    🔄 Reload Stream
-  </button>
+<!-- COMMAND BUTTONS -->
+
+<div class="row">
+  <button class="btn start" onclick="send('start')">▶ START</button>
+  <button class="btn stop" onclick="send('stop')">⏹ STOP</button>
+</div>
+
+<div class="row">
+  <button class="btn flip" onclick="send('flip')">🔄 FLIP</button>
+  <button class="btn capture" onclick="send('capture')">📸 CAPTURE</button>
+</div>
+
+<div class="row">
+  <button class="btn flash" onclick="send('flash_on')">⚡ FLASH ON</button>
+  <button class="btn flash" onclick="send('flash_off')">⚡ FLASH OFF</button>
+</div>
+
+<div class="row">
+  <button class="btn zoom" onclick="send('zoom_in')">➕ ZOOM IN</button>
+  <button class="btn zoom" onclick="send('zoom_out')">➖ ZOOM OUT</button>
+</div>
+
+<button class="btn reload" onclick="reloadStream()">🔄 RELOAD STREAM</button>
 
 </div>
 
 <script>
+
 const socket = io("https://0c2c3946-ed81-426e-b5d0-2938f8a721f8-00-2xrleh1hnov2d.pike.replit.dev");
 
+// status
 socket.on("connect", () => {
   document.getElementById("status").innerText = "🟢 Live Connected";
 });
@@ -65,10 +118,21 @@ socket.on("disconnect", () => {
   document.getElementById("status").innerText = "🔴 Disconnected";
 });
 
+// send command
+function send(cmd){
+  fetch("https://0c2c3946-ed81-426e-b5d0-2938f8a721f8-00-2xrleh1hnov2d.pike.replit.dev/command", {
+    method:"POST",
+    headers:{ "Content-Type":"application/json" },
+    body: JSON.stringify({ command: cmd })
+  });
+}
+
+// reload stream
 function reloadStream(){
   const img = document.getElementById("streamImg");
-  img.src = "https://0c2c3946-ed81-426e-b5d0-2938f8a721f8-00-2xrleh1hnov2d.pike.replit.dev/stream?"+Date.now();
+  img.src = img.src.split("?")[0] + "?" + Date.now();
 }
+
 </script>
 
 </body>
