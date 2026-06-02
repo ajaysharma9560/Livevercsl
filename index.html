@@ -1,350 +1,71 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-  <title>Camera Controller – Live Stream</title>
-  <style>
-    * {
-      margin: 0;
-      padding: 0;
-      box-sizing: border-box;
-    }
+    <title>Camera Stream Control</title>
+    <style>
+        body {
+            font-family: Arial;
+            background: #111;
+            color: white;
+            text-align: center;
+        }
 
-    body {
-      background: #0f172a;
-      color: white;
-      font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
-      padding: 20px;
-    }
+        button {
+            padding: 12px 20px;
+            margin: 10px;
+            font-size: 16px;
+            cursor: pointer;
+            border: none;
+            border-radius: 6px;
+        }
 
-    .container {
-      max-width: 550px;
-      margin: 0 auto;
-    }
+        .start { background: #28a745; color: white; }
+        .stop { background: #dc3545; color: white; }
 
-    /* header */
-    .header {
-      text-align: center;
-      margin-bottom: 20px;
-    }
-    .header h1 {
-      font-size: 1.8rem;
-      background: linear-gradient(135deg, #22c55e, #3b82f6);
-      -webkit-background-clip: text;
-      background-clip: text;
-      color: transparent;
-      letter-spacing: -0.3px;
-    }
-    .header p {
-      font-size: 0.8rem;
-      color: #94a3b8;
-      margin-top: 6px;
-    }
+        img {
+            margin-top: 20px;
+            width: 90%;
+            max-width: 600px;
+            border: 2px solid #444;
+        }
 
-    /* stream card */
-    .stream-card {
-      background: rgba(15, 23, 42, 0.6);
-      backdrop-filter: blur(10px);
-      border-radius: 32px;
-      overflow: hidden;
-      border: 1px solid rgba(34, 197, 94, 0.25);
-      margin-bottom: 24px;
-    }
-    .video-wrapper {
-      padding: 12px;
-    }
-    .video-container {
-      background: #000;
-      border-radius: 24px;
-      overflow: hidden;
-      aspect-ratio: 16 / 9;
-      position: relative;
-      border: 1px solid rgba(34,197,94,0.4);
-    }
-    iframe {
-      width: 100%;
-      height: 100%;
-      border: none;
-    }
-
-    /* device & status panel */
-    .info-panel {
-      padding: 12px 18px;
-      background: rgba(0,0,0,0.5);
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      border-top: 1px solid rgba(255,255,255,0.05);
-    }
-    .status-badge {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
-    .dot {
-      width: 10px;
-      height: 10px;
-      border-radius: 50%;
-      background: #ef4444;
-    }
-    .dot.online {
-      background: #22c55e;
-      box-shadow: 0 0 6px #22c55e;
-      animation: pulse 1.5s infinite;
-    }
-    .status-text {
-      font-size: 0.85rem;
-      font-weight: 500;
-      color: #cbd5e1;
-    }
-    .device-name {
-      font-size: 0.75rem;
-      color: #94a3b8;
-      margin-top: 6px;
-      text-align: center;
-      padding-bottom: 12px;
-    }
-
-    /* quality section */
-    .section {
-      background: rgba(15, 23, 42, 0.7);
-      backdrop-filter: blur(8px);
-      border-radius: 28px;
-      padding: 18px;
-      margin-bottom: 20px;
-      border: 1px solid rgba(255,255,255,0.05);
-    }
-    .section-title {
-      font-size: 0.85rem;
-      font-weight: 600;
-      color: #94a3b8;
-      margin-bottom: 12px;
-      letter-spacing: 0.3px;
-    }
-    .quality-grid {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 10px;
-    }
-    .quality-btn {
-      flex: 1;
-      min-width: 70px;
-      background: #0f172a;
-      border: 1px solid #334155;
-      color: #e2e8f0;
-      padding: 10px 0;
-      border-radius: 60px;
-      font-size: 0.85rem;
-      font-weight: 500;
-      cursor: pointer;
-      transition: all 0.2s;
-    }
-    .quality-btn.active {
-      background: #22c55e;
-      border-color: #22c55e;
-      color: white;
-      box-shadow: 0 4px 12px rgba(34,197,94,0.3);
-    }
-    /* control row */
-    .control-row {
-      display: flex;
-      gap: 14px;
-      margin-top: 6px;
-    }
-    .ctrl-btn {
-      flex: 1;
-      padding: 12px 0;
-      border: none;
-      border-radius: 60px;
-      font-size: 1rem;
-      font-weight: 700;
-      cursor: pointer;
-      transition: transform 0.1s ease;
-      background: #1e293b;
-      color: white;
-    }
-    .ctrl-btn:active {
-      transform: scale(0.97);
-    }
-    .btn-start { background: #22c55e; color: white; box-shadow: 0 4px 12px rgba(34,197,94,0.2); }
-    .btn-stop  { background: #ef4444; color: white; }
-    .btn-flip  { background: #3b82f6; color: white; }
-
-    /* toast */
-    .toast {
-      position: fixed;
-      bottom: 25px;
-      left: 50%;
-      transform: translateX(-50%);
-      background: #1e293b;
-      backdrop-filter: blur(12px);
-      border: 1px solid #334155;
-      color: white;
-      padding: 10px 22px;
-      border-radius: 50px;
-      font-size: 0.85rem;
-      z-index: 2000;
-      white-space: nowrap;
-      animation: fadeUp 0.25s ease;
-    }
-
-    @keyframes fadeUp {
-      from { opacity: 0; transform: translateX(-50%) translateY(20px);}
-      to { opacity: 1; transform: translateX(-50%) translateY(0);}
-    }
-    @keyframes pulse {
-      0%,100% { opacity: 1; }
-      50% { opacity: 0.5; }
-    }
-
-    @media (max-width: 480px) {
-      .quality-btn { font-size: 0.75rem; padding: 8px 0; }
-      .ctrl-btn { padding: 10px 0; font-size: 0.9rem; }
-    }
-  </style>
+        .status {
+            margin-top: 10px;
+            font-size: 14px;
+            color: #aaa;
+        }
+    </style>
 </head>
+
 <body>
-<div class="container">
-  <div class="header">
-    <h1>📷 Camera Controller</h1>
-    <p>Live stream + remote commands</p>
-  </div>
 
-  <!-- Stream embed (from your Replit) -->
-  <div class="stream-card">
-    <div class="video-wrapper">
-      <div class="video-container">
-        <iframe src="https://12d67607-77d4-432f-bbb7-7aec27403eea-00-3qily6wifo7zz.pike.replit.dev" allow="camera; microphone" loading="lazy"></iframe>
-      </div>
-    </div>
-    <div class="info-panel">
-      <div class="status-badge">
-        <div class="dot" id="serverDot"></div>
-        <span class="status-text" id="serverStatus">Connecting...</span>
-      </div>
-      <div class="status-badge">
-        <span>🎥</span>
-        <span class="status-text" id="deviceLabel">Waiting for device...</span>
-      </div>
-    </div>
-    <div class="device-name" id="extraInfo">Stream ready – use buttons below</div>
-  </div>
+<h2>📷 Live Camera Control Panel</h2>
 
-  <!-- Quality controls -->
-  <div class="section">
-    <div class="section-title">🎨 STREAM QUALITY</div>
-    <div class="quality-grid">
-      <button class="quality-btn" data-quality="120p" data-w="160" data-h="120">120p</button>
-      <button class="quality-btn" data-quality="140p" data-w="176" data-h="144">140p</button>
-      <button class="quality-btn active" data-quality="240p" data-w="320" data-h="240">240p</button>
-      <button class="quality-btn" data-quality="360p" data-w="480" data-h="360">360p</button>
-      <button class="quality-btn" data-quality="480p" data-w="640" data-h="480">480p</button>
-    </div>
-  </div>
+<button class="start" onclick="startStream()">START</button>
+<button class="stop" onclick="stopStream()">STOP</button>
 
-  <!-- Command buttons -->
-  <div class="section">
-    <div class="section-title">🎮 CAMERA CONTROL</div>
-    <div class="control-row">
-      <button class="ctrl-btn btn-start" id="btnStart">▶ START</button>
-      <button class="ctrl-btn btn-stop" id="btnStop">⏹ STOP</button>
-      <button class="ctrl-btn btn-flip" id="btnFlip">🔄 FLIP</button>
-    </div>
-  </div>
-</div>
+<div class="status" id="status">Status: Idle</div>
+
+<br>
+
+<!-- STREAM VIEW -->
+<img id="stream" src="https://85196b91-8e83-46cb-9653-6f735ff07ef4-00-vvrapqesa3hf.sisko.replit.dev/stream" />
 
 <script>
-  // ---------- YOUR REPLIT BACKEND URL ----------
-  const REPLIT_BACKEND = "https://12d67607-77d4-432f-bbb7-7aec27403eea-00-3qily6wifo7zz.pike.replit.dev";
 
-  // UI elements
-  const serverDot = document.getElementById('serverDot');
-  const serverStatus = document.getElementById('serverStatus');
-  const deviceLabel = document.getElementById('deviceLabel');
+const SERVER = "https://85196b91-8e83-46cb-9653-6f735ff07ef4-00-vvrapqesa3hf.sisko.replit.dev";
 
-  // toast helper
-  function showToast(msg, duration = 2200) {
-    let toast = document.querySelector('.toast');
-    if (toast) toast.remove();
-    const div = document.createElement('div');
-    div.className = 'toast';
-    div.textContent = msg;
-    document.body.appendChild(div);
-    setTimeout(() => div.remove(), duration);
-  }
+async function startStream() {
+    await fetch(SERVER + "/start", { method: "POST" });
+    document.getElementById("status").innerText = "Status: Streaming Started 🔴";
+}
 
-  // send command to backend /command endpoint
-  async function sendCommand(command, extra = {}) {
-    try {
-      const response = await fetch(`${REPLIT_BACKEND}/command`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ command, ...extra })
-      });
-      const data = await response.json();
-      if (response.ok && data.success !== false) {
-        showToast(`✅ ${command.toUpperCase()} sent`);
-      } else {
-        showToast(`⚠️ ${command} – no device or offline`);
-      }
-      return data;
-    } catch (err) {
-      console.error(err);
-      showToast(`❌ Cannot send ${command} (server unreachable?)`);
-    }
-  }
+async function stopStream() {
+    await fetch(SERVER + "/stop", { method: "POST" });
+    document.getElementById("status").innerText = "Status: Stopped ⏹";
+}
 
-  // ----- Quality buttons -----
-  const qualityBtns = document.querySelectorAll('.quality-btn');
-  qualityBtns.forEach(btn => {
-    btn.addEventListener('click', () => {
-      qualityBtns.forEach(b => b.classList.remove('active'));
-      btn.classList.add('active');
-      const quality = btn.getAttribute('data-quality');
-      const width = parseInt(btn.getAttribute('data-w'));
-      const height = parseInt(btn.getAttribute('data-h'));
-      sendCommand('quality', { quality, width, height });
-    });
-  });
-
-  // ----- Control buttons -----
-  document.getElementById('btnStart').addEventListener('click', () => sendCommand('start'));
-  document.getElementById('btnStop').addEventListener('click', () => sendCommand('stop'));
-  document.getElementById('btnFlip').addEventListener('click', () => sendCommand('flip'));
-
-  // ----- Optional: tiny socket to show device online status -----
-  // (does not affect commands, just for "device connected" label)
-  (function addStatusSocket() {
-    const script = document.createElement('script');
-    script.src = "https://cdn.socket.io/4.5.4/socket.io.min.js";
-    script.onload = () => {
-      const statusSocket = io(REPLIT_BACKEND, { transports: ['websocket', 'polling'] });
-      statusSocket.on('connect', () => {
-        serverDot.className = 'dot online';
-        serverStatus.innerText = 'Online';
-      });
-      statusSocket.on('disconnect', () => {
-        serverDot.className = 'dot';
-        serverStatus.innerText = 'Offline';
-      });
-      statusSocket.on('device_list_update', (devices) => {
-        if (devices && devices.length) {
-          deviceLabel.innerText = devices[0].name;
-        } else {
-          deviceLabel.innerText = 'No device connected';
-        }
-      });
-      statusSocket.on('device_connected', (dev) => {
-        if (dev && dev.name) deviceLabel.innerText = dev.name;
-        else if (Array.isArray(dev) && dev.length) deviceLabel.innerText = dev[0].name;
-      });
-      statusSocket.on('device_disconnected', () => {
-        deviceLabel.innerText = 'No device connected';
-      });
-    };
-    document.head.appendChild(script);
-  })();
 </script>
+
 </body>
 </html>
