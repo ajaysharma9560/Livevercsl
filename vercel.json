@@ -1,9 +1,9 @@
 {
-    "version": 2,
-    "routes": [
-        {
-            "src": "/config.json",
-            "dest": "/config.json"
-        }
-    ]
+  "version": 2,
+  "routes": [
+    {
+      "src": "/config.json",
+      "dest": "/config.json"
+    }
+  ]
 }
