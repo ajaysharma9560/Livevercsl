@@ -1,6 +1,0 @@
-{
-    "name": "vercel-config-server",
-    "version": "1.0.0",
-    "description": "Config server for Ludoo App",
-    "main": "api/config.js"
-}
