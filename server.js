@@ -19,12 +19,12 @@ app.get('/api/config', (req, res) => {
 
 // Health check
 app.get('/health', (req, res) => {
-    res.json({ status: 'ok' });
+    res.json({ status: 'ok', uptime: process.uptime() });
 });
 
 // Home page
 app.get('/', (req, res) => {
-    res.send('Config Server Running');
+    res.send('Config Server Running. Use /api/config endpoint.');
 });
 
 const PORT = process.env.PORT || 3000;
