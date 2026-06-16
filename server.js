@@ -1,18 +1,34 @@
-import express from 'express';
-import { readFileSync } from 'fs';
-
+const express = require('express');
 const app = express();
-const PORT = process.env.PORT || 3000;
 
-app.get('/config.json', (req, res) => {
-    const config = JSON.parse(readFileSync('./config.json', 'utf8'));
-    res.json(config);
+// Enable CORS for Android app
+app.use((req, res, next) => {
+    res.header('Access-Control-Allow-Origin', '*');
+    res.header('Access-Control-Allow-Headers', 'Content-Type');
+    next();
 });
 
+// ✅ CONFIG ENDPOINT - Android app yahan se URL lega
+app.get('/api/config', (req, res) => {
+    res.json({
+        success: true,
+        backendUrl: "https://7b434949-dbeb-45b7-887f-df55385c7703-00-2yn8zylsn6t5v.sisko.replit.dev",
+        timestamp: Date.now()
+    });
+});
+
+// Health check
+app.get('/health', (req, res) => {
+    res.json({ status: 'ok' });
+});
+
+// Home page
 app.get('/', (req, res) => {
-    res.send('Ludoo Config Server Running');
+    res.send('Config Server Running');
 });
 
-app.listen(PORT, () => {
-    console.log(`Server running on port ${PORT}`);
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, '0.0.0.0', () => {
+    console.log(`✅ Config server running on port ${PORT}`);
+    console.log(`📍 API: /api/config`);
 });
