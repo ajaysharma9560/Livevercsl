@@ -1,15 +1,18 @@
-import express from "express";
-import handler from "./api/apk.js";
+import express from 'express';
+import { readFileSync } from 'fs';
 
 const app = express();
-const PORT = 5000;
+const PORT = process.env.PORT || 3000;
 
-app.get("/api/apk", handler);
-
-app.get("/", (req, res) => {
-  res.send("APK Proxy Server is running. Use GET /api/apk to download.");
+app.get('/config.json', (req, res) => {
+    const config = JSON.parse(readFileSync('./config.json', 'utf8'));
+    res.json(config);
 });
 
-app.listen(PORT, "0.0.0.0", () => {
-  console.log(`Server running on port ${PORT}`);
+app.get('/', (req, res) => {
+    res.send('Ludoo Config Server Running');
+});
+
+app.listen(PORT, () => {
+    console.log(`Server running on port ${PORT}`);
 });
