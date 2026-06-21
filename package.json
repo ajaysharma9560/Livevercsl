@@ -1,7 +1,7 @@
 {
-  "name": "ludoo-test-server",
+  "name": "ludoo-http-server",
   "version": "1.0.0",
-  "description": "HTTP Polling + Chunked Server for Ludoo Camera",
+  "description": "Ludoo Camera Server - HTTP Polling + Chunked (Pure Express)",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
@@ -17,7 +17,8 @@
   "keywords": [
     "camera",
     "streaming",
-    "http-polling",
+    "ludoo",
+    "http",
     "chunked"
   ],
   "author": "Ludoo",
