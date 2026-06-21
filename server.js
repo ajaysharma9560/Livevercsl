@@ -126,8 +126,7 @@ app.post('/api/heartbeat', (req, res) => {
     }
 });
 
-// ✅ FRAME UPLOAD - FIXED: Pre-convert base64 to buffer ONCE
-let totalFramesReceived = 0;
+// ✅ FRAME UPLOAD - Pre-convert to buffer ONCE
 app.post('/api/frame', (req, res) => {
     try {
         const { deviceId, image, quality, fps, camera } = req.body;
@@ -153,10 +152,7 @@ app.post('/api/frame', (req, res) => {
             }
             frameQueue[deviceId].push(frameData);
             
-            totalFramesReceived++;
-            if (totalFramesReceived % 30 === 1) {
-                console.log(`📷 Frame #${totalFramesReceived} from [${deviceId}] | size=${imgBuf.length} bytes`);
-            }
+            console.log(`📷 Frame stored: ${deviceId}, size: ${imgBuf.length} bytes`);
         }
         res.json({ success: true });
     } catch (e) {
@@ -164,15 +160,14 @@ app.post('/api/frame', (req, res) => {
     }
 });
 
-// ✅ FRAME FETCH JSON (legacy / debug)
+// ✅ FRAME FETCH JSON (legacy)
 app.get('/api/frame/:deviceId', (req, res) => {
     const frame = resolveLatestFrame(req.params.deviceId);
     if (!frame) return res.json({ success: false, image: null });
-    // ✅ Convert buffer back to base64 for legacy clients
     res.json({ success: true, image: frame.buf.toString('base64'), ts: frame.ts });
 });
 
-// ✅ FRAME FETCH BINARY — raw JPEG bytes
+// ✅ FRAME FETCH BINARY
 app.get('/api/frameb/:deviceId', (req, res) => {
     const frame = resolveLatestFrame(req.params.deviceId);
     if (!frame || !frame.buf) { res.status(204).end(); return; }
@@ -183,7 +178,7 @@ app.get('/api/frameb/:deviceId', (req, res) => {
     res.send(frame.buf);
 });
 
-// ✅ HTTP CHUNKED STREAM (MJPEG) - FIXED: No base64 conversion
+// ✅ HTTP CHUNKED STREAM (MJPEG) - FIXED
 app.get('/api/stream/:deviceId', (req, res) => {
     const deviceId = req.params.deviceId;
     console.log(`🎥 MJPEG stream started for: ${deviceId}`);
@@ -201,7 +196,7 @@ app.get('/api/stream/:deviceId', (req, res) => {
     const sendFrame = () => {
         if (!active) return;
         
-        // ✅ Get latest frame from queue
+        // ✅ Get latest frame
         let frame = null;
         const queue = frameQueue[deviceId];
         if (queue && queue.length > 0) {
@@ -211,11 +206,10 @@ app.get('/api/stream/:deviceId', (req, res) => {
             frame = latestFrames[deviceId];
         }
         
-        // ✅ Send only new frames (no duplicates)
+        // ✅ Send only new frames
         if (frame && frame.buf && frame.ts !== lastSentTs) {
             lastSentTs = frame.ts;
             try {
-                // ✅ DIRECT BUFFER USE - NO CONVERSION!
                 const header = `--boundary\r\nContent-Type: image/jpeg\r\nContent-Length: ${frame.buf.length}\r\n\r\n`;
                 res.write(header);
                 res.write(frame.buf);
@@ -241,7 +235,7 @@ app.get('/api/stream/:deviceId', (req, res) => {
     req.on('error', stopStream);
 });
 
-// ✅ COMMAND SEND
+// ✅ COMMAND SEND (HTTP)
 app.post('/api/command', (req, res) => {
     try {
         const { deviceId, command, value } = req.body;
@@ -263,7 +257,7 @@ app.post('/api/command', (req, res) => {
     }
 });
 
-// ✅ COMMAND POLL
+// ✅ COMMAND POLL (Android app se)
 app.get('/api/commands/:deviceId', (req, res) => {
     try {
         const { deviceId } = req.params;
@@ -339,8 +333,23 @@ app.get('/api/debug', (req, res) => {
     res.json({
         devices: devices.map(d => d.id),
         pendingCommands,
-        frameQueueSize: Object.fromEntries(Object.entries(frameQueue).map(([k, v]) => [k, v.length])),
         heartbeats: Object.fromEntries(Object.entries(deviceHeartbeats).map(([k, v]) => [k, `${Math.round((Date.now() - v) / 1000)}s ago`]))
+    });
+});
+
+app.get('/api/debug-frames', (req, res) => {
+    const result = {};
+    for (const id of Object.keys(latestFrames)) {
+        result[id] = {
+            ts: latestFrames[id].ts,
+            size: latestFrames[id].buf ? latestFrames[id].buf.length : 0,
+            hasImage: !!latestFrames[id].buf
+        };
+    }
+    res.json({
+        devices: devices.map(d => d.id),
+        frames: result,
+        totalFrames: Object.keys(latestFrames).length
     });
 });
 
@@ -471,7 +480,7 @@ app.get('/', requireAuth, (req, res) => {
 <div class="container">
     <div class="header">
         <h1>📹 Ludoo Remote</h1>
-        <p id="connMode">📡 HTTP Polling Mode</p>
+        <p id="connMode">📡 HTTP Polling + Chunked Mode</p>
         <a href="/logout" class="logout-btn">🔒 Logout</a>
     </div>
     <div class="stats">
@@ -734,14 +743,14 @@ const PORT = process.env.PORT || 5000;
 server.listen(PORT, '0.0.0.0', () => {
     console.log('');
     console.log('═══════════════════════════════════════════════════');
-    console.log('✅  Ludoo Camera Remote  —  HTTP Polling + Chunked Mode (FIXED)');
+    console.log('✅  Ludoo Camera Remote  —  HTTP Polling + Chunked Mode');
     console.log('═══════════════════════════════════════════════════');
     console.log('🌐  Web UI       : http://localhost:' + PORT);
     console.log('❤️   Heartbeat    : POST /api/heartbeat');
     console.log('📡  HTTP Command : POST /api/command');
     console.log('⏳  HTTP Poll    : GET  /api/commands/:deviceId');
-    console.log('🖼️   Frame        : POST /api/frame (pre-converted to buffer)');
-    console.log('🎥  Chunked      : GET  /api/stream/:deviceId (direct buffer)');
+    console.log('🖼️   Frame        : POST/GET /api/frame');
+    console.log('🎥  Chunked      : GET  /api/stream/:deviceId');
     console.log('📱  Devices      : GET  /api/devices');
     console.log('🔍  Debug        : GET  /api/debug');
     console.log('═══════════════════════════════════════════════════');
