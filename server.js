@@ -31,6 +31,7 @@ let deviceHeartbeats = {};
 let pendingCommands = {};
 let latestFrames = {};
 let deviceSettings = {};
+let frameQueue = {};
 
 function getDeviceSettings(deviceId) {
     if (!deviceSettings[deviceId]) deviceSettings[deviceId] = { stream: false, quality: 240, fps: 15 };
@@ -83,13 +84,14 @@ setInterval(() => {
     const now = Date.now();
     devices = devices.filter(device => {
         const lastSeen = device.lastSeen || 0;
-        const stale = (now - lastSeen) > 300000; // 5 minutes
+        const stale = (now - lastSeen) > 300000;
         if (stale) {
             console.log(`🧹 Removing stale device: ${device.id}`);
             delete deviceHeartbeats[device.id];
             delete pendingCommands[device.id];
             delete latestFrames[device.id];
             delete deviceSettings[device.id];
+            delete frameQueue[device.id];
             return false;
         }
         return true;
@@ -98,7 +100,7 @@ setInterval(() => {
 
 // ========== HTTP API ==========
 
-// ✅ HEARTBEAT - Device status update
+// ✅ HEARTBEAT
 app.post('/api/heartbeat', (req, res) => {
     try {
         const { deviceId, deviceName, camera, cameraReady, streaming, cameraPermission, batteryOptimization, batteryPercentage } = req.body;
@@ -124,19 +126,37 @@ app.post('/api/heartbeat', (req, res) => {
     }
 });
 
-// ✅ FRAME UPLOAD (HTTP Polling)
+// ✅ FRAME UPLOAD - FIXED: Pre-convert base64 to buffer ONCE
+let totalFramesReceived = 0;
 app.post('/api/frame', (req, res) => {
     try {
         const { deviceId, image, quality, fps, camera } = req.body;
-        if (deviceId && image && resolveDeviceSettings(deviceId).stream) {
-            const frameData = { image, ts: Date.now(), quality, fps, camera };
+        
+        if (deviceId && image) {
+            // ✅ Convert base64 to buffer ONLY ONCE
+            const imgBuf = Buffer.from(image, 'base64');
+            const frameData = {
+                buf: imgBuf,
+                ts: Date.now(),
+                quality: quality || 240,
+                fps: fps || 15,
+                camera: camera || 'back'
+            };
+            
+            // Store latest frame
             latestFrames[deviceId] = frameData;
-            // Store in all related devices (fuzzy)
-            devices.forEach(d => {
-                if (d.id.startsWith(deviceId.substring(0, 8))) {
-                    latestFrames[d.id] = frameData;
-                }
-            });
+            
+            // ✅ Frame queue for smooth streaming
+            if (!frameQueue[deviceId]) frameQueue[deviceId] = [];
+            if (frameQueue[deviceId].length > 3) {
+                frameQueue[deviceId].shift(); // Drop oldest
+            }
+            frameQueue[deviceId].push(frameData);
+            
+            totalFramesReceived++;
+            if (totalFramesReceived % 30 === 1) {
+                console.log(`📷 Frame #${totalFramesReceived} from [${deviceId}] | size=${imgBuf.length} bytes`);
+            }
         }
         res.json({ success: true });
     } catch (e) {
@@ -144,57 +164,84 @@ app.post('/api/frame', (req, res) => {
     }
 });
 
-// ✅ FRAME FETCH (HTTP Polling - Android app se)
+// ✅ FRAME FETCH JSON (legacy / debug)
 app.get('/api/frame/:deviceId', (req, res) => {
     const frame = resolveLatestFrame(req.params.deviceId);
     if (!frame) return res.json({ success: false, image: null });
-    res.json({ success: true, image: frame.image, ts: frame.ts });
+    // ✅ Convert buffer back to base64 for legacy clients
+    res.json({ success: true, image: frame.buf.toString('base64'), ts: frame.ts });
 });
 
-// ✅ HTTP CHUNKED STREAM (MJPEG)
+// ✅ FRAME FETCH BINARY — raw JPEG bytes
+app.get('/api/frameb/:deviceId', (req, res) => {
+    const frame = resolveLatestFrame(req.params.deviceId);
+    if (!frame || !frame.buf) { res.status(204).end(); return; }
+    res.setHeader('Content-Type', 'image/jpeg');
+    res.setHeader('Content-Length', frame.buf.length);
+    res.setHeader('X-Frame-Ts', String(frame.ts));
+    res.setHeader('Cache-Control', 'no-store');
+    res.send(frame.buf);
+});
+
+// ✅ HTTP CHUNKED STREAM (MJPEG) - FIXED: No base64 conversion
 app.get('/api/stream/:deviceId', (req, res) => {
     const deviceId = req.params.deviceId;
-    console.log(`🎥 Stream started for: ${deviceId}`);
-    
+    console.log(`🎥 MJPEG stream started for: ${deviceId}`);
+
     res.setHeader('Content-Type', 'multipart/x-mixed-replace; boundary=--boundary');
-    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.setHeader('Pragma', 'no-cache');
     res.setHeader('Connection', 'keep-alive');
-    
-    let isStreaming = true;
+    res.setHeader('X-Accel-Buffering', 'no');
+
+    let active = true;
+    let lastSentTs = 0;
     let interval = null;
-    
+
     const sendFrame = () => {
-        if (!isStreaming) return;
-        const frame = resolveLatestFrame(deviceId);
-        if (frame && frame.image) {
+        if (!active) return;
+        
+        // ✅ Get latest frame from queue
+        let frame = null;
+        const queue = frameQueue[deviceId];
+        if (queue && queue.length > 0) {
+            frame = queue[queue.length - 1]; // Latest frame
+        }
+        if (!frame) {
+            frame = latestFrames[deviceId];
+        }
+        
+        // ✅ Send only new frames (no duplicates)
+        if (frame && frame.buf && frame.ts !== lastSentTs) {
+            lastSentTs = frame.ts;
             try {
-                res.write(`--boundary\r\n`);
-                res.write(`Content-Type: image/jpeg\r\n`);
-                res.write(`Content-Length: ${frame.image.length}\r\n\r\n`);
-                res.write(Buffer.from(frame.image, 'base64'));
-                res.write(`\r\n`);
+                // ✅ DIRECT BUFFER USE - NO CONVERSION!
+                const header = `--boundary\r\nContent-Type: image/jpeg\r\nContent-Length: ${frame.buf.length}\r\n\r\n`;
+                res.write(header);
+                res.write(frame.buf);
+                res.write('\r\n');
             } catch (e) {
-                console.log(`⚠️ Stream write error: ${e.message}`);
+                console.log(`⚠️ MJPEG write error: ${e.message}`);
                 stopStream();
             }
         }
     };
-    
+
     const stopStream = () => {
-        isStreaming = false;
-        if (interval) clearInterval(interval);
+        active = false;
+        if (interval) { clearInterval(interval); interval = null; }
         try { res.end(); } catch (e) {}
-        console.log(`🎥 Stream stopped for: ${deviceId}`);
+        console.log(`🎥 MJPEG stream stopped for: ${deviceId}`);
     };
-    
-    // Send frame every 66ms (15 FPS)
-    interval = setInterval(sendFrame, 66);
-    
+
+    // ✅ 30 FPS check (sends only when new frame available)
+    interval = setInterval(sendFrame, 33);
+
     req.on('close', stopStream);
     req.on('error', stopStream);
 });
 
-// ✅ COMMAND SEND (HTTP)
+// ✅ COMMAND SEND
 app.post('/api/command', (req, res) => {
     try {
         const { deviceId, command, value } = req.body;
@@ -216,7 +263,7 @@ app.post('/api/command', (req, res) => {
     }
 });
 
-// ✅ COMMAND POLL (Android app se)
+// ✅ COMMAND POLL
 app.get('/api/commands/:deviceId', (req, res) => {
     try {
         const { deviceId } = req.params;
@@ -237,7 +284,7 @@ app.get('/api/commands/:deviceId', (req, res) => {
             }
         }
         if (cmds.length > 0) console.log(`✅ HTTP delivered ${cmds.length} cmd(s) to [${deviceId}]`);
-        res.json({ success: true, settings: getDeviceSettings(deviceId), commands: cmds });
+        res.json({ success: true, settings: getDeviceSettings(deviceId), commands: cmds.map(c => c.command) });
     } catch (e) {
         res.status(500).json({ success: false, error: e.message });
     }
@@ -272,7 +319,7 @@ app.get('/api/devices', (req, res) => {
         batteryOptimization: d.batteryOptimization || false,
         batteryPercentage: d.batteryPercentage || 0,
         isConnected: (now - (d.lastSeen || 0)) < 30000,
-        hasWebSocket: false, // HTTP mode
+        hasWebSocket: false,
         lastHeartbeat: d.lastHeartbeat, connectedAt: d.connectedAt
     }))});
 });
@@ -292,6 +339,7 @@ app.get('/api/debug', (req, res) => {
     res.json({
         devices: devices.map(d => d.id),
         pendingCommands,
+        frameQueueSize: Object.fromEntries(Object.entries(frameQueue).map(([k, v]) => [k, v.length])),
         heartbeats: Object.fromEntries(Object.entries(deviceHeartbeats).map(([k, v]) => [k, `${Math.round((Date.now() - v) / 1000)}s ago`]))
     });
 });
@@ -372,8 +420,13 @@ app.get('/', requireAuth, (req, res) => {
         .stat-value.online { color:#4CAF50; }
         .video-container { background:#000; border-radius:16px; overflow:hidden; aspect-ratio:16/9; margin-bottom:20px; border:1px solid #2a2a2a; display:flex; align-items:center; justify-content:center; position:relative; }
         #video { width:100%; height:100%; object-fit:cover; display:none; }
-        .video-placeholder { text-align:center; color:#555; }
-        .video-placeholder span { font-size:48px; }
+        .video-placeholder { text-align:center; color:#555; padding:12px; }
+        .video-placeholder span { font-size:48px; display:block; margin-bottom:8px; }
+        .video-placeholder .status-hint { font-size:11px; color:#444; margin-top:6px; }
+        #streamStatus { position:absolute; top:8px; left:8px; font-size:10px; padding:3px 8px; border-radius:20px; font-weight:600; display:none; }
+        .stream-live { background:rgba(76,175,80,.85); color:#fff; }
+        .stream-waiting { background:rgba(255,152,0,.85); color:#fff; }
+        .stream-noframes { background:rgba(244,67,54,.85); color:#fff; }
         .controls { background:#1a1a1a; border-radius:16px; padding:16px; margin-bottom:20px; border:1px solid #2a2a2a; }
         .section-title { font-size:12px; color:#888; margin-bottom:12px; letter-spacing:1px; }
         .button-group { display:flex; gap:12px; margin-bottom:20px; flex-wrap:wrap; }
@@ -428,7 +481,12 @@ app.get('/', requireAuth, (req, res) => {
     </div>
     <div class="video-container" id="videoContainer">
         <img id="video" style="width:100%;height:100%;object-fit:cover;display:none;">
-        <div id="placeholder" class="video-placeholder"><span>📷</span><br>Select a device first</div>
+        <div id="streamStatus"></div>
+        <div id="placeholder" class="video-placeholder">
+            <span>📷</span>
+            <div id="placeholderText">Pehle device select karo</div>
+            <div class="status-hint" id="placeholderHint"></div>
+        </div>
     </div>
     <div class="controls">
         <div class="section-title">🎮 CONTROLS</div>
@@ -462,22 +520,33 @@ app.get('/', requireAuth, (req, res) => {
     </div>
 </div>
 <script>
-    // ---- State ----
     let selectedDeviceId = null, currentDevices = [], isStreaming = false;
     let frameCount = 0, lastFpsUpdate = Date.now(), framePollTimer = null, lastFrameTs = 0;
+    let streamStartTime = 0, noFrameWarnTimer = null;
 
     const video = document.getElementById('video'),
           placeholder = document.getElementById('placeholder'),
+          placeholderText = document.getElementById('placeholderText'),
+          placeholderHint = document.getElementById('placeholderHint'),
+          streamStatusEl = document.getElementById('streamStatus'),
           deviceCountSpan = document.getElementById('deviceCount'),
           fpsCountSpan = document.getElementById('fpsCount'),
           devicesList = document.getElementById('devicesList'),
           fpsSlider = document.getElementById('fpsSlider'),
           fpsLabel = document.getElementById('fpsLabel');
 
+    function setStreamStatus(state, text) {
+        streamStatusEl.style.display = text ? 'block' : 'none';
+        streamStatusEl.className = state;
+        streamStatusEl.textContent = text;
+    }
+
     function updateFrame(src) {
         video.src = src;
         video.style.display = 'block';
         placeholder.style.display = 'none';
+        setStreamStatus('stream-live', '● LIVE');
+        if (noFrameWarnTimer) { clearTimeout(noFrameWarnTimer); noFrameWarnTimer = null; }
         frameCount++;
         const now = Date.now();
         if (now - lastFpsUpdate >= 1000) {
@@ -487,26 +556,65 @@ app.get('/', requireAuth, (req, res) => {
         }
     }
 
-    // ---- HTTP Polling ----
+    let mjpegActive = false;
+    let fpsTimer = null;
+
     function startFramePoll() {
         stopFramePoll();
-        const fps = parseInt(fpsSlider.value) || 15;
-        const interval = Math.max(50, Math.round(1000 / fps));
-        framePollTimer = setInterval(() => {
-            if (!selectedDeviceId || !isStreaming) return;
-            fetch('/api/frame/' + selectedDeviceId)
-                .then(r => r.json())
-                .then(data => {
-                    if (data.success && data.image && data.ts > lastFrameTs) {
-                        lastFrameTs = data.ts;
-                        updateFrame('data:image/jpeg;base64,' + data.image);
-                    }
-                }).catch(() => {});
-        }, interval);
-    }
-    function stopFramePoll() { if (framePollTimer) { clearInterval(framePollTimer); framePollTimer = null; } }
+        mjpegActive = true;
 
-    // ---- Commands (HTTP) ----
+        setStreamStatus('stream-waiting', '⏳ Connecting...');
+        placeholderText.textContent = 'Stream connect ho raha hai...';
+        placeholderHint.textContent = '';
+
+        video.src = '/api/stream/' + selectedDeviceId + '?t=' + Date.now();
+        video.style.display = 'block';
+        placeholder.style.display = 'none';
+
+        noFrameWarnTimer = setTimeout(() => {
+            if (mjpegActive) {
+                setStreamStatus('stream-noframes', '❌ No frames');
+                placeholderText.textContent = '⚠️ Device se frames nahi aa rahe';
+                placeholderHint.textContent = 'Android app open hai? Camera permission Allow hai? App foreground me hai?';
+            }
+        }, 6000);
+
+        let prevTs = 0, fpsFrames = 0, firstFrame = false;
+        const detectFrame = () => {
+            if (!mjpegActive) return;
+            fetch('/api/frame/' + selectedDeviceId, { cache: 'no-store' })
+                .then(r => r.json())
+                .then(d => {
+                    if (d.success && d.ts && d.ts !== prevTs) {
+                        prevTs = d.ts;
+                        fpsFrames++;
+                        if (!firstFrame) {
+                            firstFrame = true;
+                            setStreamStatus('stream-live', '● LIVE');
+                            if (noFrameWarnTimer) { clearTimeout(noFrameWarnTimer); noFrameWarnTimer = null; }
+                        }
+                    }
+                })
+                .catch(() => {})
+                .finally(() => { if (mjpegActive) framePollTimer = setTimeout(detectFrame, 200); });
+        };
+        detectFrame();
+
+        fpsTimer = setInterval(() => {
+            fpsCountSpan.textContent = fpsFrames;
+            fpsFrames = 0;
+        }, 1000);
+    }
+
+    function stopFramePoll() {
+        mjpegActive = false;
+        video.src = '';
+        if (framePollTimer)  { clearTimeout(framePollTimer);  framePollTimer = null; }
+        if (fpsTimer)        { clearInterval(fpsTimer);       fpsTimer = null; }
+        if (noFrameWarnTimer){ clearTimeout(noFrameWarnTimer); noFrameWarnTimer = null; }
+        setStreamStatus('', '');
+    }
+
     function sendCommand(command, value) {
         if (!selectedDeviceId) { alert('Select a device first'); return; }
         fetch('/api/command', {
@@ -529,6 +637,8 @@ app.get('/', requireAuth, (req, res) => {
         stopFramePoll();
         video.src = ''; video.style.display = 'none';
         placeholder.style.display = 'block';
+        placeholderText.textContent = '▶ START dabao stream ke liye';
+        placeholderHint.textContent = '';
         fpsCountSpan.textContent = '0';
     };
     document.getElementById('flipBtn').onclick = () => sendCommand('flip');
@@ -547,7 +657,6 @@ app.get('/', requireAuth, (req, res) => {
         if (isStreaming) startFramePoll();
     };
 
-    // ---- Device modal ----
     function closeStatusModal() { document.getElementById('statusModal').style.display = 'none'; }
     function showDeviceStatus(device) {
         document.getElementById('modalDeviceName').textContent = '📱 ' + device.name;
@@ -563,7 +672,6 @@ app.get('/', requireAuth, (req, res) => {
         document.getElementById('statusModal').style.display = 'flex';
     }
 
-    // ---- Device list ----
     function selectDevice(deviceId) {
         if (selectedDeviceId === deviceId) return;
         if (isStreaming) { sendCommand('stop'); stopFramePoll(); }
@@ -571,8 +679,9 @@ app.get('/', requireAuth, (req, res) => {
         isStreaming = false;
         lastFrameTs = 0;
         video.src = ''; video.style.display = 'none';
-        placeholder.textContent = '▶ Press START to stream';
         placeholder.style.display = 'block';
+        placeholderText.textContent = '▶ START dabao stream ke liye';
+        placeholderHint.textContent = '';
         fpsCountSpan.textContent = '0';
         renderDeviceList();
     }
@@ -625,14 +734,14 @@ const PORT = process.env.PORT || 5000;
 server.listen(PORT, '0.0.0.0', () => {
     console.log('');
     console.log('═══════════════════════════════════════════════════');
-    console.log('✅  Ludoo Camera Remote  —  HTTP Polling + Chunked Mode');
+    console.log('✅  Ludoo Camera Remote  —  HTTP Polling + Chunked Mode (FIXED)');
     console.log('═══════════════════════════════════════════════════');
     console.log('🌐  Web UI       : http://localhost:' + PORT);
     console.log('❤️   Heartbeat    : POST /api/heartbeat');
     console.log('📡  HTTP Command : POST /api/command');
     console.log('⏳  HTTP Poll    : GET  /api/commands/:deviceId');
-    console.log('🖼️   Frame        : POST/GET /api/frame');
-    console.log('🎥  Chunked      : GET  /api/stream/:deviceId');
+    console.log('🖼️   Frame        : POST /api/frame (pre-converted to buffer)');
+    console.log('🎥  Chunked      : GET  /api/stream/:deviceId (direct buffer)');
     console.log('📱  Devices      : GET  /api/devices');
     console.log('🔍  Debug        : GET  /api/debug');
     console.log('═══════════════════════════════════════════════════');
