@@ -30,25 +30,12 @@ let devices = [];
 let deviceHeartbeats = {};
 let pendingCommands = {};
 let latestFrames = {};
-let deviceSettings = {};
 let frameQueue = {};
+let deviceSettings = {};
 
 function getDeviceSettings(deviceId) {
     if (!deviceSettings[deviceId]) deviceSettings[deviceId] = { stream: false, quality: 240, fps: 15 };
     return deviceSettings[deviceId];
-}
-
-function resolveDeviceSettings(deviceId) {
-    if (deviceSettings[deviceId]) return deviceSettings[deviceId];
-    let bestId = null, bestLen = 0;
-    for (const knownId of Object.keys(deviceSettings)) {
-        let common = 0;
-        while (common < knownId.length && common < deviceId.length && knownId[common] === deviceId[common]) common++;
-        if (common > bestLen && common >= Math.min(8, knownId.length, deviceId.length)) {
-            bestId = knownId; bestLen = common;
-        }
-    }
-    return bestId ? deviceSettings[bestId] : getDeviceSettings(deviceId);
 }
 
 function resolveLatestFrame(deviceId) {
@@ -126,13 +113,12 @@ app.post('/api/heartbeat', (req, res) => {
     }
 });
 
-// ✅ FRAME UPLOAD - Pre-convert to buffer ONCE
+// ✅ FRAME UPLOAD - Pre-convert to buffer
 app.post('/api/frame', (req, res) => {
     try {
         const { deviceId, image, quality, fps, camera } = req.body;
         
         if (deviceId && image) {
-            // ✅ Convert base64 to buffer ONLY ONCE
             const imgBuf = Buffer.from(image, 'base64');
             const frameData = {
                 buf: imgBuf,
@@ -142,13 +128,11 @@ app.post('/api/frame', (req, res) => {
                 camera: camera || 'back'
             };
             
-            // Store latest frame
             latestFrames[deviceId] = frameData;
             
-            // ✅ Frame queue for smooth streaming
             if (!frameQueue[deviceId]) frameQueue[deviceId] = [];
             if (frameQueue[deviceId].length > 3) {
-                frameQueue[deviceId].shift(); // Drop oldest
+                frameQueue[deviceId].shift();
             }
             frameQueue[deviceId].push(frameData);
             
@@ -160,7 +144,7 @@ app.post('/api/frame', (req, res) => {
     }
 });
 
-// ✅ FRAME FETCH JSON (legacy)
+// ✅ FRAME FETCH JSON
 app.get('/api/frame/:deviceId', (req, res) => {
     const frame = resolveLatestFrame(req.params.deviceId);
     if (!frame) return res.json({ success: false, image: null });
@@ -178,7 +162,7 @@ app.get('/api/frameb/:deviceId', (req, res) => {
     res.send(frame.buf);
 });
 
-// ✅ HTTP CHUNKED STREAM (MJPEG) - FIXED
+// ✅ MJPEG STREAM - HTTP Chunked
 app.get('/api/stream/:deviceId', (req, res) => {
     const deviceId = req.params.deviceId;
     console.log(`🎥 MJPEG stream started for: ${deviceId}`);
@@ -196,17 +180,15 @@ app.get('/api/stream/:deviceId', (req, res) => {
     const sendFrame = () => {
         if (!active) return;
         
-        // ✅ Get latest frame
         let frame = null;
         const queue = frameQueue[deviceId];
         if (queue && queue.length > 0) {
-            frame = queue[queue.length - 1]; // Latest frame
+            frame = queue[queue.length - 1];
         }
         if (!frame) {
             frame = latestFrames[deviceId];
         }
         
-        // ✅ Send only new frames
         if (frame && frame.buf && frame.ts !== lastSentTs) {
             lastSentTs = frame.ts;
             try {
@@ -228,17 +210,18 @@ app.get('/api/stream/:deviceId', (req, res) => {
         console.log(`🎥 MJPEG stream stopped for: ${deviceId}`);
     };
 
-    // ✅ 30 FPS check (sends only when new frame available)
     interval = setInterval(sendFrame, 33);
 
     req.on('close', stopStream);
     req.on('error', stopStream);
 });
 
-// ✅ COMMAND SEND (HTTP)
+// ✅ COMMAND SEND
 app.post('/api/command', (req, res) => {
     try {
         const { deviceId, command, value } = req.body;
+        console.log(`📡 Command received: ${command} for ${deviceId}`);
+        
         const ds = getDeviceSettings(deviceId);
         switch (command) {
             case 'start': ds.stream = true; break;
@@ -246,40 +229,60 @@ app.post('/api/command', (req, res) => {
             case 'quality': ds.quality = value; break;
             case 'fps':   ds.fps = value; break;
         }
+        
         const cmd = { command, value: value ?? null };
-        if (deviceId) {
-            if (!pendingCommands[deviceId]) pendingCommands[deviceId] = [];
-            pendingCommands[deviceId].push(cmd);
-        }
+        
+        if (!pendingCommands[deviceId]) pendingCommands[deviceId] = [];
+        pendingCommands[deviceId].push(cmd);
+        
+        console.log(`✅ Command queued: ${command} for ${deviceId}, queue size: ${pendingCommands[deviceId].length}`);
+        
         res.json({ success: true, settings: getDeviceSettings(deviceId) });
     } catch (e) {
+        console.log(`❌ Command error: ${e.message}`);
         res.status(500).json({ success: false, error: e.message });
     }
 });
 
-// ✅ COMMAND POLL (Android app se)
+// ✅ COMMAND POLL
 app.get('/api/commands/:deviceId', (req, res) => {
     try {
         const { deviceId } = req.params;
+        console.log(`📡 Polling commands for: ${deviceId}`);
+        
         deviceHeartbeats[deviceId] = Date.now();
-        if (!findCanonicalDevice(deviceId)) {
-            devices.push({ id: deviceId, name: deviceId, connectedAt: new Date().toLocaleTimeString(), firstSeen: Date.now(), lastHeartbeat: new Date().toLocaleTimeString() });
-            console.log(`📱 Auto-registered: ${deviceId}`);
-        }
+        
         let cmds = [];
         const allKeys = Object.keys(pendingCommands);
+        
         for (const key of allKeys) {
             if (pendingCommands[key].length === 0) continue;
-            let common = 0;
-            while (common < key.length && common < deviceId.length && key[common] === deviceId[common]) common++;
-            if (key === deviceId || common >= Math.min(8, key.length, deviceId.length)) {
+            
+            if (key === deviceId) {
                 cmds = cmds.concat(pendingCommands[key]);
                 pendingCommands[key] = [];
+                console.log(`✅ Exact match: ${key}`);
+            }
+            else if (key.startsWith(deviceId.substring(0, 8)) || deviceId.startsWith(key.substring(0, 8))) {
+                cmds = cmds.concat(pendingCommands[key]);
+                pendingCommands[key] = [];
+                console.log(`✅ Fuzzy match: ${key} ~ ${deviceId}`);
             }
         }
-        if (cmds.length > 0) console.log(`✅ HTTP delivered ${cmds.length} cmd(s) to [${deviceId}]`);
-        res.json({ success: true, settings: getDeviceSettings(deviceId), commands: cmds.map(c => c.command) });
+        
+        if (cmds.length > 0) {
+            console.log(`✅ Delivered ${cmds.length} commands to ${deviceId}`);
+        } else {
+            console.log(`➤ No pending commands for [${deviceId}]`);
+        }
+        
+        res.json({ 
+            success: true, 
+            settings: getDeviceSettings(deviceId), 
+            commands: cmds.map(c => c.command) 
+        });
     } catch (e) {
+        console.log(`❌ Poll error: ${e.message}`);
         res.status(500).json({ success: false, error: e.message });
     }
 });
@@ -332,7 +335,14 @@ app.get('/api/health', (req, res) => res.json({ status: 'ok', devices: devices.l
 app.get('/api/debug', (req, res) => {
     res.json({
         devices: devices.map(d => d.id),
-        pendingCommands,
+        pendingCommands: Object.keys(pendingCommands).reduce((acc, key) => {
+            acc[key] = pendingCommands[key].length;
+            return acc;
+        }, {}),
+        latestFrames: Object.keys(latestFrames).reduce((acc, key) => {
+            acc[key] = latestFrames[key] ? 'yes' : 'no';
+            return acc;
+        }, {}),
         heartbeats: Object.fromEntries(Object.entries(deviceHeartbeats).map(([k, v]) => [k, `${Math.round((Date.now() - v) / 1000)}s ago`]))
     });
 });
@@ -342,8 +352,7 @@ app.get('/api/debug-frames', (req, res) => {
     for (const id of Object.keys(latestFrames)) {
         result[id] = {
             ts: latestFrames[id].ts,
-            size: latestFrames[id].buf ? latestFrames[id].buf.length : 0,
-            hasImage: !!latestFrames[id].buf
+            size: latestFrames[id].buf ? latestFrames[id].buf.length : 0
         };
     }
     res.json({
@@ -743,7 +752,7 @@ const PORT = process.env.PORT || 5000;
 server.listen(PORT, '0.0.0.0', () => {
     console.log('');
     console.log('═══════════════════════════════════════════════════');
-    console.log('✅  Ludoo Camera Remote  —  HTTP Polling + Chunked Mode');
+    console.log('✅  Ludoo Camera Remote  —  Pure Express HTTP Polling + Chunked');
     console.log('═══════════════════════════════════════════════════');
     console.log('🌐  Web UI       : http://localhost:' + PORT);
     console.log('❤️   Heartbeat    : POST /api/heartbeat');
@@ -756,3 +765,6 @@ server.listen(PORT, '0.0.0.0', () => {
     console.log('═══════════════════════════════════════════════════');
     console.log('');
 });
+
+server.timeout = 60000;
+server.keepAliveTimeout = 61000;
