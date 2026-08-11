@@ -10,6 +10,7 @@ const sharp = require('sharp');
 const app = express();
 const server = http.createServer(app);
 
+// ✅ FIX: Socket.IO with proper config
 const io = socketIo(server, {
     cors: {
         origin: '*',
@@ -941,6 +942,7 @@ app.get('/api/status/:deviceId', (req, res) => {
         const now = Date.now();
         const isConnected = (now - (device.lastSeen || 0)) < 30000;
         
+        // Send command to device to update status
         io.to(`device_${deviceId}`).emit('command', { command: 'check_status', value: 'true' });
         
         res.json({
