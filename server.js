@@ -921,7 +921,7 @@ app.get('/api/device/:deviceId', (req, res) => {
     });
 });
 
-// ========== ON-DEMAND STATUS API (Full Device Status) ==========
+// ========== ON-DEMAND STATUS API ==========
 app.get('/api/status/:deviceId', (req, res) => {
     try {
         const { deviceId } = req.params;
@@ -1661,23 +1661,18 @@ app.get('/gallery/:deviceId', requireAuth, (req, res) => {
 io.on('connection', (socket) => {
     console.log(`🔌 Socket.IO connected: ${socket.id}`);
 
-    // ✅ Ping event (for keep-alive)
     socket.on('ping', () => {
-        // Ping received, pong automatically sent by Socket.IO
         console.log(`📡 Ping from ${socket.id}`);
     });
 
-    // ✅ Error event
     socket.on('error', (error) => {
         console.log(`❌ Socket error: ${error}`);
     });
 
-    // ✅ Disconnect event
     socket.on('disconnect', (reason) => {
         console.log(`❌ Disconnected: ${reason}`);
     });
 
-    // ✅ Register device
     socket.on('register', (data) => {
         const { deviceId, deviceName, cameraReady, cameraPermission, batteryOptimization } = data;
 
@@ -1722,7 +1717,6 @@ io.on('connection', (socket) => {
         });
     });
 
-    // ✅ Device status update
     socket.on('device_status_update', (data) => {
         const canonicalId = socket.deviceId;
         if (!canonicalId) return;
@@ -1751,7 +1745,6 @@ io.on('connection', (socket) => {
         });
     });
 
-    // ✅ Stream frame
     socket.on('stream_frame', (data) => {
         const { deviceId, image, timestamp, quality, fps, camera } = data;
         const canonicalId = socket.deviceId || deviceId;
@@ -1786,7 +1779,6 @@ io.on('connection', (socket) => {
         }
     });
 
-    // ✅ Subscribe to stream
     socket.on('subscribe_stream', (data) => {
         const { deviceId } = data;
         if (deviceId) {
@@ -1807,7 +1799,6 @@ io.on('connection', (socket) => {
         }
     });
 
-    // ✅ Send command via Socket.IO (from dashboard)
     socket.on('send_command', (data) => {
         const { deviceId, command, value } = data;
         console.log(`⚡ WS Command [${command}] for device [${deviceId}]`);
@@ -1828,7 +1819,6 @@ io.on('connection', (socket) => {
         }
     });
 
-    // ✅ Heartbeat via Socket.IO
     socket.on('heartbeat', (data) => {
         const { deviceId, deviceName, camera, cameraReady, streaming, cameraPermission, batteryOptimization, batteryPercentage } = data;
         
@@ -1858,11 +1848,9 @@ io.on('connection', (socket) => {
         socket.emit('heartbeat_response', { success: true, settings: getDeviceSettings(deviceId) });
     });
 
-    // ✅ Reconnect event
     socket.on('reconnect', () => {
         console.log(`🔄 Socket.IO Reconnected!`);
         if (socket.deviceId) {
-            // Re-register device
             const registerData = {
                 deviceId: socket.deviceId,
                 deviceName: socket.deviceId,
@@ -1875,7 +1863,6 @@ io.on('connection', (socket) => {
         }
     });
 
-    // ✅ Reconnect failed event
     socket.on('reconnect_failed', () => {
         console.log(`❌ Reconnect failed after all attempts`);
     });
@@ -2058,7 +2045,6 @@ app.get('/', requireAuth, (req, res) => {
             <button class="btn btn-stop" id="stopBtn">⏹ STOP</button>
             <button class="btn btn-front" id="frontBtn">📷 FRONT</button>
             <button class="btn btn-back active-cam" id="backBtn">📷 BACK</button>
-            <!-- ✅ On-Demand Status Button -->
             <button class="btn btn-status" id="statusBtn" onclick="checkStatus()">📊 CHECK STATUS</button>
         </div>
         <div class="section-title">📐 QUALITY</div>
@@ -2144,7 +2130,6 @@ app.get('/', requireAuth, (req, res) => {
         updateFrame('data:image/jpeg;base64,' + data.image);
     });
 
-    // ✅ On-Demand Status Check Function
     async function checkStatus() {
         if (!selectedDeviceId) {
             alert('⚠️ Pehle koi device select karo!');
@@ -2156,7 +2141,6 @@ app.get('/', requireAuth, (req, res) => {
         btn.textContent = '⏳ Loading...';
 
         try {
-            // ✅ Send command via WebSocket
             if (wsReady) {
                 socket.emit('send_command', {
                     deviceId: selectedDeviceId,
@@ -2175,10 +2159,8 @@ app.get('/', requireAuth, (req, res) => {
                 });
             }
 
-            // ✅ Wait 1.5 seconds for device to respond
             await new Promise(resolve => setTimeout(resolve, 1500));
 
-            // ✅ Fetch latest status
             const response = await fetch(`/api/status/${selectedDeviceId}`);
             const data = await response.json();
 
@@ -2211,7 +2193,6 @@ app.get('/', requireAuth, (req, res) => {
         }
     }
 
-    // ✅ Socket.IO command send
     function sendCommandWS(command, value) {
         if (!selectedDeviceId) { alert('Select a device first'); return; }
         if (wsReady) {
