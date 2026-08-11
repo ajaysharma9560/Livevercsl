@@ -1,7 +1,7 @@
 {
   "name": "ludoo-remote",
   "version": "2.0.0",
-  "description": "Ludoo Camera Remote Server - WebSocket + HTTP",
+  "description": "Ludoo Camera Remote Server - WebSocket + HTTP Polling",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
@@ -27,7 +27,8 @@
     "remote",
     "websocket",
     "streaming",
-    "ludoo"
+    "ludoo",
+    "http-polling"
   ],
   "author": "",
   "license": "ISC"
