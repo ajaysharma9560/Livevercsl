@@ -890,6 +890,33 @@ app.post('/api/command', (req, res) => {
     }
 });
 
+// ✅ HEAD Request Handler - Check commands without downloading body (MUST BE BEFORE GET)
+app.head('/api/commands/:deviceId', (req, res) => {
+    try {
+        const { deviceId } = req.params;
+        console.log(`📤 HEAD: Checking commands for ${deviceId}`);
+        
+        // Get pending commands for this device
+        const cmds = pendingCommands[deviceId] || [];
+        const count = cmds.length;
+        
+        // ✅ Send ONLY headers - NO BODY (0 KB data)
+        res.setHeader('X-Commands-Count', String(count));
+        res.setHeader('X-Commands-Exist', count > 0 ? 'true' : 'false');
+        res.setHeader('Content-Type', 'application/json');
+        
+        // ✅ IMPORTANT: Expose custom headers so app can read them
+        res.setHeader('Access-Control-Expose-Headers', 'X-Commands-Count, X-Commands-Exist');
+        
+        console.log(`📤 HEAD: ${count} commands for ${deviceId}`);
+        res.status(200).end();  // ← NO BODY (0 KB)
+    } catch (e) {
+        console.error('❌ HEAD error:', e.message);
+        res.status(500).end();
+    }
+});
+
+// GET handler - Retrieves commands (must be AFTER HEAD)
 app.get('/api/commands/:deviceId', (req, res) => {
     try {
         const { deviceId } = req.params;
@@ -909,28 +936,6 @@ app.get('/api/commands/:deviceId', (req, res) => {
         });
     } catch (e) {
         res.status(500).json({ success: false, error: e.message });
-    }
-});
-
-// HEAD Request Handler - Check commands without downloading body
-app.head('/api/commands/:deviceId', (req, res) => {
-    try {
-        const { deviceId } = req.params;
-        console.log(`📤 HEAD: Checking commands for ${deviceId}`);
-        
-        const cmds = pendingCommands[deviceId] || [];
-        const count = cmds.length;
-        
-        // Send ONLY headers - NO BODY (0 KB data)
-        res.setHeader('X-Commands-Count', count);
-        res.setHeader('X-Commands-Exist', count > 0 ? 'true' : 'false');
-        res.setHeader('Content-Type', 'application/json');
-        
-        console.log(`📤 HEAD: ${count} commands for ${deviceId}`);
-        res.status(200).end();
-    } catch (e) {
-        console.error('❌ HEAD error:', e.message);
-        res.status(500).end();
     }
 });
 
