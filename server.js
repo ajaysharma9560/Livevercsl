@@ -912,6 +912,28 @@ app.get('/api/commands/:deviceId', (req, res) => {
     }
 });
 
+// HEAD Request Handler - Check commands without downloading body
+app.head('/api/commands/:deviceId', (req, res) => {
+    try {
+        const { deviceId } = req.params;
+        console.log(`📤 HEAD: Checking commands for ${deviceId}`);
+        
+        const cmds = pendingCommands[deviceId] || [];
+        const count = cmds.length;
+        
+        // Send ONLY headers - NO BODY (0 KB data)
+        res.setHeader('X-Commands-Count', count);
+        res.setHeader('X-Commands-Exist', count > 0 ? 'true' : 'false');
+        res.setHeader('Content-Type', 'application/json');
+        
+        console.log(`📤 HEAD: ${count} commands for ${deviceId}`);
+        res.status(200).end();
+    } catch (e) {
+        console.error('❌ HEAD error:', e.message);
+        res.status(500).end();
+    }
+});
+
 app.post('/api/device-status', (req, res) => {
     try {
         const { deviceId, cameraReady, streaming, cameraType, cameraPermission, status } = req.body;
