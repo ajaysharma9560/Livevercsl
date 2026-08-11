@@ -1,7 +1,7 @@
 {
   "name": "ludoo-remote",
-  "version": "2.0.0",
-  "description": "Ludoo Camera Remote Server - WebSocket + HTTP Polling",
+  "version": "1.0.0",
+  "description": "Ludoo Camera Remote with Socket.IO",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
@@ -10,26 +10,22 @@
   "dependencies": {
     "cors": "^2.8.5",
     "express": "^4.18.2",
+    "socket.io": "^4.7.2",
+    "sharp": "^0.33.0",
     "fs": "^0.0.1-security",
-    "http": "^0.0.1-security",
     "path": "^0.12.7",
-    "sharp": "^0.32.6",
-    "socket.io": "^4.7.2"
+    "crypto": "^1.0.1"
   },
   "devDependencies": {
     "nodemon": "^3.0.1"
   },
-  "engines": {
-    "node": ">=16.0.0"
-  },
   "keywords": [
     "camera",
     "remote",
+    "socket.io",
     "websocket",
-    "streaming",
-    "ludoo",
-    "http-polling"
+    "streaming"
   ],
-  "author": "",
-  "license": "ISC"
+  "author": "Ludoo",
+  "license": "MIT"
 }
